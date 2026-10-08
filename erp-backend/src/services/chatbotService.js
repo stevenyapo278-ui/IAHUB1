@@ -3139,6 +3139,7 @@ async function addTicketFollowup(ticketId, content, isPrivate, user) {
     data: {
       ticketId: id,
       authorId: user.sub || user.id,
+      source: 'chatbot',
       content: sanitized,
       isPrivate: isPrivate === true,
     },

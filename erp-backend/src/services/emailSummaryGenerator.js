@@ -1,6 +1,7 @@
 const prisma = require('../prismaClient');
 const { getActiveProviders, callProviderWithFallback, callAiWithRetry } = require('./mailAnalyzer');
 const { getPrompt } = require('./promptTemplates');
+const { senderPromptVars } = require('./senderIdentity');
 const { logger } = require('../utils/logger');
 
 // Extrait un résumé par défaut (extrait de texte nettoyé) si l'IA n'est pas disponible
@@ -13,8 +14,10 @@ function extractTextExcerpt(htmlOrText, maxLen = 200) {
 }
 
 // Génère un résumé IA bref pour un email (1-2 phrases en français)
+// Contexte optionnel : ticketTitle + identité de l'expéditeur (sender) permettent un résumé
+// contextualisé (« Le technicien X signale… ») au lieu d'un résumé hors-sol.
 // Ne lève jamais d'exception : dégrade vers un extrait de texte en cas d'échec.
-async function generateEmailSummary({ body, direction }) {
+async function generateEmailSummary({ body, direction, ticketTitle = '', sender = null }) {
   const cleanBody = extractTextExcerpt(body, 1500);
   if (!cleanBody) return null;
 
@@ -24,7 +27,20 @@ async function generateEmailSummary({ body, direction }) {
       return extractTextExcerpt(body, 200);
     }
 
-    const prompt = await getPrompt('summarizeEmail', { body: cleanBody });
+    // Bloc de contexte : uniquement les lignes réellement disponibles (ticket, expéditeur
+    // identifié) — un mail sortant envoyé par le support n'a pas d'expéditeur à résoudre.
+    const ctx = [`- Sens : ${direction === 'OUTBOUND' ? 'réponse envoyée par le support' : 'email reçu sur la boîte de support'}`];
+    if (ticketTitle) ctx.push(`- Ticket : ${ticketTitle}`);
+    if (sender) {
+      const vars = senderPromptVars(sender);
+      ctx.push(`- Expéditeur : ${vars.senderName} (${vars.senderRole})`);
+      ctx.push(`- Expéditeur = demandeur du ticket : ${vars.senderIsRequester}`);
+    }
+
+    const prompt = await getPrompt('summarizeEmail', {
+      body: cleanBody,
+      contextBlock: ctx.join('\n'),
+    });
     const raw = await callAiWithRetry(() => callProviderWithFallback(providers, prompt, 'background'), { maxRetries: 2, baseDelay: 800 });
     const summary = raw.trim()
       .replace(/^["'`\u201c\u201d]+/, '')

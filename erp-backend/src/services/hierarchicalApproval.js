@@ -121,7 +121,7 @@ async function decideApproval({ record, decision, comment, actorEmail }) {
     ? `✅ Validation hiérarchique accordée par ${actorEmail || record.managerEmail}${commentText ? ` : ${commentText}` : ''}`
     : `❌ Validation hiérarchique refusée par ${actorEmail || record.managerEmail} : ${commentText}`;
   await prisma.followup.create({
-    data: { ticketId, authorId: null, content: followupContent },
+    data: { ticketId, authorId: null, source: 'system', content: followupContent },
   }).catch(() => {});
 
   emitTicketUpdated(ticket, { approvalStatus: decision });

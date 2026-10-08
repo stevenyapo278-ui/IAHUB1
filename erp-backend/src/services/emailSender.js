@@ -214,7 +214,7 @@ async function sendEmail({ ticketId, to, cc = [], subject, bodyHtml, inReplyTo =
     if (saveAsMessage && ticketId) {
       const sender = account.emailAddress || account.username;
       // Récupérer le statut actuel du ticket pour le suivi
-      const currentTicket = await prisma.ticket.findUnique({ where: { id: ticketId }, select: { status: true } }).catch(() => null);
+      const currentTicket = await prisma.ticket.findUnique({ where: { id: ticketId }, select: { status: true, title: true } }).catch(() => null);
       const plainBody = effectiveBodyHtml.replace(/<[^>]+>/g, ' ');
       const outMsg = await prisma.ticketMessage.create({
         data: {
@@ -233,7 +233,7 @@ async function sendEmail({ ticketId, to, cc = [], subject, bodyHtml, inReplyTo =
       // RAG mails : indexer la réponse sortante
       if (outMsg?.id) indexTicketMessage(outMsg.id).catch((e) => console.warn('[emailRag] indexTicketMessage failed', e.message));
       // Générer le résumé IA en arrière-plan
-      generateEmailSummary({ body: plainBody, direction: 'OUTBOUND' })
+      generateEmailSummary({ body: plainBody, direction: 'OUTBOUND', ticketTitle: currentTicket?.title })
         .then((summary) => {
           if (summary) {
             return prisma.ticketMessage.updateMany({ where: { ticketId, direction: 'OUTBOUND', body: plainBody }, data: { summary } })
@@ -327,7 +327,7 @@ async function sendEmail({ ticketId, to, cc = [], subject, bodyHtml, inReplyTo =
 
   if (saveAsMessage && ticketId) {
     // Récupérer le statut actuel du ticket pour le suivi
-    const currentTicket = await prisma.ticket.findUnique({ where: { id: ticketId }, select: { status: true } }).catch(() => null);
+    const currentTicket = await prisma.ticket.findUnique({ where: { id: ticketId }, select: { status: true, title: true } }).catch(() => null);
     const plainBody = bodyHtml.replace(/<[^>]+>/g, ' ');
     const sentMsg = await prisma.ticketMessage.create({
       data: {
@@ -350,7 +350,7 @@ async function sendEmail({ ticketId, to, cc = [], subject, bodyHtml, inReplyTo =
     // RAG mails : indexer la réponse sortante
     if (sentMsg?.id) indexTicketMessage(sentMsg.id).catch((e) => console.warn('[emailRag] indexTicketMessage failed', e.message));
     // Générer le résumé IA en arrière-plan
-    generateEmailSummary({ body: plainBody, direction: 'OUTBOUND' })
+    generateEmailSummary({ body: plainBody, direction: 'OUTBOUND', ticketTitle: currentTicket?.title })
       .then((summary) => {
         if (summary) {
           return prisma.ticketMessage.updateMany({ where: { ticketId, direction: 'OUTBOUND', body: plainBody }, data: { summary } })

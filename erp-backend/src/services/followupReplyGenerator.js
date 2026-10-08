@@ -2,18 +2,13 @@ const prisma = require('../prismaClient');
 const { getActiveProviders, callProviderWithFallback } = require('./mailAnalyzer');
 const { getPrompt } = require('./promptTemplates');
 const { searchKnowledge } = require('./knowledgeSearch');
+const { loadConversationItems, formatHistoryItems, stripHtml } = require('./conversationContext');
+const { senderPromptVars } = require('./senderIdentity');
 
 // Sous ce seuil de similarité, un extrait de connaissance est considéré comme non pertinent et
 // n'est pas transmis au prompt — on ne laisse pas le modèle seul juge de la pertinence (risque de
 // présenter une réponse comme certaine alors qu'elle s'appuie sur du contenu hors sujet).
 const KNOWLEDGE_SIMILARITY_THRESHOLD = 0.75;
-
-function formatHistory(messages) {
-  if (!messages.length) return 'Aucun historique disponible.';
-  return messages
-    .map((m) => `[${m.direction === 'INBOUND' ? 'Utilisateur' : 'Support'}] ${(m.body || '').substring(0, 500)}`)
-    .join('\n---\n');
-}
 
 function formatKnowledgeResults(results) {
   if (!results.length) return 'Aucun extrait pertinent trouvé.';
@@ -23,19 +18,18 @@ function formatKnowledgeResults(results) {
 }
 
 // Génère une réponse de suivi pour un email reçu sur un ticket déjà ouvert, en s'appuyant sur
-// l'historique complet de la conversation et une recherche dans la base de connaissances.
+// l'historique complet de la conversation (messages email + suivis internes) et une recherche
+// dans la base de connaissances.
 // Ne lève jamais d'exception : toute défaillance (pas de provider, erreur réseau, JSON invalide)
 // dégrade vers { canAnswer: false }, qui déclenche l'escalade côté appelant.
-async function generateFollowupReply({ ticketId, lastMessageBody, fromEmail, fromName }) {
+async function generateFollowupReply({ ticketId, lastMessageBody, fromEmail, fromName, sender = null }) {
   const providers = await getActiveProviders();
   if (providers.length === 0) return { canAnswer: false, replyHtml: '', usedKnowledgeChunkIds: [], confidence: 0 };
 
   const ticket = await prisma.ticket.findUnique({ where: { id: ticketId } });
-  const messages = await prisma.ticketMessage.findMany({
-    where: { ticketId },
-    orderBy: { timestamp: 'asc' },
-    select: { direction: true, body: true },
-  });
+  // Historique = messages email ∪ suivis ERP (commentaires et notes internes de l'équipe) :
+  // sans les suivis, l'IA reprend des infos déjà traitées en interne ou ignore l'état réel.
+  const historyItems = await loadConversationItems(ticketId, { messages: 40, followups: 30 });
 
   const knowledgeQuery = `${ticket?.aiSummary || ticket?.title || ''}\n${lastMessageBody || ''}`.trim();
   let knowledgeResults = [];
@@ -49,9 +43,11 @@ async function generateFollowupReply({ ticketId, lastMessageBody, fromEmail, fro
   const prompt = await getPrompt('generateFollowupReply', {
     ticketTitle: ticket?.title || '',
     ticketSummary: ticket?.aiSummary || 'Non disponible',
-    historyText: formatHistory(messages),
+    ticketContent: stripHtml(ticket?.content).substring(0, 1200) || 'Non disponible',
+    historyText: formatHistoryItems(historyItems, 500),
     knowledgeResults: formatKnowledgeResults(knowledgeResults),
     lastMessage: lastMessageBody?.substring(0, 1000) || '',
+    ...senderPromptVars(sender),
   });
 
   let raw;

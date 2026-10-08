@@ -41,6 +41,23 @@ async function createTicketFromEmail({ subject, body, from, fromName, analysis, 
     console.warn(`[ticketCreator] Aucune équipe résolue pour ticket (team="${analysis.team}", category="${analysis.category}")`);
   }
 
+  // Demandeur : relie le ticket à l'utilisateur de la plateforme correspondant à l'adresse
+  // expéditrice (quand il a un compte). Sans ça, le ticket email n'a aucun demandeur :
+  // affichage « Demandeur » vide, cloisonnement RAG inexploitable, et l'IA ne peut pas
+  // savoir si l'expéditeur d'un email de suivi est le demandeur ou un technicien.
+  let requesterId = null;
+  if (from) {
+    try {
+      const requester = await tx.user.findUnique({
+        where: { email: from.trim().toLowerCase() },
+        select: { id: true, isActive: true },
+      });
+      if (requester?.isActive) requesterId = requester.id;
+    } catch (err) {
+      console.warn(`[ticketCreator] Résolution demandeur impossible (${from}) : ${err.message}`);
+    }
+  }
+
   const erpTicket = await tx.ticket.create({
     data: {
       title,
@@ -54,6 +71,8 @@ async function createTicketFromEmail({ subject, body, from, fromName, analysis, 
       sourceEmail: from || null,
       sourceName: fromName || null,
       sourceSubject: subject || null,
+      requesterId,
+      requesterIds: requesterId ? [requesterId] : [],
       aiProcessed: true,
       aiSummary: analysis.summary || null,
       lowTrustSender,

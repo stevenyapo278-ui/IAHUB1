@@ -33,6 +33,14 @@ jest.mock('../prismaClient', () => ({
   knowledgeChunk: {
     findUnique: jest.fn().mockResolvedValue(null),
   },
+  // Identité expéditeur (senderIdentity) : aucun utilisateur connu par défaut
+  user: {
+    findUnique: jest.fn().mockResolvedValue(null),
+  },
+  // Suivis internes ERP fusionnés dans l'historique de conversation
+  followup: {
+    findMany: jest.fn().mockResolvedValue([]),
+  },
 }));
 
 jest.mock('./emailPoller', () => ({ pollAllAccounts: jest.fn() }));
@@ -218,10 +226,18 @@ describe('emailPipeline — conversation IA multi-tours sur les emails de suivi'
       knowledgeChunkIds: [11, 12],
     }));
     // Contexte = derniers échanges vus par l'IA, du plus récent au plus ancien, corps tronqué
-    expect(Array.isArray(created.contextMessages)).toBe(true);
-    expect(created.contextMessages[0].body).toContain('Toujours la meme panne');
-    expect(created.contextMessages[0].direction).toBe('INBOUND');
-    expect(created.contextMessages.length).toBeLessThanOrEqual(4);
-    expect(created.contextMessages[0].body.length).toBeLessThanOrEqual(400);
+    // (nouvelle forme : { items, sender } — les anciens brouillons restaient des tableaux)
+    expect(Array.isArray(created.contextMessages)).toBe(false);
+    expect(Array.isArray(created.contextMessages.items)).toBe(true);
+    expect(created.contextMessages.items[0].body).toContain('Toujours la meme panne');
+    expect(created.contextMessages.items[0].direction).toBe('INBOUND');
+    expect(created.contextMessages.items.length).toBeLessThanOrEqual(4);
+    expect(created.contextMessages.items[0].body.length).toBeLessThanOrEqual(400);
+    // Identité de l'expéditeur injectée pour le valideur
+    expect(created.contextMessages.sender).toEqual(expect.objectContaining({
+      known: false,
+      isRequester: false,
+      role: 'inconnu (aucun compte plateforme)',
+    }));
   });
 });

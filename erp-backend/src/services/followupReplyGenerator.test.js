@@ -1,9 +1,11 @@
 const mockTicketFindUnique = jest.fn();
 const mockMessageFindMany = jest.fn();
+const mockFollowupFindMany = jest.fn();
 
 jest.mock('../prismaClient', () => ({
   ticket: { findUnique: (...args) => mockTicketFindUnique(...args) },
   ticketMessage: { findMany: (...args) => mockMessageFindMany(...args) },
+  followup: { findMany: (...args) => mockFollowupFindMany(...args) },
   promptTemplate: { findUnique: jest.fn().mockResolvedValue(null) },
 }));
 
@@ -28,6 +30,7 @@ describe('generateFollowupReply', () => {
     jest.clearAllMocks();
     mockTicketFindUnique.mockResolvedValue({ id: 1, title: 'Imprimante en panne', aiSummary: "L'imprimante ne répond plus" });
     mockMessageFindMany.mockResolvedValue([{ direction: 'INBOUND', body: 'Mon imprimante ne marche plus' }]);
+    mockFollowupFindMany.mockResolvedValue([]);
     mockSearchKnowledge.mockResolvedValue([]);
     mockGetActiveProviders.mockResolvedValue([{ name: 'openai', label: 'OpenAI', keys: [{}], models: [{ name: 'gpt-4o' }] }]);
   });
@@ -87,5 +90,39 @@ describe('generateFollowupReply', () => {
     mockCallProviderWithFallback.mockResolvedValue(JSON.stringify({ canAnswer: true, replyHtml: '<p>Réponse</p>', confidence: 1.5, usedKnowledgeChunkIds: [1] }));
     const result = await generateFollowupReply({ ticketId: 1, lastMessageBody: 'toujours en panne' });
     expect(result).toEqual({ canAnswer: true, replyHtml: '<p>Réponse</p>', usedKnowledgeChunkIds: [1], confidence: 1 });
+  });
+
+  it("injecte la demande d'origine, le rôle de l'expéditeur et les suivis internes dans le prompt", async () => {
+    mockGetActiveProviders.mockResolvedValue([{ name: 'openai', label: 'OpenAI', keys: [{}], models: [{ name: 'gpt-4o' }] }]);
+    mockTicketFindUnique.mockResolvedValue({
+      id: 1,
+      title: 'Imprimante en panne',
+      aiSummary: "L'imprimante ne répond plus",
+      content: '<p>Imprimante bloquee depuis ce matin au 2e etage</p>',
+    });
+    mockMessageFindMany.mockResolvedValue([
+      { direction: 'INBOUND', body: 'Mon imprimante ne marche plus', timestamp: new Date('2026-01-01T10:00:00Z') },
+    ]);
+    // Suivi interne saisi dans l'ERP (HTML de l'éditeur riche) : doit être strippé et étiqueté
+    mockFollowupFindMany.mockResolvedValue([
+      { content: '<p><strong>Note :</strong> carte rechangee par Karim</p>', isPrivate: true, createdAt: new Date('2026-01-01T11:00:00Z'), author: { fullName: 'Karim T.' } },
+    ]);
+    mockSearchKnowledge.mockResolvedValue([]);
+    mockCallProviderWithFallback.mockImplementation((_, prompt) => {
+      expect(prompt).toContain('Imprimante bloquee depuis ce matin au 2e etage'); // demande d'origine
+      expect(prompt).toContain('technicien');                                     // rôle plateforme
+      expect(prompt).toContain('Est le demandeur du ticket : non');
+      expect(prompt).toContain('Note interne — Karim T.');                        // suivi interne étiqueté
+      expect(prompt).toContain('carte rechangee par Karim');                      // HTML strippé
+      expect(prompt).not.toContain('<strong>');
+      return Promise.resolve(JSON.stringify({ canAnswer: true, replyHtml: '<p>ok</p>', confidence: 0.9 }));
+    });
+
+    const result = await generateFollowupReply({
+      ticketId: 1,
+      lastMessageBody: 'toujours en panne',
+      sender: { known: true, role: 'TECHNICIAN', fullName: 'Karim T.', isRequester: false, teams: 'Réseau', email: 'karim@prosuma.ci' },
+    });
+    expect(result.canAnswer).toBe(true);
   });
 });

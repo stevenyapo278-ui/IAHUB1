@@ -1993,7 +1993,7 @@ router.post('/:id/reinstate', forbidTechnicianTicketEdits, requirePermission('ti
 
     // Suivi public : le demandeur voit que sa demande repart en attente d'approbation.
     await prisma.followup.create({
-      data: { ticketId: id, authorId: req.user.sub, content: "♻️ Ticket réintégré — remis en attente d'approbation" },
+      data: { ticketId: id, authorId: req.user.sub, source: 'ui', content: "♻️ Ticket réintégré — remis en attente d'approbation" },
     }).catch((err) => console.error('[ticket.routes] Suivi de réintégration échoué:', err.message));
 
     try { await applySla(ticket); } catch (err) { console.error('[ticket.routes] Recalcul SLA réintégration échoué:', err.message); }
@@ -2574,6 +2574,7 @@ router.post('/:id/followups', followupUpload.array('images', 10), [body('content
     data: {
       ticketId,
       authorId: req.user.sub,
+      source: 'ui',
       content,
       isPrivate: req.body.isPrivate === 'true' || req.body.isPrivate === true,
     },

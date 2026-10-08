@@ -37,6 +37,8 @@ async function applyInboxRulesSafe(updated, context) {
   return updated;
 }
 const { generateEmailSummary } = require('./emailSummaryGenerator');
+const { resolveSenderIdentity, ROLE_LABELS } = require('./senderIdentity');
+const { loadConversationItems, stripHtml } = require('./conversationContext');
 const { applyRulesToEmail } = require('./inboxRuleEngine');
 const { detectLocationFromSender, extractSignatureZone } = require('./locationDetector');
 const { formatTicketTitle, UNDETERMINED } = require('../utils/ticketTitle');
@@ -384,6 +386,11 @@ async function processMessage(message, account) {
       // Email de suivi sur ticket existant
       const ticket = await prisma.ticket.findUnique({ where: { id: match.ticketId } });
 
+      // Identité plateforme de l'expéditeur (rôle, demandeur du ticket ?) : injectée dans
+      // le résumé, l'analyse d'intention et la réponse IA — sans elle l'IA contextualise
+      // le fil à partir du seul texte du mail et ne sait pas qui parle.
+      const sender = await resolveSenderIdentity({ fromEmail, fromName, ticket });
+
       // Enregistrer le message dans l'historique
       const ticketMsg = await prisma.ticketMessage.create({
         data: {
@@ -409,7 +416,7 @@ async function processMessage(message, account) {
 
       // Générer le résumé IA en arrière-plan si pas encore disponible
       if (!ticketMsg.summary) {
-        generateEmailSummary({ body: cleanBody, direction: 'INBOUND' })
+        generateEmailSummary({ body: cleanBody, direction: 'INBOUND', ticketTitle: ticket?.title, sender })
           .then((summary) => {
             if (summary) {
               return prisma.ticketMessage.update({ where: { id: ticketMsg.id }, data: { summary } })
@@ -437,22 +444,19 @@ async function processMessage(message, account) {
 
       await logEvent(match.ticketId, 'EMAIL_RECEIVED', fromEmail, { subject, method: match.method });
 
-      // Récupère les derniers échanges du fil pour donner du contexte réel à l'analyse d'intention
-      // (sans ça, un "ok merci" se juge sans savoir à quelle relance précise l'utilisateur répond).
-      const recentMessages = await prisma.ticketMessage.findMany({
-        where: { ticketId: match.ticketId },
-        orderBy: { timestamp: 'desc' },
-        take: 5,
-        select: { direction: true, body: true, sender: true, timestamp: true },
-      });
+      // Récupère les derniers échanges du fil — messages email ET suivis internes ERP
+      // (commentaires/notes de l'équipe, tri chronologique) : sans les suivis, un "ok merci"
+      // se juge sans voir ce que l'équipe a déjà noté en interne sur le ticket.
+      const conversationItems = await loadConversationItems(match.ticketId, { messages: 5, followups: 5 });
 
       // Analyser l'intention de la réponse
       const intentResult = await analyzeIntent({
         subject, body: cleanBody,
         ticketTitle: ticket?.title,
         ticketSummary: ticket?.aiSummary,
-        conversationHistory: recentMessages.reverse(),
+        conversationHistory: conversationItems,
         fromEmail,
+        sender,
         ticketId: match.ticketId, // pour injecter les rejets récents dans le prompt
         headers,
       });
@@ -520,6 +524,7 @@ async function processMessage(message, account) {
             ticketId: match.ticketId,
             lastMessageBody: cleanBody,
             fromEmail, fromName,
+            sender,
           });
 
           if (!replyResult.canAnswer) {
@@ -578,16 +583,29 @@ async function processMessage(message, account) {
                 aiConfidence: replyResult.confidence,
                 knowledgeChunkIds,
                 knowledgeSnippet,
-                // Snapshot du contexte vu par l'IA (4 derniers échanges, corps tronqué) :
-                // affiché sur la carte du centre de validation pour juger la proposition
-                // sans rouvrir le ticket. recentMessages est passé en ordre ascendant par
-                // analyzeIntent (.reverse() in-place) → on reprend la fin puis on re inverse.
-                contextMessages: recentMessages.slice(-4).reverse().map((m) => ({
-                  direction: m.direction,
-                  sender: m.sender,
-                  timestamp: m.timestamp,
-                  body: (m.body || '').substring(0, 400),
-                })),
+                // Snapshot du contexte vu par l'IA (4 derniers échanges — messages email ET
+                // suivis internes — corps tronqué) : affiché sur la carte du centre de validation
+                // pour juger la proposition sans rouvrir le ticket. `sender` = identité de
+                // l'expéditeur, pour que le valideur voie qui parle (demandeur, technicien,
+                // inconnu). Les anciens brouillons stockent un simple tableau : le centre de
+                // validation gère les deux formes.
+                contextMessages: {
+                  items: conversationItems.slice(-4).reverse().map((item) => ({
+                    source: item.source,
+                    direction: item.direction || null,
+                    sender: item.sender || null,
+                    author: item.author || null,
+                    isPrivate: item.isPrivate === true,
+                    timestamp: item.timestamp,
+                    body: stripHtml(item.body).substring(0, 400),
+                  })),
+                  sender: {
+                    name: sender.fullName || sender.name || sender.email || 'Inconnu',
+                    role: sender.known ? (ROLE_LABELS[sender.role] || sender.role) : 'inconnu (aucun compte plateforme)',
+                    isRequester: sender.isRequester === true,
+                    known: sender.known === true,
+                  },
+                },
               },
             });
             await logEvent(match.ticketId, 'AI_FOLLOWUP_DRAFT_GENERATED', 'AI', {
@@ -703,26 +721,18 @@ async function processMessage(message, account) {
     } else {
       // Couche 3 : Fallback analyse IA pour nouveau ticket
       // Résolution de l'expéditeur pour injecter role/équipes/compétences dans le prompt IA
-      let senderRole = 'inconnu';
-      let senderTeams = 'aucune';
-      let senderSkills = 'aucune';
-      if (fromEmail) {
-        const knownUser = await prisma.user.findUnique({
-          where: { email: fromEmail.toLowerCase().trim() },
-          select: {
-            role: true,
-            team: { select: { name: true } },
-            skills: { select: { level: true, skill: { select: { name: true } } } },
-          },
-        });
-        if (knownUser) {
-          senderRole = knownUser.role;
-          senderTeams = knownUser.team?.name || 'aucune';
-          senderSkills = knownUser.skills?.map((s) => s.skill.name).join(', ') || 'aucune';
-          console.log(`[emailPipeline] Expéditeur résolu : ${fromEmail} → role=${senderRole}, équipe=${senderTeams}`);
-        }
+      // (même résolveur que le fil de suivi : une seule source de vérité pour l'identité).
+      const senderIdentity = await resolveSenderIdentity({ fromEmail, fromName });
+      if (senderIdentity.known) {
+        console.log(`[emailPipeline] Expéditeur résolu : ${fromEmail} → role=${senderIdentity.role}, équipe=${senderIdentity.teams}`);
       }
-      analysis = await analyzeEmail({ subject, body: cleanBody, from: fromEmail, fromName, senderRole, senderTeams, senderSkills, signatureText });
+      analysis = await analyzeEmail({
+        subject, body: cleanBody, from: fromEmail, fromName,
+        senderRole: senderIdentity.role || 'inconnu',
+        senderTeams: senderIdentity.teams,
+        senderSkills: senderIdentity.skills,
+        signatureText,
+      });
     }
 
     // L'IA détecte un spam / email d'information / hors périmètre
@@ -796,7 +806,10 @@ async function processMessage(message, account) {
       subject, body: cleanBody, category: analysis.category,
     });      if (similarMatch) {
       // Rattacher cet email au ticket similaire existant
-      const similarTicket = await prisma.ticket.findUnique({ where: { id: similarMatch.ticketId }, select: { status: true } });
+      const similarTicket = await prisma.ticket.findUnique({
+        where: { id: similarMatch.ticketId },
+        select: { status: true, title: true, requesterId: true, requesterIds: true, sourceEmail: true },
+      });
       const similarSummary = analysis?.summary || null;
       const ticketMsg = await prisma.ticketMessage.create({
         data: {
@@ -818,7 +831,8 @@ async function processMessage(message, account) {
 
       // Générer le résumé IA en arrière-plan si pas encore disponible
       if (!ticketMsg.summary) {
-        generateEmailSummary({ body: cleanBody, direction: 'INBOUND' })
+        const similarSender = await resolveSenderIdentity({ fromEmail, fromName, ticket: similarTicket });
+        generateEmailSummary({ body: cleanBody, direction: 'INBOUND', ticketTitle: similarTicket?.title, sender: similarSender })
           .then((summary) => {
             if (summary) {
               return prisma.ticketMessage.update({ where: { id: ticketMsg.id }, data: { summary } })

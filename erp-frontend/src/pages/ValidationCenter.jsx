@@ -1287,6 +1287,13 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                 // affichait le badge « non créé » à tort).
                 const isTicketPending = ticketObj && ticketObj.approvalStatus === 'PENDING';
 
+                // Snapshot de contexte : les anciens brouillons stockent un simple tableau de
+                // messages, les nouveaux un objet { items, sender } qui ajoute les suivis
+                // internes ERP et l'identité de l'expéditeur (rôle, demandeur ?).
+                const ctx = draft.contextMessages;
+                const ctxItems = Array.isArray(ctx) ? ctx : (ctx?.items || []);
+                const ctxSender = Array.isArray(ctx) ? null : (ctx?.sender || null);
+
                 return (
                   <div
                     key={draft.id}
@@ -1348,45 +1355,72 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                     {/* CONTEXTE : ce à quoi l'IA répond — snapshot pris au moment de la génération.
                         Sans ça, le valideur juge une proposition sans voir ni le mail reçu,
                         ni ce que le support a déjà envoyé (= doublons invisibles). */}
-                    {Array.isArray(draft.contextMessages) && draft.contextMessages.length > 0 && (
+                    {ctxItems.length > 0 && (
                       <div className="p-4 rounded-2xl bg-surface-container-low/60 border border-outline-variant/20 space-y-2">
                         <div className="flex items-center justify-between">
                           <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">
                             Contexte vu par l'IA
                           </span>
                           <span className="text-[10px] text-on-surface-variant">
-                            {draft.contextMessages.length} dernier(s) échange(s)
+                            {ctxItems.length} dernier(s) échange(s)
                           </span>
                         </div>
-                        {draft.contextMessages.map((m, idx) => (
+                        {ctxSender && (
+                          <div className="flex items-center gap-2 text-[11px] text-on-surface-variant">
+                            <span className="font-bold uppercase tracking-wider text-[10px]">Expéditeur :</span>
+                            <span className="font-semibold text-on-surface">{ctxSender.name}</span>
+                            <span className="px-2 py-0.5 rounded-full border border-outline-variant/40 bg-surface-container text-[10px] font-bold">
+                              {ctxSender.role}
+                            </span>
+                            <span className={`px-2 py-0.5 rounded-full border text-[10px] font-bold ${
+                              ctxSender.isRequester
+                                ? 'border-blue-300 bg-blue-50 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300 dark:border-blue-500/30'
+                                : 'border-amber-300 bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/30'
+                            }`}>
+                              {ctxSender.isRequester ? 'Demandeur du ticket' : 'Pas le demandeur'}
+                            </span>
+                          </div>
+                        )}
+                        {ctxItems.map((m, idx) => {
+                          const lastInboundIdx = ctxItems.findIndex((x) => x.direction === 'INBOUND');
+                          const isFollowup = m.source === 'followup';
+                          return (
                           <div key={`${m.timestamp}-${idx}`} className="flex items-start gap-2">
                             <span
                               className={`shrink-0 px-2 py-0.5 rounded-full text-[10px] font-bold border ${
-                                m.direction === 'INBOUND'
-                                  ? 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-500/15 dark:text-blue-300 dark:border-blue-500/30'
-                                  : 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30'
+                                isFollowup
+                                  ? 'bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-500/15 dark:text-purple-300 dark:border-purple-500/30'
+                                  : m.direction === 'INBOUND'
+                                    ? 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-500/15 dark:text-blue-300 dark:border-blue-500/30'
+                                    : 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30'
                               }`}
                             >
-                              {m.direction === 'INBOUND' ? '👤 Client' : '📨 Support'}
+                              {isFollowup
+                                ? (m.isPrivate ? '🔒 Note interne' : '📝 Suivi interne')
+                                : m.direction === 'INBOUND' ? '👤 Client' : '📨 Support'}
                             </span>
                             <div className="min-w-0 flex-1">
                               <div className="flex items-center gap-2">
                                 <span className="text-[10px] text-on-surface-variant">
                                   {m.timestamp ? new Date(m.timestamp).toLocaleString('fr-FR') : ''}
                                 </span>
-                                {idx === 0 && (
+                                {m.author && (
+                                  <span className="text-[10px] text-on-surface-variant">— {m.author}</span>
+                                )}
+                                {idx === lastInboundIdx && lastInboundIdx >= 0 && (
                                   <span className="text-[10px] font-bold text-purple-600 dark:text-purple-400">
                                     ← mail auquel l'IA répond
                                   </span>
                                 )}
                               </div>
-                              <p className={`text-xs text-on-surface leading-snug ${idx === 0 ? 'font-semibold' : ''}`}>
+                              <p className={`text-xs text-on-surface leading-snug ${idx === lastInboundIdx ? 'font-semibold' : ''}`}>
                                 {(m.body || '').substring(0, 220)}
                                 {(m.body || '').length > 220 ? '…' : ''}
                               </p>
                             </div>
                           </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     )}
 

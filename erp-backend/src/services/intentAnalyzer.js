@@ -1,5 +1,7 @@
 const prisma = require('../prismaClient');
 const { getActiveProviders, callProviderWithFallback } = require('./mailAnalyzer');
+const { formatHistoryItems } = require('./conversationContext');
+const { senderPromptVars } = require('./senderIdentity');
 
 const VALID_INTENTS = ['RESOLVED', 'STILL_PRESENT', 'NEW_INFO', 'QUESTION', 'REOPEN', 'NEW_ISSUE_IN_THREAD', 'UNKNOWN'];
 
@@ -18,9 +20,11 @@ const MAX_CLOSE_SUGGESTIONS = 2;
 const MAX_TICKET_LIFETIME_DAYS = 60; // au-delà, on ne réinitialise plus le compteur de relances indéfiniment
 
 // Analyse l'intention d'un email de réponse utilisateur sur un ticket existant.
-// conversationHistory (optionnel) = derniers messages du fil, pour donner du contexte réel à l'IA.
+// conversationHistory (optionnel) = derniers éléments du fil (messages email + suivis ERP),
+// pour donner du contexte réel à l'IA. sender (optionnel) = identité plateforme de l'expéditeur
+// (rôle, appartenance au ticket) injectée dans le prompt — sans elle, l'IA ne sait pas qui parle.
 // Retourne { intent, confidence, newIssueSummary, isAutoReply, evidence, userAnsweredSupport }.
-async function analyzeIntent({ subject, body, ticketTitle, ticketSummary, conversationHistory = [], fromEmail, ticketId, headers = {} }) {
+async function analyzeIntent({ subject, body, ticketTitle, ticketSummary, conversationHistory = [], fromEmail, sender = null, ticketId, headers = {} }) {
   // Pré-filtre heuristique zéro-coût : les messages triviaux ou purement automatiques sont
   // traités sans appel LLM (comportement UNKNOWN / isAutoReply, identique aux branches existantes).
   const { prefilterReply } = require('./intentPrefilter');
@@ -41,11 +45,7 @@ async function analyzeIntent({ subject, body, ticketTitle, ticketSummary, conver
     return { intent: 'UNKNOWN', confidence: 0, newIssueSummary: null, isAutoReply: false, evidence: null, userAnsweredSupport: false };
   }
 
-  const historyText = conversationHistory.length > 0
-    ? conversationHistory
-      .map((m) => `[${m.direction === 'INBOUND' ? 'Utilisateur' : 'Support'}] ${(m.body || '').substring(0, 300)}`)
-      .join('\n---\n')
-    : 'Aucun historique disponible.';
+  const historyText = formatHistoryItems(conversationHistory, 300);
 
   // Boucle de retour d'apprentissage : les dernières clôtures suggérées par l'IA et REJETÉES par la
   // Hotline (avec leur motif) sont injectées dans le prompt pour éviter de reproduire les mêmes erreurs
@@ -77,6 +77,7 @@ async function analyzeIntent({ subject, body, ticketTitle, ticketSummary, conver
     subject,
     body: body?.substring(0, 4000) || '',
     recentRejections,
+    ...senderPromptVars(sender),
   });
 
   let raw;
