@@ -59,6 +59,7 @@ import PaginationButtons from '../components/PaginationButtons';
 import BulkActionsBar from '../components/BulkActionsBar';
 import UndoToast from '../components/UndoToast';
 import { flattenCategoryTree } from '../utils/categoryTree';
+import { stripHtml } from '../utils/sanitize';
 import EmptyState from '../components/EmptyState';
 
 import KanbanBoard from '../components/KanbanBoard';
@@ -630,7 +631,7 @@ function TicketPreviewTooltip({ ticketId, data, anchorRef }) {
                   <div className="w-1 h-1 rounded-full bg-primary mt-1.5 shrink-0" />
                   <div className="min-w-0">
                     <p className="text-[9px] text-foreground font-medium leading-tight truncate">{f.author?.fullName || 'Anonyme'}</p>
-                    <p className="text-[8px] text-muted-foreground line-clamp-1">{f.content}</p>
+                    <p className="text-[8px] text-muted-foreground line-clamp-1">{stripHtml(f.content)}</p>
                   </div>
                 </div>
               ))}

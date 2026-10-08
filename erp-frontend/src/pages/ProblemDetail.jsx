@@ -5,7 +5,7 @@ import {
   AlertTriangle, ArrowLeft, Clock, CheckCircle2, Radio, User, Users, Tag,
   Link2, Plus, X, RefreshCw, Send, Eye, Calendar, Flame, Info, ArrowDown,
   Sparkles, Pencil, Trash2, LinkIcon, Unlink, Search, Loader2, Paperclip,
-  ChevronDown, FileText, MapPin,
+  ChevronDown, FileText, MapPin, ClipboardList,
 } from 'lucide-react';
 import api from '../api/client';
 import { hasPermission } from '../utils/permissions';
@@ -17,7 +17,11 @@ import ImageAttachmentsEditor from '../components/ImageAttachmentsEditor';
 import RemoteUserMultiSelect from '../components/RemoteUserMultiSelect';
 import RemoteUserSelect from '../components/RemoteUserSelect';
 import { clipboardImageFiles, imageItemsFromFiles, revokeImageItems } from '../utils/imageAttachments';
-import { sanitizeHtml } from '../utils/sanitize';
+import { sanitizeHtml, richTextIsEmpty } from '../utils/sanitize';
+import { readFollowupDraft, writeFollowupDraft } from '../utils/followupDraft';
+import RichTextEditor from '../components/RichTextEditor';
+import FollowupTemplateDialog from '../components/FollowupTemplateDialog';
+import { REPORT_FIELDS } from '../constants/followup';
 
 const STATUS_OPTIONS = ['NEW', 'IN_PROGRESS', 'ASSIGNED', 'PLANNED', 'WAITING', 'SOLVED', 'CLOSED', 'OBSERVED'];
 const STATUS_LABELS = {
@@ -154,7 +158,19 @@ export default function ProblemDetail() {
   const [editForm, setEditForm] = useState({});
   const [saving, setSaving] = useState(false);
   const [showLinkModal, setShowLinkModal] = useState(false);
-  const [newFollowup, setNewFollowup] = useState('');
+  // Brouillon du suivi en cours de rédaction — même principe que TicketDetail :
+  // conservé par fiche (localStorage) pour ne pas perdre un texte non envoyé.
+  const [followupDraft, setFollowupDraft] = useState(() => ({ key: null, html: '' }));
+  const readDraft = () => (readFollowupDraft('problem', id, user?.id) || { key: String(id), html: '' });
+  const newFollowup = followupDraft.key === String(id) ? followupDraft.html : readDraft().html;
+  const setNewFollowup = (updater) => setFollowupDraft((prev) => {
+    const base = prev.key === String(id) ? prev : readDraft();
+    return { key: String(id), html: typeof updater === 'function' ? updater(base.html) : updater };
+  });
+  useEffect(() => {
+    if (followupDraft.key !== String(id)) return;
+    writeFollowupDraft('problem', id, user?.id, followupDraft.html);
+  }, [followupDraft, id, user?.id]);
   const [sendingFollowup, setSendingFollowup] = useState(false);
   const [pastedImages, setPastedImages] = useState([]);
   const [uploadingFiles, setUploadingFiles] = useState(false);
@@ -166,6 +182,8 @@ export default function ProblemDetail() {
   const [editingFollowupId, setEditingFollowupId] = useState(null);
   const [editingFollowupContent, setEditingFollowupContent] = useState('');
   const [savingFollowupEdit, setSavingFollowupEdit] = useState(false);
+  const [reportDialogOpen, setReportDialogOpen] = useState(false);
+  const composerEditorRef = useRef(null);
 
   // Libère les aperçus blob:// du composeur au démontage
   const pastedImagesRef = useRef(pastedImages);
@@ -247,7 +265,8 @@ export default function ProblemDetail() {
   }
 
   async function saveEditFollowup(followupId) {
-    const text = editingFollowupContent.trim();
+    // Un éditeur vide vaut '<p></p>' : richTextIsEmpty traite ce cas comme vide
+    const text = richTextIsEmpty(editingFollowupContent) ? '' : editingFollowupContent.trim();
     if (!text) return;
     setSavingFollowupEdit(true);
     try {
@@ -273,13 +292,27 @@ export default function ProblemDetail() {
     }
   }
 
+  // Insère un rapport d'intervention pré-rempli (bouton « Rapport d'intervention »)
+  function insertReportTemplate(html) {
+    const ed = composerEditorRef.current;
+    if (ed) {
+      if (richTextIsEmpty(ed.getHTML())) ed.commands.setContent(html, { emitUpdate: true });
+      else ed.chain().focus().insertContentAt(ed.state.doc.content.size, html).run();
+    } else {
+      setNewFollowup((prev) => `${prev || ''}${html}`);
+    }
+    setReportDialogOpen(false);
+  }
+
   async function handleAddFollowup() {
-    if (!newFollowup.trim() && pastedImages.length === 0) return;
+    // Un éditeur vide vaut '<p></p>' : richTextIsEmpty traite ce cas comme vide
+    const text = richTextIsEmpty(newFollowup) ? '' : newFollowup.trim();
+    if (!text && pastedImages.length === 0) return;
     setSendingFollowup(true);
     try {
       // Multipart dès qu'une image est jointe ; JSON reste accepté sinon
       const fd = new FormData();
-      let content = newFollowup.trim();
+      let content = text;
       pastedImages.forEach((img, idx) => {
         fd.append('images', img.file);
         content += `${content ? '\n\n' : ''}<!--IMAGE_${idx}-->`;
@@ -312,9 +345,10 @@ export default function ProblemDetail() {
 
   function handlePasteImages(e) {
     const files = clipboardImageFiles(e);
-    if (files.length === 0) return;
+    if (files.length === 0) return false;
     e.preventDefault();
     addCommentImages(files);
+    return true;
   }
 
   // Pièces jointes du problème (section Description)
@@ -766,15 +800,16 @@ export default function ProblemDetail() {
               commentBody={(f) => (
                 editingFollowupId === f.id ? (
                   <div className="mt-2 space-y-2">
-                    <textarea
-                      rows={3}
+                    <RichTextEditor
                       value={editingFollowupContent}
-                      onChange={(e) => setEditingFollowupContent(e.target.value)}
-                      className={`${inputCls} w-full resize-none`}
+                      onChange={setEditingFollowupContent}
+                      onSubmit={() => saveEditFollowup(f.id)}
+                      onEscape={cancelEditFollowup}
+                      minHeight={140}
                       autoFocus
                     />
                     <div className="flex gap-2">
-                      <button onClick={() => saveEditFollowup(f.id)} disabled={savingFollowupEdit || !editingFollowupContent.trim()}
+                      <button onClick={() => saveEditFollowup(f.id)} disabled={savingFollowupEdit || richTextIsEmpty(editingFollowupContent)}
                         className="px-3 py-1.5 rounded-lg bg-primary text-on-primary text-[11px] font-bold cursor-pointer hover:opacity-90 disabled:opacity-50 flex items-center gap-1">
                         {savingFollowupEdit ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3 h-3" />}
                         Enregistrer
@@ -802,30 +837,43 @@ export default function ProblemDetail() {
             {canManage && (
               <div className="flex gap-2 mt-3 pt-3 border-t border-outline-variant/30">
                 <div className="flex-1 space-y-2">
-                  <textarea
-                    rows={2}
+                  <RichTextEditor
                     value={newFollowup}
-                    onChange={(e) => setNewFollowup(e.target.value)}
-                    onPaste={handlePasteImages}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleAddFollowup(); }
-                    }}
-                    placeholder="Ajouter un commentaire… (Entrée pour envoyer, Ctrl+V pour coller une capture)"
-                    className={`${inputCls} w-full resize-none`}
+                    onChange={setNewFollowup}
+                    onSubmit={handleAddFollowup}
+                    onPasteFiles={handlePasteImages}
+                    onEditorReady={(ed) => { composerEditorRef.current = ed; }}
+                    placeholder="Ajouter un commentaire… (Ctrl+V pour coller une capture, Ctrl+Entrée pour envoyer)"
+                    minHeight={120}
                   />
                   <ImageAttachmentsEditor
                     items={pastedImages}
                     onChange={setPastedImages}
                     onFiles={addCommentImages}
                   />
+                  <button
+                    type="button"
+                    onClick={() => setReportDialogOpen(true)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-primary/30 bg-primary/[0.06] text-primary text-[11px] font-bold hover:bg-primary/10 transition-colors cursor-pointer"
+                  >
+                    <ClipboardList className="w-3.5 h-3.5" />
+                    Rapport d'intervention
+                  </button>
                 </div>
                 <button onClick={handleAddFollowup}
-                  disabled={sendingFollowup || (!newFollowup.trim() && pastedImages.length === 0)}
+                  disabled={sendingFollowup || (richTextIsEmpty(newFollowup) && pastedImages.length === 0)}
                   className="self-start p-2 rounded-xl bg-primary text-on-primary cursor-pointer hover:opacity-90 disabled:opacity-50">
                   {sendingFollowup ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
                 </button>
               </div>
             )}
+
+            <FollowupTemplateDialog
+              open={reportDialogOpen}
+              fields={REPORT_FIELDS}
+              onClose={() => setReportDialogOpen(false)}
+              onInsert={insertReportTemplate}
+            />
           </div>
         </div>
 

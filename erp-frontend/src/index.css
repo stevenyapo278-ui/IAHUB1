@@ -2918,3 +2918,86 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   border-color: var(--color-primary);
   background-color: color-mix(in srgb, var(--color-primary) 14%, transparent);
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════ */
+/* ÉDITEUR RICHE (TipTap) — zone de suivi des tickets                          */
+/* L'élément éditable porte la classe « rte-content » (editorProps.attributes)  */
+/* et reçoit --rte-min (hauteur mini) depuis le conteneur du composant.         */
+/* ═══════════════════════════════════════════════════════════════════════════ */
+.rte-content {
+  min-height: var(--rte-min, 160px);
+  padding: 12px 16px;
+  outline: none;
+  font-size: 13.5px;
+  line-height: 1.65;
+  color: var(--color-on-surface);
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  cursor: text;
+}
+.rte-content:focus,
+.rte-content.ProseMirror-focused { outline: none; }
+
+.rte-content p { margin: 0 0 0.5em; }
+.rte-content p:last-child { margin-bottom: 0; }
+.rte-content br { content: ''; }
+
+.rte-content ul,
+.rte-content ol { margin: 0.25em 0 0.5em; padding-left: 1.35em; }
+.rte-content ul { list-style: disc; }
+.rte-content ol { list-style: decimal; }
+.rte-content li { margin: 0.15em 0; }
+.rte-content li p { margin: 0; }
+
+.rte-content blockquote {
+  margin: 0.4em 0;
+  padding: 0.1em 0 0.1em 0.85em;
+  border-left: 3px solid color-mix(in srgb, var(--color-primary) 45%, transparent);
+  color: var(--color-on-surface-variant);
+  font-style: italic;
+}
+
+.rte-content a {
+  color: var(--color-primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.rte-content :is(h1, h2, h3) { font-weight: 700; margin: 0.6em 0 0.3em; }
+.rte-content h1 { font-size: 1.15em; }
+.rte-content h2 { font-size: 1.05em; }
+.rte-content h3 { font-size: 1em; }
+
+.rte-content pre {
+  margin: 0.4em 0;
+  padding: 0.6em 0.8em;
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--color-on-surface) 6%, transparent);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.9em;
+  white-space: pre-wrap;
+}
+.rte-content code {
+  padding: 0.1em 0.3em;
+  border-radius: 0.3rem;
+  background: color-mix(in srgb, var(--color-on-surface) 6%, transparent);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.92em;
+}
+.rte-content pre code { padding: 0; background: none; }
+
+.rte-content hr {
+  border: 0;
+  border-top: 1px solid var(--color-outline-variant);
+  margin: 0.8em 0;
+}
+
+/* Même traitement que dans l'activité : les mentions ressortent en pastille */
+.rte-content span.mention {
+  padding: 0.05em 0.35em;
+  border-radius: 0.4em;
+  background: color-mix(in srgb, var(--color-primary) 14%, transparent);
+  color: var(--color-primary);
+  font-weight: 600;
+  white-space: nowrap;
+}

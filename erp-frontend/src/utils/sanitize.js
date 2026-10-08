@@ -199,3 +199,30 @@ export function sanitizeHtml(html, logoUrl = null) {
   }
   return DOMPurify.sanitize(str);
 }
+
+// Retire les balises HTML pour afficher du texte brut (aperçus, troncatures).
+// <br>/</p>/</li> deviennent des retours à la ligne pour rester lisibles.
+export function stripHtml(html) {
+  if (!html || typeof html !== 'string') return '';
+  return html
+    .replace(/<\s*br\s*\/?>/gi, '\n')
+    .replace(/<\s*\/p\s*>/gi, '\n')
+    .replace(/<\s*\/li\s*>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/gi, '&')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+// true si un HTML de texte enrichi ne contient aucun texte visible
+// (un éditeur vide vaut '<p></p>', qui passe .trim() et bloquerait l'envoi)
+export function richTextIsEmpty(html) {
+  if (!html) return true;
+  return stripHtml(html).replace(/\u00a0/g, ' ').trim() === '';
+}

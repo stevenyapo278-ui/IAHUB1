@@ -24,7 +24,7 @@ import {
   RefreshCw, RotateCcw, Mail, FileText, Check, X, Send, ChevronRight,
   Flame, Radio, Info, ArrowDown, UserCheck, HelpCircle, Layers, History,
   TrendingUp, Lock, Link2, Merge, Plus, GitBranch, Timer, Play, Square, ListChecks, Boxes,
-  ChevronDown, Inbox, Pencil, Save, Search,
+  ChevronDown, Inbox, Pencil, Save, Search, ClipboardList,
   ChevronsLeft, ChevronLeft, ChevronsRight, Eye, Copy, ShieldAlert, ShieldOff, Loader2, Image as ImageIcon,
   AtSign, File as FileIcon, Archive, Video, Music, Download, Unlock, ShieldCheck
 } from 'lucide-react';
@@ -32,8 +32,12 @@ import {
   MANUAL_STATUS_OPTIONS, STATUS_LABELS, PRIORITY_OPTIONS, TYPE_OPTIONS, SOURCE_OPTIONS,
   URGENCY_IMPACT_OPTIONS, PRIORITY_CONFIG, STATUS_CONFIG, ORIGIN_CONFIG, initials
 } from '../constants/tickets';
+import { REPORT_FIELDS } from '../constants/followup';
 
-import { sanitizeHtml } from '../utils/sanitize';
+import { sanitizeHtml, richTextIsEmpty } from '../utils/sanitize';
+import { readFollowupDraft, writeFollowupDraft } from '../utils/followupDraft';
+import RichTextEditor from '../components/RichTextEditor';
+import FollowupTemplateDialog from '../components/FollowupTemplateDialog';
 
 function extractCleanTextAndImages(content) {
   if (!content || typeof content !== 'string') return { text: '', images: [] };
@@ -78,46 +82,8 @@ const STATUS_ACCENT = {
   CLOSED: 'bg-slate-400',
 };
 
-// Coordonnées du caret dans un textarea — miroir invisible (textarea-caret)
-// Retourne {top,left,height} relatif au textarea (scroll inclus)
-function getTextareaCaretCoordinates(textarea, position) {
-  const properties = [
-    'direction','boxSizing','width','height','overflowX','overflowY',
-    'borderTopWidth','borderRightWidth','borderBottomWidth','borderLeftWidth','borderStyle',
-    'paddingTop','paddingRight','paddingBottom','paddingLeft',
-    'fontStyle','fontVariant','fontWeight','fontStretch','fontSize','fontSizeAdjust','lineHeight','fontFamily',
-    'textAlign','textTransform','textIndent','textDecoration','letterSpacing','wordSpacing','tabSize','MozTabSize'
-  ];
-  const isFirefox = typeof window !== 'undefined' && window.mozInnerScreenX != null;
-  const div = document.createElement('div');
-  div.id = 'textarea-caret-mirror';
-  document.body.appendChild(div);
-  const style = div.style;
-  const computed = window.getComputedStyle ? window.getComputedStyle(textarea) : textarea.currentStyle;
-  style.whiteSpace = 'pre-wrap';
-  if (textarea.nodeName !== 'INPUT') style.wordWrap = 'break-word';
-  style.position = 'absolute';
-  style.visibility = 'hidden';
-  style.overflow = 'hidden';
-  properties.forEach((prop) => { try { style[prop] = computed[prop]; } catch {} });
-  if (isFirefox) {
-    if (textarea.scrollHeight > parseInt(computed.height, 10)) style.overflowY = 'scroll';
-  } else {
-    style.overflow = 'hidden';
-  }
-  div.textContent = textarea.value.substring(0, position);
-  if (textarea.nodeName === 'INPUT') div.textContent = div.textContent.replace(/\s/g, '\u00a0');
-  const span = document.createElement('span');
-  span.textContent = textarea.value.substring(position) || '.';
-  div.appendChild(span);
-  const coordinates = {
-    top: span.offsetTop + parseInt(computed.borderTopWidth || '0', 10),
-    left: span.offsetLeft + parseInt(computed.borderLeftWidth || '0', 10),
-    height: parseInt(computed.lineHeight || '18', 10) || 18,
-  };
-  document.body.removeChild(div);
-  return coordinates;
-}
+// Champs guidés du « Rapport d'intervention » : voir src/constants/followup.js
+
 
 function AttachmentThumbnail({ ticketId, attachment }) {
   const [blobUrl, setBlobUrl] = useState(null);
@@ -210,16 +176,46 @@ export default function TicketDetail() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { autonomousMode, settings: systemSettings } = useSystemSettings();
-  const [ticket, setTicket] = useState(null);    const [followup, setFollowup] = useState('');
-  const [followupPrivate, setFollowupPrivate] = useState(false);
+  const [ticket, setTicket] = useState(null);
+  // Brouillon du suivi en cours de rédaction — `{ key, html, mentions, priv }`.
+  // `key` = fiche (ticket) sur laquelle il a été saisi ; si `key !== id`, on relit le
+  // brouillon persisté (localStorage) de la fiche affichée. La navigation inter-fiches
+  // ne fait donc jamais apparaître le texte d'un ticket sur un autre, et rien n'est
+  // perdu si on recharge la page avant l'envoi.
+  const [followupDraft, setFollowupDraft] = useState(() => ({ key: null, html: '', mentions: [], priv: false }));
+  const readDraft = () => (readFollowupDraft('ticket', id, user?.id) || { key: String(id), html: '', mentions: [], priv: false });
+  const activeDraft = followupDraft.key === String(id) ? followupDraft : readDraft();
+  const followup = activeDraft.html;
+  const followupPrivate = activeDraft.priv;
+  const setFollowup = (updater) => setFollowupDraft((prev) => {
+    const base = prev.key === String(id) ? prev : readDraft();
+    return { ...base, key: String(id), html: typeof updater === 'function' ? updater(base.html) : updater };
+  });
+  const setFollowupPrivate = (updater) => setFollowupDraft((prev) => {
+    const base = prev.key === String(id) ? prev : readDraft();
+    const priv = typeof updater === 'function' ? updater(base.priv) : updater;
+    return { ...base, key: String(id), priv: Boolean(priv) };
+  });
+  // Persistance : à chaque frappe, on écrit le brouillon de la fiche courante
+  // (une valeur vide supprime la clé). Écriture seule, sans setState.
+  useEffect(() => {
+    if (followupDraft.key !== String(id)) return;
+    writeFollowupDraft('ticket', id, user?.id, followupDraft.html, followupDraft.mentions, followupDraft.priv);
+  }, [followupDraft, id, user?.id]);
+  const [reportDialogOpen, setReportDialogOpen] = useState(false);
   const [events, setEvents] = useState([]);
 
   // Mentions @ Outlook-like dans les suivis
-  const followupRef = useRef(null);
+  const followupEditorRef = useRef(null);
   const [mentionQuery, setMentionQuery] = useState(null);
   const [mentionResults, setMentionResults] = useState([]);
   const [mentionIndex, setMentionIndex] = useState(0);
-  const [mentionedUsers, setMentionedUsers] = useState([]);
+  const mentionedUsers = activeDraft.mentions;
+  const setMentionedUsers = (updater) => setFollowupDraft((prev) => {
+    const base = prev.key === String(id) ? prev : readDraft();
+    const mentions = typeof updater === 'function' ? updater(base.mentions) : updater;
+    return { ...base, key: String(id), mentions };
+  });
   const [mentionPos, setMentionPos] = useState({ top: 0, left: 0, width: 320 });
   const mentionDebounceRef = useRef(null);
 
@@ -922,11 +918,35 @@ export default function TicketDetail() {
     );
   }
 
-  function handlePaste(e) {
+  // Collage d'images dans l'éditeur riche — true = pris en charge (le collage
+  // par défaut de l'éditeur est alors neutralisé), false = texte classique.
+  function handleFollowupPasteFiles(e) {
     const files = clipboardImageFiles(e);
-    if (files.length === 0) return;
+    if (files.length === 0) return false;
     e.preventDefault();
     addFollowupFiles(files);
+    return true;
+  }
+
+  function handleEditFollowupPasteFiles(e) {
+    const files = clipboardImageFiles(e);
+    if (files.length === 0) return false;
+    e.preventDefault();
+    addEditFollowupFiles(files);
+    return true;
+  }
+
+  // Insère un rapport d'intervention pré-rempli (bouton « Rapport d'intervention »).
+  // En éditeur vide on remplace le document, sinon on ajoute en fin de suivi.
+  function insertReportTemplate(html) {
+    const ed = followupEditorRef.current;
+    if (ed) {
+      if (richTextIsEmpty(ed.getHTML())) ed.commands.setContent(html, { emitUpdate: true });
+      else ed.chain().focus().insertContentAt(ed.state.doc.content.size, html).run();
+    } else {
+      setFollowup((prev) => `${prev || ''}${html}`);
+    }
+    setReportDialogOpen(false);
   }
 
   // ── Mentions @ : logique autocomplete ──────────────────────────────────
@@ -944,174 +964,127 @@ export default function TicketDetail() {
     }, 180);
   }, []);
 
-  function updateMentionState(value, cursorPos) {
-    const before = value.slice(0, cursorPos);
+  // ── Mentions @ — version TipTap ────────────────────────────────────────────
+  // Le texte avant le curseur est lu DANS le bloc courant ($from.parent) : les
+  // indices retournés sont alors alignés sur les positions ProseMirror.
+  function computeMentionQuery(ed) {
+    const $from = ed.state.selection.$from;
+    const textBefore = $from.parent.textBetween(0, $from.parentOffset, '\n', '\n');
     // Ignorer les mentions déjà validées (@Nom + espace) pour ne pas rouvrir le dropdown
-    let lastCommittedEnd = -1;
+    let lastCommittedEnd = 0;
     for (const u of mentionedUsers) {
       const needle = `@${u.fullName} `;
-      let idx = value.indexOf(needle);
+      let idx = textBefore.indexOf(needle);
       while (idx !== -1) {
         const end = idx + needle.length;
-        if (end <= cursorPos && end > lastCommittedEnd) lastCommittedEnd = end;
-        idx = value.indexOf(needle, idx + 1);
+        if (end > lastCommittedEnd) lastCommittedEnd = end;
+        idx = textBefore.indexOf(needle, idx + 1);
       }
     }
-    const subBefore = lastCommittedEnd >= 0 ? before.slice(lastCommittedEnd) : before;
-    // Si pas de commit, subBefore == before ; sinon on coupe après le dernier commit
-    // On cherche le dernier @ dans ce sous-texte
-    const atIdx = subBefore.lastIndexOf('@');
-    if (atIdx === -1) {
-      setMentionQuery(null);
-      return;
-    }
-    const query = subBefore.slice(atIdx + 1);
-    // Fermer si @ suivi d'un email-like déjà complet ou trop long / newline
-    if (query.includes('\n') || query.length > 40) {
-      setMentionQuery(null);
-      return;
-    }
-    // Le @ doit être en début de ligne ou précédé d'un espace (évite les emails)
-    const charBeforeAt = atIdx > 0 ? subBefore[atIdx - 1] : null;
-    if (charBeforeAt && charBeforeAt !== ' ' && charBeforeAt !== '\n' && charBeforeAt !== '\t') {
-      setMentionQuery(null);
-      return;
-    }
-    // Ouvrir le dropdown et lancer la recherche
-    setMentionQuery(query);
-    // Positionner le volet juste à la position du curseur (comme Outlook) — portail fixed
-    if (followupRef.current) {
-      const textarea = followupRef.current;
-      const rect = textarea.getBoundingClientRect();
-      const caret = getTextareaCaretCoordinates(textarea, cursorPos);
-      const dropdownWidth = Math.min(360, Math.max(260, 320));
+    const subBefore = textBefore.slice(lastCommittedEnd);
+    const atIdxInSub = subBefore.lastIndexOf('@');
+    if (atIdxInSub === -1) return null;
+    const query = subBefore.slice(atIdxInSub + 1);
+    // Fermer si @ suivi d'un email-like déjà complet, trop long, ou sur un autre bloc
+    if (query.includes('\n') || query.length > 40) return null;
+    // Le @ doit être en début de bloc ou précédé d'un espace (évite les emails)
+    const charBeforeAt = atIdxInSub > 0 ? subBefore[atIdxInSub - 1] : null;
+    if (charBeforeAt && charBeforeAt !== ' ' && charBeforeAt !== '\n' && charBeforeAt !== '\t') return null;
+    return { query, atIdx: lastCommittedEnd + atIdxInSub };
+  }
+
+  // Positionnement Outlook-like : coordsAtPos donne la position du curseur en
+  // coordonnées écran — plus besoin du miroir « textarea-caret ».
+  function positionMentionDropdown(ed) {
+    try {
+      const coords = ed.view.coordsAtPos(ed.state.selection.from);
+      const dropdownWidth = 320;
       const estHeight = 280;
-      // caret.top/left sont relatifs au textarea, on convertit en viewport
-      const caretLeft = rect.left + caret.left - textarea.scrollLeft;
-      const caretTop = rect.top + caret.top - textarea.scrollTop;
-      const dropdownLeft = Math.min(caretLeft, window.innerWidth - dropdownWidth - 12);
-      const spaceBelowCaret = window.innerHeight - (caretTop + caret.height);
-      const showAbove = spaceBelowCaret < 140 && caretTop > spaceBelowCaret;
-      const top = showAbove ? caretTop - estHeight - 6 : caretTop + caret.height + 6;
-      setMentionPos({
-        top,
-        left: Math.max(8, dropdownLeft),
-        width: dropdownWidth,
-      });
+      const left = Math.min(coords.left, window.innerWidth - dropdownWidth - 12);
+      const spaceBelowCaret = window.innerHeight - coords.bottom;
+      const showAbove = spaceBelowCaret < 140 && coords.top > spaceBelowCaret;
+      const top = showAbove ? coords.top - estHeight - 6 : coords.bottom + 6;
+      setMentionPos({ top, left: Math.max(8, left), width: dropdownWidth });
+    } catch {
+      // Curseur hors écran : on garde la dernière position connue
     }
-    fetchMentionResults(query.trim());
   }
 
   function insertMention(user) {
-    const el = followupRef.current;
-    if (!el) return;
-    const cursorPos = el.selectionStart ?? followup.length;
-    const before = followup.slice(0, cursorPos);
-    const after = followup.slice(cursorPos);
-    // Retrouver le dernier @ non committé (même logique que updateMentionState)
-    let lastCommittedEnd = -1;
-    for (const u of mentionedUsers) {
-      const needle = `@${u.fullName} `;
-      let idx = followup.indexOf(needle);
-      while (idx !== -1) {
-        const end = idx + needle.length;
-        if (end <= cursorPos && end > lastCommittedEnd) lastCommittedEnd = end;
-        idx = followup.indexOf(needle, idx + 1);
-      }
-    }
-    const subBefore = lastCommittedEnd >= 0 ? before.slice(lastCommittedEnd) : before;
-    const atIdxInSub = subBefore.lastIndexOf('@');
-    if (atIdxInSub === -1) return;
-    const atIdx = before.length - subBefore.length + atIdxInSub;
+    const ed = followupEditorRef.current;
+    if (!ed) return;
+    const m = computeMentionQuery(ed);
+    if (!m) return;
+    const from = ed.state.selection.from;
+    // Position du '@' = début du bloc + index dans le texte du bloc
+    const atPos = ed.state.selection.$from.start() + m.atIdx;
     const mentionText = `@${user.fullName} `;
-    const newVal = followup.slice(0, atIdx) + mentionText + after;
-    setFollowup(newVal);
+    ed.chain().focus()
+      .deleteRange({ from: atPos, to: from })
+      .insertContent(mentionText)
+      .run();
     setMentionedUsers((prev) => (prev.some((u) => u.id === user.id) ? prev : [...prev, user]));
     setMentionQuery(null);
     setMentionResults([]);
-    // replacer le curseur après la mention
-    setTimeout(() => {
-      el.focus();
-      const newPos = atIdx + mentionText.length;
-      el.setSelectionRange(newPos, newPos);
-    }, 0);
   }
 
-  function handleFollowupChange(e) {
-    const val = e.target.value;
-    const pos = e.target.selectionStart ?? val.length;
-    setFollowup(val);
+  // Appelé par l'éditeur à chaque frappe / déplacement de curseur (onActivity)
+  function handleFollowupActivity(ed) {
     // Nettoyer les mentions supprimées : garder seulement celles encore présentes
     if (mentionedUsers.length > 0) {
-      const still = mentionedUsers.filter((u) => val.includes(`@${u.fullName}`));
+      const plain = ed.getText();
+      const still = mentionedUsers.filter((u) => plain.includes(`@${u.fullName}`));
       if (still.length !== mentionedUsers.length) setMentionedUsers(still);
     }
-    updateMentionState(val, pos);
+    const m = computeMentionQuery(ed);
+    if (!m) {
+      if (mentionQuery !== null) setMentionQuery(null);
+      return;
+    }
+    setMentionQuery(m.query);
+    positionMentionDropdown(ed);
+    fetchMentionResults(m.query.trim());
   }
 
+  // true = touche absorbée par le dropdown (l'éditeur n'ira pas plus loin) ;
+  // false = laisser TipTap traiter (dont Ctrl+Entrée → onSubmit).
   function handleFollowupKeyDown(e) {
     if (mentionQuery !== null && mentionResults.length > 0) {
       if (e.key === 'ArrowDown') {
-        e.preventDefault();
         setMentionIndex((i) => (i + 1) % mentionResults.length);
-        return;
+        return true;
       }
       if (e.key === 'ArrowUp') {
-        e.preventDefault();
         setMentionIndex((i) => (i - 1 + mentionResults.length) % mentionResults.length);
-        return;
+        return true;
       }
       if (e.key === 'Enter' || e.key === 'Tab') {
-        e.preventDefault();
         const chosen = mentionResults[mentionIndex];
         if (chosen) insertMention(chosen);
-        return;
+        return true;
       }
       if (e.key === 'Escape') {
-        e.preventDefault();
         setMentionQuery(null);
-        return;
+        return true;
       }
     }
-    // Ctrl+Enter pour envoyer (existant)
-    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-      e.preventDefault();
-      handleAddFollowup(e);
-    }
+    return false;
   }
 
-  function handleFollowupSelect() {
-    if (followupRef.current) {
-      updateMentionState(followup, followupRef.current.selectionStart ?? followup.length);
-    }
-  }
-
-  // Fermer le dropdown si clic en dehors du textarea + repositionner au scroll/resize
+  // Fermer le dropdown si clic en dehors de l'éditeur + repositionner au scroll/resize
   useEffect(() => {
     if (mentionQuery === null) return;
+    const editableOf = () => (followupEditorRef.current ? followupEditorRef.current.view.dom : null);
     function onDocClick(e) {
-      if (followupRef.current && !followupRef.current.contains(e.target)) {
+      const el = editableOf();
+      if (el && !el.contains(e.target)) {
         const dropdown = document.querySelector('.mention-dropdown');
         if (dropdown && dropdown.contains(e.target)) return;
         setMentionQuery(null);
       }
     }
     function updatePos() {
-      if (followupRef.current) {
-        const textarea = followupRef.current;
-        const pos = textarea.selectionStart ?? followup.length;
-        const rect = textarea.getBoundingClientRect();
-        const caret = getTextareaCaretCoordinates(textarea, pos);
-        const dropdownWidth = Math.min(360, Math.max(260, 320));
-        const estHeight = 280;
-        const caretLeft = rect.left + caret.left - textarea.scrollLeft;
-        const caretTop = rect.top + caret.top - textarea.scrollTop;
-        const dropdownLeft = Math.min(caretLeft, window.innerWidth - dropdownWidth - 12);
-        const spaceBelowCaret = window.innerHeight - (caretTop + caret.height);
-        const showAbove = spaceBelowCaret < 140 && caretTop > spaceBelowCaret;
-        const top = showAbove ? caretTop - estHeight - 6 : caretTop + caret.height + 6;
-        setMentionPos({ top, left: Math.max(8, dropdownLeft), width: dropdownWidth });
-      }
+      if (followupEditorRef.current) positionMentionDropdown(followupEditorRef.current);
     }
     document.addEventListener('mousedown', onDocClick);
     window.addEventListener('scroll', updatePos, true);
@@ -1124,8 +1097,8 @@ export default function TicketDetail() {
   }, [mentionQuery]);
 
   async function handleAddFollowup(e) {
-    e.preventDefault();
-    if (!followup.trim() && pastedImages.length === 0) return;
+    if (e && typeof e.preventDefault === 'function') e.preventDefault();
+    if (richTextIsEmpty(followup) && pastedImages.length === 0) return;
     try {
       // Déterminer les mentions réellement présentes dans le texte final
       const finalMentioned = mentionedUsers.filter((u) => followup.includes(`@${u.fullName}`));
@@ -1204,15 +1177,10 @@ export default function TicketDetail() {
     setEditingFollowupImages((prev) => [...prev, ...items]);
   }
 
-  function handleEditFollowupPaste(e) {
-    const files = clipboardImageFiles(e);
-    if (files.length === 0) return;
-    e.preventDefault();
-    addEditFollowupFiles(files);
-  }
 
   async function saveEditFollowup(followupId) {
-    const text = editingFollowupContent.trim();
+    // Un éditeur vide vaut '<p></p>' : richTextIsEmpty traite ce cas comme vide
+    const text = richTextIsEmpty(editingFollowupContent) ? '' : editingFollowupContent.trim();
     const savedTags = editingFollowupImages
       .filter((img) => !img.file)
       .map((img) => `<img src="${img.url}" alt="image jointe" />`);
@@ -1804,8 +1772,18 @@ export default function TicketDetail() {
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 flex flex-col gap-6 w-full max-w-none min-w-0 overflow-visible">
-      {/* Top Header Bar (Fixe) */}
-      <div className="flex items-center gap-3 pb-4 border-b border-outline-variant/30 shrink-0">
+      {/* Top Header Bar — COLlée au défilement : le conteneur de scroll de l'app
+          est le <div class="overflow-y-auto"> de MainLayout, donc sticky top-0 se
+          pose juste SOUS la topbar fixe et reste visible pendant toute la fiche.
+          Marges/padding négatifs : le fond translucide + le filet couvrent toute la
+          largeur utile, sans changer la mise en page quand la barre n'est pas collée. */}
+      <div
+        className="sticky top-0 z-30 -mx-4 sm:-mx-6 lg:-mx-8 -mt-4 sm:-mt-6 lg:-mt-8 px-4 sm:px-6 lg:px-8 pt-4 sm:pt-6 lg:pt-8 pb-4 flex items-center gap-3 border-b shrink-0 backdrop-blur-md"
+        style={{
+          backgroundColor: 'color-mix(in srgb, var(--color-surface-container-lowest) 95%, transparent)',
+          borderColor: 'color-mix(in srgb, var(--color-outline-variant) 30%, transparent)',
+        }}
+      >
         <button
           onClick={() => ((window.history.state?.idx ?? 0) > 0 ? navigate(-1) : navigate('/tickets'))}
           className="p-2 rounded-xl border border-outline-variant/40 bg-surface text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all cursor-pointer shrink-0"
@@ -2510,19 +2488,16 @@ export default function TicketDetail() {
                 )
               )}
               commentEditor={(f) => (
-                <div className="space-y-2">
-                  <textarea
-                    className="w-full min-h-[150px] p-3 rounded-xl border border-primary/40 bg-surface text-sm text-on-surface leading-relaxed resize-y focus:outline-none focus:ring-2 focus:ring-primary/30"
-                    rows={6}
-                    value={editingFollowupContent}
-                    onChange={(e) => setEditingFollowupContent(e.target.value)}
-                    onPaste={handleEditFollowupPaste}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Escape') cancelEditFollowup();
-                      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') saveEditFollowup(f.id);
-                    }}
-                    autoFocus
-                  />
+              <div className="space-y-2">
+                <RichTextEditor
+                  value={editingFollowupContent}
+                  onChange={setEditingFollowupContent}
+                  onSubmit={() => saveEditFollowup(f.id)}
+                  onEscape={cancelEditFollowup}
+                  onPasteFiles={handleEditFollowupPasteFiles}
+                  minHeight={150}
+                  autoFocus
+                />
                   <ImageAttachmentsEditor
                     items={editingFollowupImages}
                     onChange={setEditingFollowupImages}
@@ -2531,7 +2506,7 @@ export default function TicketDetail() {
                   <div className="flex items-center gap-2">
                     <button
                       onClick={() => saveEditFollowup(f.id)}
-                      disabled={savingFollowupEdit || (!editingFollowupContent.trim() && editingFollowupImages.length === 0)}
+                      disabled={savingFollowupEdit || (richTextIsEmpty(editingFollowupContent) && editingFollowupImages.length === 0)}
                       className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-primary text-on-primary text-[10px] font-semibold hover:opacity-90 transition-opacity disabled:opacity-50 cursor-pointer"
                     >
                       {savingFollowupEdit ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
@@ -2575,17 +2550,16 @@ export default function TicketDetail() {
                 </label>
               )}
               <div className="relative">
-                <textarea
-                  ref={followupRef}
-                  className="w-full bg-surface border border-slate-200 dark:border-outline-variant/60 rounded-xl px-4 py-3 text-sm text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all resize-y min-h-[220px]"
-                  placeholder="Ajouter un commentaire ou suivi... Tapez @ pour mentionner quelqu'un (Ctrl+Entrée pour envoyer)"
-                  rows={8}
+                <RichTextEditor
                   value={followup}
-                  onChange={handleFollowupChange}
+                  onChange={setFollowup}
+                  onSubmit={handleAddFollowup}
                   onKeyDown={handleFollowupKeyDown}
-                  onKeyUp={handleFollowupSelect}
-                  onClick={handleFollowupSelect}
-                  onPaste={handlePaste}
+                  onPasteFiles={handleFollowupPasteFiles}
+                  onActivity={handleFollowupActivity}
+                  onEditorReady={(ed) => { followupEditorRef.current = ed; }}
+                  placeholder="Ajouter un commentaire ou suivi... Tapez @ pour mentionner quelqu'un (Ctrl+Entrée pour envoyer)"
+                  minHeight={200}
                 />
               </div>
               {/* Dropdown mentions @ — portail premium, positionné à la caret */}
@@ -2725,11 +2699,21 @@ export default function TicketDetail() {
                 onFiles={addFollowupFiles}
               />
 
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] text-on-surface-variant font-medium">Astuce : Appuyez sur <kbd className="px-1.5 py-0.5 bg-surface-container border border-outline-variant/40 rounded text-[9px] font-mono">Ctrl+Entrée</kbd> pour soumettre.</span>
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <div className="flex items-center gap-3 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={() => setReportDialogOpen(true)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-primary/30 bg-primary/[0.06] text-primary text-[11px] font-bold hover:bg-primary/10 transition-colors cursor-pointer"
+                  >
+                    <ClipboardList className="w-3.5 h-3.5" />
+                    Rapport d'intervention
+                  </button>
+                  <span className="text-[10px] text-on-surface-variant font-medium">Astuce : Appuyez sur <kbd className="px-1.5 py-0.5 bg-surface-container border border-outline-variant/40 rounded text-[9px] font-mono">Ctrl+Entrée</kbd> pour soumettre.</span>
+                </div>
                 <button
                   type="submit"
-                  disabled={!followup.trim() && pastedImages.length === 0}
+                  disabled={richTextIsEmpty(followup) && pastedImages.length === 0}
                   className="flex items-center gap-1.5 px-5 py-2 rounded-xl btn-primary text-xs font-bold disabled:opacity-40 transition-all cursor-pointer"
                 >
                   <Send className="w-3.5 h-3.5" />
@@ -2738,13 +2722,22 @@ export default function TicketDetail() {
               </div>
             </form>
             )}
+
+            <FollowupTemplateDialog
+              open={reportDialogOpen}
+              fields={REPORT_FIELDS}
+              onClose={() => setReportDialogOpen(false)}
+              onInsert={insertReportTemplate}
+            />
           </div>
 
 
         </div>
 
         {/* ── RIGHT COLUMN: Actions, AI, Approvals ──────────────────────── */}
-        <div className="flex flex-col gap-5 min-w-0 xl:w-[340px] xl:shrink-0 order-3 xl:sticky xl:top-6 xl:self-start">
+        {/* xl:top — doit dépasser la barre d'en-tête collée (~81px en xl) sinon
+            les cartes du rail passent DERRIÈRE la barre au défilement. */}
+        <div className="flex flex-col gap-5 min-w-0 xl:w-[340px] xl:shrink-0 order-3 xl:sticky xl:top-[92px] xl:self-start">
           {/* Source Email Details */}
           {ticket.sourceEmail && (
             <div className="bento-card p-5 space-y-3">

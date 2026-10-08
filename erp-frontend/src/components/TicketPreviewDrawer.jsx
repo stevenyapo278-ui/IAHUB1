@@ -23,7 +23,7 @@ import api from '../api/client';
 import FormDrawer from './FormDrawer';
 import SlaBadge from './SlaBadge';
 import { STATUS_CONFIG } from '../constants/tickets';
-import { sanitizeHtml } from '../utils/sanitize';
+import { sanitizeHtml, stripHtml } from '../utils/sanitize';
 
 // Cache mémoire partagé entre les réouvertures du volet (1 appel par ticket)
 const _previewCache = new Map();
@@ -217,7 +217,7 @@ export default function TicketPreviewDrawer({ open, ticket, filterQs = '', onClo
                     <span className="text-[10px] text-on-surface-variant shrink-0">{fmtDateTime(f.createdAt)}</span>
                   </div>
                   <p className="text-[12px] text-on-surface-variant leading-relaxed whitespace-pre-wrap break-words line-clamp-4">
-                    {f.content}
+                    {stripHtml(f.content)}
                   </p>
                   {f.isPrivate && (
                     <span className="mt-1 inline-block text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-600">
