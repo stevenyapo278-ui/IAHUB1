@@ -436,44 +436,64 @@ router.get('/technician-stats', async (req, res) => {
       since.setHours(0, 0, 0, 0);
     }
     const range = { gte: since, lte: until };
+    const memberSelect = { id: true, fullName: true, email: true, teamId: true, avatarUrl: true, role: true };
 
-    const technicians = await prisma.user.findMany({
-      where: {
-        role: { in: STAFF_ROLES },
-        isActive: true,
-        ...(teamId ? { teamId: Number(teamId) } : {}),
-        ...(assignedToId ? { id: Number(assignedToId) } : {}),
-        // Un technicien ne voit que ses propres stats (écrase les filtres ci-dessus)
-        ...(req.user.role === 'TECHNICIAN' ? { id: req.user.sub } : {}),
-      },
-      select: { id: true, fullName: true, email: true, teamId: true, avatarUrl: true },
-    });
-    const techIds = technicians.map((t) => t.id);
+    // Un technicien ne voit que ses propres stats (écrase les filtres ci-dessus)
+    const isolatedToSelf = req.user.role === 'TECHNICIAN';
+    const rosterWhere = {
+      role: { in: STAFF_ROLES },
+      ...(teamId ? { teamId: Number(teamId) } : {}),
+      ...(isolatedToSelf ? { id: req.user.sub } : assignedToId ? { id: Number(assignedToId) } : {}),
+    };
+    const staffUsers = await prisma.user.findMany({ where: { ...rosterWhere, isActive: true }, select: memberSelect });
+
+    // « Toute personne ayant traité un ticket » : un compte hors staff actif (admin ou
+    // superadmin désactivé, hotline oublié…) qui a saisi un suivi ou du temps pendant la
+    // période garde sa ligne de stats — son activité ne doit pas disparaître de la vue.
+    const [followupRows, loggedRows] = await Promise.all([
+      prisma.followup.groupBy({ by: ['authorId'], where: { createdAt: range, authorId: { not: null } }, _count: true }),
+      prisma.ticketTimeEntry.groupBy({
+        by: ['userId'],
+        where: { entryDate: range },
+        _sum: { minutes: true },
+      }),
+    ]);
+    const followupCounts = Object.fromEntries(followupRows.map((r) => [r.authorId, r._count || 0]));
+    const knownIds = new Set(staffUsers.map((u) => u.id));
+    const extraIds = [...new Set([
+      ...followupRows.map((r) => r.authorId),
+      ...loggedRows.map((r) => r.userId),
+    ])].filter((id) => id != null && !knownIds.has(id));
+    const handledUsers = (!isolatedToSelf && extraIds.length)
+      ? await prisma.user.findMany({ where: { ...rosterWhere, id: { in: extraIds } }, select: memberSelect })
+      : [];
+    const technicians = [...staffUsers, ...handledUsers];
+    const memberIds = technicians.map((u) => u.id);
 
     const teams = await prisma.team.findMany({ select: { id: true, name: true } });
     const teamNames = Object.fromEntries(teams.map((t) => [t.id, t.name]));
 
-    // Tickets liés aux techniciens sur la période : créés OU résolus dans la plage
-    // Tickets de la période liés aux membres : reçus en assignation OU créés par eux
-    // (les rôles admin/hotline qui saisissent pour un utilisateur restent visibles)
+    // Tickets de la période liés aux membres : reçus en assignation (titulaire OU
+    // co-affecté), saisis par eux (les rôles admin/hotline qui enregistrent pour un
+    // utilisateur restent visibles), dans la plage créés / résolus / clôturés
     const tickets = await prisma.ticket.findMany({
       where: {
         ...NOT_DELETED,
-        OR: [{ assignedToId: { in: techIds } }, { requesterId: { in: techIds } }],
+        OR: [
+          { assignedToId: { in: memberIds } },
+          { assignees: { some: { id: { in: memberIds } } } },
+          { requesterId: { in: memberIds } },
+        ],
         AND: [{ OR: [{ createdAt: range }, { solvedAt: range }, { closedAt: range }] }],
       },
       select: {
         id: true, assignedToId: true, requesterId: true, status: true, createdAt: true,
         solvedAt: true, closedAt: true, firstResponseAt: true,
         slaResolutionDueAt: true, slaBreachedAt: true, csatScore: true,
+        assignees: { select: { id: true } },
       },
     });
 
-    const loggedRows = await prisma.ticketTimeEntry.groupBy({
-      by: ['userId'],
-      where: { userId: { in: techIds }, entryDate: range },
-      _sum: { minutes: true },
-    });
     const loggedMinutes = Object.fromEntries(loggedRows.map((r) => [r.userId, r._sum.minutes || 0]));
 
     const RESOLVED = ['SOLVED', 'CLOSED'];
@@ -481,7 +501,8 @@ router.get('/technician-stats', async (req, res) => {
     const round1 = (n) => (n == null ? null : Math.round(n * 10) / 10);
 
     const stats = technicians.map((tech) => {
-      const mine = tickets.filter((t) => t.assignedToId === tech.id);
+      // Le membre « traite » le ticket s'il en est le titulaire ou un co-affecté
+      const mine = tickets.filter((t) => t.assignedToId === tech.id || (t.assignees || []).some((a) => a.id === tech.id));
       const createdInPeriod = mine.filter((t) => t.createdAt >= since && t.createdAt <= until);
       // Tickets SAISIS par ce membre (requester) sur la période : compteur « Créés »
       const authoredInPeriod = tickets.filter((t) => t.requesterId === tech.id && t.createdAt >= since && t.createdAt <= until);
@@ -509,11 +530,14 @@ router.get('/technician-stats', async (req, res) => {
         id: tech.id,
         fullName: tech.fullName,
         email: tech.email,
+        role: tech.role,
+        avatarUrl: tech.avatarUrl,
         teamName: teamNames[tech.teamId] || null,
         created: authoredInPeriod.length,
         assigned: createdInPeriod.length,
         open: createdInPeriod.filter((t) => !RESOLVED.includes(t.status)).length,
         resolved: resolvedInPeriod.length,
+        followups: followupCounts[tech.id] || 0,
         avgResolutionHours: avgResolutionH,
         avgFirstResponseHours: avgFirstResponseH,
         slaTotal: withSlaResolved.length,
@@ -530,11 +554,12 @@ router.get('/technician-stats', async (req, res) => {
     const totalResolved = stats.reduce((s, x) => s + x.resolved, 0);
     const weightedResolution = stats.reduce((s, x) => s + (x.avgResolutionHours ?? 0) * x.resolved, 0);
     const totals = {
-      technicians: stats.filter((x) => x.assigned > 0 || x.resolved > 0 || x.created > 0).length,
+      technicians: stats.filter((x) => x.assigned > 0 || x.resolved > 0 || x.created > 0 || x.followups > 0).length,
       created: stats.reduce((s, x) => s + x.created, 0),
       assigned: stats.reduce((s, x) => s + x.assigned, 0),
       open: stats.reduce((s, x) => s + x.open, 0),
       resolved: totalResolved,
+      followups: stats.reduce((s, x) => s + x.followups, 0),
       avgResolutionHours: totalResolved ? round1(weightedResolution / totalResolved) : null,
       slaTotal: stats.reduce((s, x) => s + x.slaTotal, 0),
       slaRespected: stats.reduce((s, x) => s + x.slaRespected, 0),
@@ -564,7 +589,7 @@ router.get('/technician-stats', async (req, res) => {
     }
 
     return res.json({
-      items: stats.sort((a, b) => b.resolved - a.resolved || b.assigned - a.assigned),
+      items: stats.sort((a, b) => b.resolved - a.resolved || b.assigned - a.assigned || b.followups - a.followups || b.created - a.created),
       totals,
       trend: Object.values(trend),
       period: { since: since.toISOString(), until: until.toISOString() },

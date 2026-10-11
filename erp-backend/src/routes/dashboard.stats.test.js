@@ -25,6 +25,11 @@ jest.mock('../prismaClient', () => {
       } else if (cond instanceof Date) {
         if (!isEq(val, cond)) return false;
       } else if (typeof cond === 'object' && !Array.isArray(cond)) {
+        if ('some' in cond) {
+          const arr = val || [];
+          if (!Array.isArray(arr) || !arr.some((x) => matches(x, cond.some))) return false;
+          continue;
+        }
         if ('notIn' in cond && cond.notIn.includes(val)) return false;
         if ('in' in cond && !cond.in.includes(val)) return false;
         if ('not' in cond && (cond.not === null ? val !== null && val !== undefined : isEq(val, cond.not))) return false;
@@ -66,7 +71,8 @@ jest.mock('../prismaClient', () => {
         (where?.id?.in || []).map((id) => ({ id, name: `Équipe ${id}` })),
       ),
     },
-    user: { findMany: jest.fn(async () => [{ id: 1, fullName: 'Tech', email: 'tech@t.ci' }]) },
+    user: { findMany: jest.fn(async () => [{ id: 1, fullName: 'Tech', email: 'tech@t.ci', role: 'TECHNICIAN', teamId: null }]) },
+    followup: { groupBy: jest.fn(async () => []), findMany: jest.fn(async () => []) },
     ticketTimeEntry: { groupBy: jest.fn(async () => []) },
     aiEmailDraft: { count: jest.fn(async () => 0) },
     incomingEmail: { count: jest.fn(async () => 0) },
@@ -453,6 +459,74 @@ describe('Vues de performance — périmètre des rôles', () => {
     const day = res.body.trend.find((d) => d.date === '2026-09-01');
     expect(day.created).toBe(2); // #1 (assigné) + #2 (saisi par Tech, non résolu)
     expect(day.resolved).toBe(0);
+  });
+
+  it('/technician-stats compte les co-affectés : un superadmin sur un ticket ne disparaît plus', async () => {
+    prisma.user.findMany.mockResolvedValueOnce([
+      { id: 1, fullName: 'Tech', email: 'tech@t.ci', role: 'TECHNICIAN', teamId: null },
+      { id: 2, fullName: 'Super', email: 'super@t.ci', role: 'SUPERADMIN', teamId: null },
+    ]);
+    db.tickets.push(
+      t({ id: 1, assignedToId: 1, assignees: [{ id: 1 }, { id: 2 }], status: 'SOLVED', solvedAt: new Date('2026-09-10') }),
+    );
+
+    const res = makeRes();
+    await getHandler('get', '/technician-stats')(
+      makeReq({ query: { startDate: '2026-09-01', endDate: '2026-09-30' } }),
+      res,
+    );
+
+    expect(res.statusCode).toBe(200);
+    const superRow = res.body.items.find((x) => x.id === 2);
+    expect(superRow.role).toBe('SUPERADMIN');
+    expect(superRow.assigned).toBe(1); // co-affecté, même sans être titulaire
+    expect(superRow.resolved).toBe(1);
+    const techRow = res.body.items.find((x) => x.id === 1);
+    expect(techRow.assigned).toBe(1);
+  });
+
+  it('/technician-stats : les suivis saisis par un admin (traitement sans assignation) sont répertoriés', async () => {
+    prisma.user.findMany.mockResolvedValueOnce([
+      { id: 1, fullName: 'Tech', email: 'tech@t.ci', role: 'TECHNICIAN', teamId: null },
+      { id: 3, fullName: 'Admin', email: 'admin@t.ci', role: 'ADMIN', teamId: null },
+    ]);
+    prisma.followup.groupBy.mockResolvedValueOnce([{ authorId: 3, _count: 4 }]);
+    db.tickets.push(t({ id: 1, assignedToId: 1 }));
+
+    const res = makeRes();
+    await getHandler('get', '/technician-stats')(
+      makeReq({ query: { startDate: '2026-09-01', endDate: '2026-09-30' } }),
+      res,
+    );
+
+    expect(res.statusCode).toBe(200);
+    const adminRow = res.body.items.find((x) => x.id === 3);
+    expect(adminRow).toBeDefined();
+    expect(adminRow.role).toBe('ADMIN');
+    expect(adminRow.followups).toBe(4);
+    expect(res.body.totals.followups).toBe(4);
+    expect(res.body.totals.technicians).toBe(2); // Tech (assigné) + Admin (suivis)
+  });
+
+  it('/technician-stats : un compte désactivé ayant traité des tickets reste dans la liste', async () => {
+    prisma.user.findMany
+      .mockResolvedValueOnce([{ id: 1, fullName: 'Tech', email: 'tech@t.ci', role: 'TECHNICIAN', teamId: null }])
+      .mockResolvedValueOnce([{ id: 9, fullName: 'Ancien', email: 'ancien@t.ci', role: 'SUPERADMIN', teamId: null }]);
+    prisma.followup.groupBy.mockResolvedValueOnce([{ authorId: 9, _count: 2 }]);
+    db.tickets.push(t({ id: 1, assignedToId: 1 }));
+
+    const res = makeRes();
+    await getHandler('get', '/technician-stats')(
+      makeReq({ query: { startDate: '2026-09-01', endDate: '2026-09-30' } }),
+      res,
+    );
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.items.map((x) => x.id)).toContain(9);
+    // La seconde requête ne retombe que sur des comptes staff ayant réellement traité
+    const { where } = prisma.user.findMany.mock.calls[1][0];
+    expect(where.role.in).toEqual(STAFF);
+    expect(where.id.in).toEqual([9]);
   });
 });
 
