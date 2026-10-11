@@ -71,6 +71,7 @@ export function KpiCard({
   trend = null,
   mono = false,
   loading = false,
+  sub = null,
 }) {
   const bubbleBg = getBubbleBg(color);
 
@@ -135,6 +136,14 @@ export function KpiCard({
         >
           {label}
         </p>
+        {sub && (
+          <p
+            className="text-[11px] font-semibold mt-1 leading-tight"
+            style={{ color: 'var(--color-on-surface-variant)', opacity: 0.75 }}
+          >
+            {sub}
+          </p>
+        )}
       </div>
     </div>
   );
