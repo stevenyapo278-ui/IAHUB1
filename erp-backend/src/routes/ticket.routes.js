@@ -3085,7 +3085,10 @@ router.post('/bulk-restore', forbidTechnicianTicketEdits, requireDeleteTicketPer
 });
 
 // ── Transférer la conversation email ────────────────────────────────────────
-// POST /api/tickets/:id/forward-email — body: { to: "email@example.com" }
+// POST /api/tickets/:id/forward-email — body: { to: "a@b.c" | ["a@b.c"], cc?: [...], note?: string }
+// Transfère la conversation complète à une adresse (ou plusieurs). Le mail est envoyé
+// hors fil (pas de conversationId) puisque les destinataires ne font pas partie de la
+// conversation Outlook d'origine.
 // Sécurité : seul le demandeur assigné OU le technicien assigné peut transférer.
 router.post('/:id/forward-email', async (req, res) => {
   const ticketId = Number(req.params.id);
@@ -3100,7 +3103,6 @@ router.post('/:id/forward-email', async (req, res) => {
         select: {
           direction: true, sender: true, recipients: true, subject: true,
           bodyHtml: true, body: true, timestamp: true, ccRecipients: true,
-          conversationId: true, internetMessageId: true, outlookMessageId: true,
         },
       },
     },
@@ -3122,36 +3124,51 @@ router.post('/:id/forward-email', async (req, res) => {
     return res.status(400).json({ error: 'Aucun email dans la conversation de ce ticket.' });
   }
 
-  // Répondre dans le fil de la conversation existante (thread)
-  const lastMsg = ticket.messages[ticket.messages.length - 1];
-  const conversationId = lastMsg?.conversationId || null;
-  const inReplyToId = lastMsg?.outlookMessageId || null;
-  const inReplyToHeader = lastMsg?.internetMessageId || null;
+  // Destinataires : validés côté serveur, jamais repris tels quels du body.
+  const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+  const normalizeList = (v) => (Array.isArray(v) ? v : String(v || '').split(/[;,]/))
+    .map((a) => String(a || '').trim())
+    .filter(Boolean);
 
-  const replyTo = req.user.email;
-  if (!replyTo) return res.status(400).json({ error: 'Aucune adresse email associée à votre compte.' });
+  const toList = normalizeList(req.body?.to);
+  const ccList = normalizeList(req.body?.cc);
+  if (toList.length === 0) {
+    return res.status(400).json({ error: 'Au moins un destinataire est requis.' });
+  }
+  const invalid = [...toList, ...ccList].find((a) => !EMAIL_RE.test(a));
+  if (invalid) {
+    return res.status(400).json({ error: `Adresse invalide : ${invalid}` });
+  }
+  // Note facultative du transféreur, insérée en tête du mail
+  const note = String(req.body?.note || '').trim().substring(0, 1000);
 
-  const subject = `Re: ${ticket.sourceSubject || ticket.title}`;
-  // Corps = transfert de la conversation originale (pas un résumé IA)
+  const subject = `Transfert : ${ticket.sourceSubject || ticket.title} (Ticket #${ticket.id})`;
+  // Corps = conversation originale complète (pas un résumé IA)
   const conversationHtml = ticket.messages.map((msg) => {
     const dir = msg.direction === 'INBOUND' ? '📥 Reçu' : '📤 Envoyé';
     const date = new Date(msg.timestamp).toLocaleString('fr-FR');
     const from = msg.sender || 'Inconnu';
-    const toList = (msg.recipients || []).join(', ');
-    const ccList = (msg.ccRecipients || []).length > 0 ? `<br><strong>CC :</strong> ${msg.ccRecipients.join(', ')}` : '';
+    const toRec = (msg.recipients || []).join(', ');
+    const ccRec = (msg.ccRecipients || []).length > 0 ? `<br><strong>CC :</strong> ${msg.ccRecipients.join(', ')}` : '';
     const body = msg.bodyHtml || `<pre style="white-space:pre-wrap;font-family:inherit">${msg.body || ''}</pre>`;
     return `
       <div style="margin-bottom:24px;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden">
         <div style="background:#f9fafb;padding:12px 16px;border-bottom:1px solid #e5e7eb;font-size:13px">
           <div><strong>${dir}</strong> — ${date}</div>
           <div><strong>De :</strong> ${from}</div>
-          <div><strong>À :</strong> ${toList}</div>
-          ${ccList}
+          <div><strong>À :</strong> ${toRec}</div>
+          ${ccRec}
           ${msg.subject ? `<div><strong>Sujet :</strong> ${msg.subject}</div>` : ''}
         </div>
         <div style="padding:16px;font-size:13px;line-height:1.5">${body}</div>
       </div>`;
   }).join('');
+
+  const noteHtml = note
+    ? `<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:14px 16px;margin:0 0 18px;font-size:13px;line-height:1.5;color:#1e3a8a">
+         <strong>Note du transféreur</strong><br>${note.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/\n/g, '<br>')}
+       </div>`
+    : '';
 
   const bodyHtml = `
     <div style="font-family:Arial,sans-serif;max-width:800px;margin:0 auto">
@@ -3163,26 +3180,33 @@ router.post('/:id/forward-email', async (req, res) => {
         <p style="font-size:13px;color:#6b7280;margin:0 0 16px">
           Transmis par <strong>${req.user.fullName || req.user.email}</strong> le ${new Date().toLocaleString('fr-FR')}.
         </p>
+        ${noteHtml}
         ${conversationHtml}
       </div>
     </div>`;
 
   try {
+    // Hors fil : les destinataires ne sont pas participants de la conversation
+    // Outlook d'origine, on n'y rattache donc pas le message (sinon il apparaîtrait
+    // dans le fil de boîte de réception d'origine sans lien avec eux).
     await sendEmail({
       ticketId: ticket.id,
-      to: replyTo,
+      to: toList,
+      cc: ccList,
       subject,
       bodyHtml,
-      conversationId: conversationId || undefined,
-      inReplyTo: inReplyToHeader || undefined,
-      inReplyToGraphMessageId: inReplyToId || undefined,
       saveAsMessage: true,
     });
     await logEvent(ticket.id, 'EMAIL_SENT', req.user.email || 'SYSTEM', {
-      replyTo,
-      conversationId,
+      forwardedTo: toList,
+      cc: ccList.length ? ccList : undefined,
+      conversationId: null,
     }).catch(() => {});
-    return res.json({ success: true, message: `Réponse envoyée à ${replyTo} dans la conversation` });
+    return res.json({
+      success: true,
+      message: `Conversation transférée à ${toList.join(', ')}`,
+      to: toList,
+    });
   } catch (err) {
     console.error('[forward-email] Erreur envoi:', err.message);
     return res.status(500).json({ error: 'Erreur lors de l\'envoi : ' + err.message });

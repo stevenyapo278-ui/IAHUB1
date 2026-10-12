@@ -3,6 +3,7 @@ const prisma = require('../prismaClient');
 const { authenticate } = require('../middleware/auth');
 const { requirePermission } = require('../middleware/permissions');
 const { generateKnowledgeDraft } = require('../services/knowledgeDraftGenerator');
+const { summarizeTicketThread } = require('../services/ticketThreadSummarizer');
 const { runReminderScheduler } = require('../services/reminderScheduler');
 const { logEvent } = require('../services/ticketEvent');
 const { searchKnowledge } = require('../services/knowledgeSearch');
@@ -83,6 +84,21 @@ router.post('/tickets/:id/generate-knowledge', requirePermission('knowledge.mana
       technicianEmail: req.user?.email,
     });
     res.json(draft);
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
+// Résumer les échanges et commentaires d'un ticket, rédigés comme un suivi.
+// Le texte est renvoyé tel quel : c'est le front qui le propose dans l'éditeur
+// de suivi, l'utilisateur relit et valide — rien n'est écrit en base ici.
+router.post('/tickets/:id/summarize-thread', async (req, res) => {
+  if (!(await assertRequesterOwnsTicket(req.user, req.params.id))) {
+    return res.status(404).json({ error: 'Ticket introuvable' });
+  }
+  try {
+    const result = await summarizeTicketThread({ ticketId: Number(req.params.id) });
+    res.json(result);
   } catch (err) {
     res.status(502).json({ error: err.message });
   }

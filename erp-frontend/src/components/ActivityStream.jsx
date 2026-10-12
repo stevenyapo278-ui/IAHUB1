@@ -179,6 +179,10 @@ export default function ActivityStream({
   defaultFilter = 'all',
   empty = 'Aucune activité pour le moment.',
   stickyDates = true,
+  // Décalage des en-têtes de jour quand la page a SA propre barre collée en haut
+  // (fiche ticket) : sans décalage, le bandeau de jour se pose derrière la barre et
+  // devient invisible. string CSS (ex: "88px") ou null pour le défaut (0).
+  stickyTop = null,
   editingId = null,
   expandedIds = null,
   onToggleExpand,
@@ -280,6 +284,7 @@ export default function ActivityStream({
             {/* En-tête de jour — collant, en couleur d'accent */}
             <div
               className={`${stickyDates ? 'sticky top-0 z-20' : ''} act-head backdrop-blur-md px-1 py-2`}
+              style={stickyDates && stickyTop ? { top: stickyTop } : undefined}
             >
               <div className="flex items-center gap-3">
                 <span className="text-[13px] font-bold text-primary whitespace-nowrap">{day.label}</span>

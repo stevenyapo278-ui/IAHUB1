@@ -223,6 +223,10 @@ export default function TicketDetail() {
   const [followupToDelete, setFollowupToDelete] = useState(null);
   const [deletingFollowup, setDeletingFollowup] = useState(false);
 
+  // Résumé IA des échanges — inséré dans l'éditeur de suivi pour relecture
+  const [summarizingThread, setSummarizingThread] = useState(false);
+  const followupFormRef = useRef(null);
+
   // Suppression de pièce jointe (confirmation avant retrait)
   const [attachmentToRemove, setAttachmentToRemove] = useState(null);
   const [removingAttachment, setRemovingAttachment] = useState(false);
@@ -283,6 +287,11 @@ export default function TicketDetail() {
   // suggérés : ils sont définis dans la vue Équipe et rattachés à la création.
   const [peopleSug, setPeopleSug] = useState(null);
   const [forwarding, setForwarding] = useState(false);
+  // Modale de transfert : choix des destinataires de la conversation
+  const [forwardModalOpen, setForwardModalOpen] = useState(false);
+  const [forwardTo, setForwardTo] = useState('');
+  const [forwardCc, setForwardCc] = useState('');
+  const [forwardNote, setForwardNote] = useState('');
   const [conversationIdDraft, setConversationIdDraft] = useState('');
   const [savingConversationId, setSavingConversationId] = useState(false);
   const [conversationLocked, setConversationLocked] = useState(true);
@@ -1096,6 +1105,47 @@ export default function TicketDetail() {
     };
   }, [mentionQuery]);
 
+  // Résume les échanges et commentaires du ticket et propose le texte comme suivi.
+  // Rien n'est écrit en base : le texte atterrit dans l'éditeur, l'utilisateur
+  // relit/corrige puis valide avec le formulaire existant.
+  async function handleSummarizeThread() {
+    if (summarizingThread) return;
+    setSummarizingThread(true);
+    try {
+      const { data } = await api.post(`/tickets/${id}/summarize-thread`);
+      const text = (data?.summary || '').trim();
+      if (!text) {
+        toast.error('Le résumé généré est vide');
+        return;
+      }
+      // Le modèle sépare ses paragraphes par un simple \n (pas toujours \n\n) :
+      // on découpe sur tout saut de ligne pour obtenir des <p> distincts.
+      const html = text
+        .split(/\n+/)
+        .map((p) => p.trim())
+        .filter(Boolean)
+        .map((p) => `<p>${p}</p>`)
+        .join('');
+
+      // Le brouillon peut déjà contenir du texte : on préfixe au lieu d'écraser.
+      const existing = followup.trim();
+      setFollowup(existing ? `${existing}\n\n${html}` : html);
+
+      toast.success(
+        `Résumé prêt à relire (${data.sources?.messages || 0} échange(s), ${data.sources?.followups || 0} commentaire(s))`
+      );
+      // Amener l'éditeur dans le champ de vision et y placer le curseur
+      requestAnimationFrame(() => {
+        followupFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        followupEditorRef.current?.commands?.focus?.();
+      });
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Erreur lors de la génération du résumé');
+    } finally {
+      setSummarizingThread(false);
+    }
+  }
+
   async function handleAddFollowup(e) {
     if (e && typeof e.preventDefault === 'function') e.preventDefault();
     if (richTextIsEmpty(followup) && pastedImages.length === 0) return;
@@ -1606,11 +1656,27 @@ export default function TicketDetail() {
     }
   }
 
-  async function handleForwardEmail() {
+  // Transfère la conversation complète à des destinataires choisis (hors fil Outlook).
+  async function handleForwardEmail(e) {
+    if (e && typeof e.preventDefault === 'function') e.preventDefault();
+    const to = forwardTo.split(/[;,]/).map((a) => a.trim()).filter(Boolean);
+    if (to.length === 0) {
+      toast.error('Indiquez au moins un destinataire');
+      return;
+    }
+    const cc = forwardCc.split(/[;,]/).map((a) => a.trim()).filter(Boolean);
     setForwarding(true);
     try {
-      const { data } = await api.post(`/tickets/${id}/forward-email`);
-      toast.success(data.message || 'Réponse envoyée dans la conversation');
+      const { data } = await api.post(`/tickets/${id}/forward-email`, {
+        to,
+        ...(cc.length ? { cc } : {}),
+        ...(forwardNote.trim() ? { note: forwardNote.trim() } : {}),
+      });
+      toast.success(data.message || 'Conversation transférée');
+      setForwardModalOpen(false);
+      setForwardTo('');
+      setForwardCc('');
+      setForwardNote('');
     } catch (err) {
       toast.error(err.response?.data?.error || 'Erreur lors du transfert');
     } finally {
@@ -1952,6 +2018,16 @@ export default function TicketDetail() {
                 >
                   <Sparkles className="w-3.5 h-3.5" />
                   <span>Capturer dans la KB</span>
+                </button>
+
+                <button
+                  onClick={handleSummarizeThread}
+                  disabled={summarizingThread}
+                  className="px-3 py-1.5 rounded-xl border border-blue-500/30 bg-blue-500/10 text-blue-600 dark:text-blue-300 hover:bg-blue-500/20 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-sm disabled:opacity-50"
+                  title="Résumer les échanges et commentaires de ce ticket, puis proposer le texte comme nouveau suivi"
+                >
+                  <FileText className={`w-3.5 h-3.5 ${summarizingThread ? 'animate-pulse' : ''}`} />
+                  <span>{summarizingThread ? 'Résumé en cours…' : 'Résumer les échanges'}</span>
                 </button>
 
                 <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold ${sConfig.bg}`}>
@@ -2417,6 +2493,7 @@ export default function TicketDetail() {
             <ActivityStream
               items={timelineItems}
               containerRef={followupContainerRef}
+              stickyTop="88px" /* en-têtes de jour sous la barre collée, pas derrière */
               showFilters
               empty="Aucun échange pour le moment."
               editingId={editingFollowupId}
@@ -2534,7 +2611,7 @@ export default function TicketDetail() {
                 <span>Ce ticket est résolu ou fermé. Un technicien ne peut plus y apporter de modification ou de suivi.</span>
               </div>
             ) : (
-              <form onSubmit={handleAddFollowup} className="pt-4 border-t border-outline-variant/30 space-y-3">
+              <form ref={followupFormRef} onSubmit={handleAddFollowup} className="pt-4 border-t border-outline-variant/30 space-y-3">
                 {canAssign && (
                 <label className="flex items-center gap-2 cursor-pointer select-none w-fit">
                   <input
@@ -2763,12 +2840,13 @@ export default function TicketDetail() {
               </dl>
               {ticket.messages?.length > 0 && canForward && (
                 <button
-                  onClick={handleForwardEmail}
+                  onClick={() => setForwardModalOpen(true)}
                   disabled={forwarding}
                   className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition-colors text-xs font-semibold disabled:opacity-50"
+                  title="Envoyer la conversation complète de ce ticket à une adresse email"
                 >
-                  {forwarding ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
-                  {forwarding ? 'Envoi en cours...' : 'Transférer la conversation'}
+                  <Send className="w-3.5 h-3.5" />
+                  Transférer la conversation
                 </button>
               )}
             </div>
@@ -3868,6 +3946,81 @@ export default function TicketDetail() {
                 {escalating ? 'Transfert en cours...' : 'Transférer le ticket'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODALE TRANSFERT : envoi de la conversation complète à des destinataires */}
+      {forwardModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md animate-fadeIn" onClick={() => !forwarding && setForwardModalOpen(false)}>
+          <div className="bg-surface border border-outline-variant/40 rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-4" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-3 text-primary">
+              <Send className="w-6 h-6" />
+              <div>
+                <h3 className="text-base font-bold">Transférer la conversation</h3>
+                <p className="text-xs text-on-surface-variant">Ticket #{id} — {ticket?.messages?.length || 0} email(s) seront envoyés</p>
+              </div>
+            </div>
+
+            <form onSubmit={handleForwardEmail} className="space-y-3.5">
+              <label className="block space-y-1.5">
+                <span className="text-xs font-bold text-on-surface">Destinataire(s) *</span>
+                <input
+                  type="text"
+                  value={forwardTo}
+                  onChange={(e) => setForwardTo(e.target.value)}
+                  placeholder="prenom.nom@exemple.ci, autre@exemple.ci"
+                  autoFocus
+                  disabled={forwarding}
+                  className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 text-xs text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+                />
+                <span className="text-[10px] text-on-surface-variant">Plusieurs adresses séparées par une virgule ou un point-virgule.</span>
+              </label>
+
+              <label className="block space-y-1.5">
+                <span className="text-xs font-bold text-on-surface">Copie (CC)</span>
+                <input
+                  type="text"
+                  value={forwardCc}
+                  onChange={(e) => setForwardCc(e.target.value)}
+                  placeholder="Facultatif"
+                  disabled={forwarding}
+                  className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 text-xs text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+                />
+              </label>
+
+              <label className="block space-y-1.5">
+                <span className="text-xs font-bold text-on-surface">Note jointe</span>
+                <textarea
+                  value={forwardNote}
+                  onChange={(e) => setForwardNote(e.target.value)}
+                  placeholder="Facultatif — message ajouté en tête du mail transféré"
+                  rows={3}
+                  disabled={forwarding}
+                  maxLength={1000}
+                  className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 text-xs text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all resize-none"
+                />
+              </label>
+
+              <div className="flex items-center justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setForwardModalOpen(false)}
+                  disabled={forwarding}
+                  className="px-4 py-2 rounded-xl border border-outline-variant/50 text-xs font-semibold text-on-surface-variant hover:bg-surface-container transition-colors disabled:opacity-50"
+                >
+                  Annuler
+                </button>
+                <button
+                  type="submit"
+                  disabled={forwarding || !forwardTo.trim()}
+                  className="px-4 py-2 rounded-xl bg-primary text-on-primary text-xs font-bold hover:opacity-90 transition-opacity flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  {forwarding ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                  {forwarding ? 'Envoi en cours…' : 'Transférer'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

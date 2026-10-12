@@ -410,6 +410,34 @@ Retourne UNIQUEMENT ce JSON :
   "keywords": ["mot1", "mot2", "mot3"]
 }`,
   },
+  summarizeTicketThread: {
+    label: "Résumé des échanges et commentaires d'un ticket, rédigé comme un suivi",
+    template: `Tu es un technicien ITSM qui rédige un commentaire de suivi sur un ticket.
+
+À partir de la fiche du ticket et de son historique complet (emails échangés + commentaires internes), rédige un résumé factuel destiné à être ajouté comme SUivi du ticket.
+
+RÈGLES ABSOLUES :
+- Utilise UNIQUEMENT les informations présentes ci-dessous. N'invente JAMAIS de détail, de cause, de solution ou de date absente du dossier.
+- Ne reprends AUCUNE balise HTML ni markdown (pas de #, **, ni de listes à puces).
+- Français, ton professionnel et concis, à la première personne du singulier lorsque tu évoques l'action du technicien.
+- Sépare clairement ce qui relève du DEMANDEUR (besoin, contrainte, confirmation) et du TECHNICIEN (diagnostic, action, résolution).
+- Si une information est manquante ou incertaine, écris-le explicitement plutôt que de la combler.
+- Longueur : 6 à 12 lignes au maximum. Pas de formule de politesse, pas de signature.
+
+Fiche du ticket :
+- Numéro : {{ticketId}}
+- Titre : {{title}}
+- Catégorie : {{category}}
+- Priorité : {{priority}}
+- Statut : {{status}}
+- Contenu initial : {{content}}
+- Résumé IA existant : {{aiSummary}}
+
+Historique chronologique des échanges et commentaires :
+{{history}}
+
+Rédige directement le texte du suivi, sans objet ni préfixe.`,
+  },
   dailySummaryInsight: {
     label: 'Résumé en langage naturel du récapitulatif quotidien des tickets ouverts',
     template: `Tu es un responsable support IT qui rédige un résumé bref pour son équipe de direction.
