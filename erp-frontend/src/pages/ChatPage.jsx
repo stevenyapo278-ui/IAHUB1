@@ -5,6 +5,7 @@ import MarkdownContent from '../components/MarkdownContent';
 import TypewriterText from '../components/TypewriterText';
 import MarieLoader from '../components/MarieLoader';
 import { postChatWithStream, TOOL_LABELS } from '../utils/chatStream';
+import copyText from '../utils/copyText';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip } from 'recharts';
 import {
   Send, Paperclip, Plus, MessageSquare, Trash2, BarChart2, Download,
@@ -89,8 +90,10 @@ function WidgetRenderer({ widget }) {
 function MessageActions({ msg, onReply }) {
   const [copied, setCopied] = useState(false);
 
-  function handleCopy() {
-    navigator.clipboard.writeText(msg.content);
+  async function handleCopy() {
+    // copyText gère le repli execCommand : navigator.clipboard n'existe pas
+    // en HTTP hors localhost (contexte non sécurisé).
+    if (!(await copyText(msg.content))) return;
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   }

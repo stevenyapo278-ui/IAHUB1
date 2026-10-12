@@ -17,6 +17,7 @@ import SlaBadge from '../components/SlaBadge';
 import ImageAttachmentsEditor from '../components/ImageAttachmentsEditor';
 import ActivityStream, { buildTimeline } from '../components/ActivityStream';
 import { clipboardImageFiles, imageItemsFromFiles, imageSrc, revokeImageItems } from '../utils/imageAttachments';
+import copyText from '../utils/copyText';
 import { flattenCategoryTree } from '../utils/categoryTree';
 import {
   ArrowLeft, Clock, User, Tag, AlertTriangle, CheckCircle2,
@@ -120,12 +121,15 @@ function InfoTile({ icon: Icon, label, value, tone = 'primary', title, copyable 
   const [copied, setCopied] = useState(false);
   const handleCopy = async () => {
     if (!value) return;
-    try {
-      await navigator.clipboard.writeText(value);
+    // copyText gère le repli execCommand : navigator.clipboard n'existe pas
+    // en HTTP hors localhost (contexte non sécurisé).
+    if (await copyText(value)) {
       setCopied(true);
       toast.success('Copié !');
       setTimeout(() => setCopied(false), 1500);
-    } catch { toast.error('Erreur de copie'); }
+    } else {
+      toast.error('Erreur de copie');
+    }
   };
 
   return (
@@ -2919,7 +2923,7 @@ export default function TicketDetail() {
                 </p>
                 <button
                   type="button"
-                  onClick={() => { navigator.clipboard.writeText(ticket.outlookConversationId); toast.success('ID copié'); }}
+                  onClick={async () => { if (await copyText(ticket.outlookConversationId)) toast.success('ID copié'); else toast.error('Erreur de copie'); }}
                   className="p-1 rounded-md hover:bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 transition-colors shrink-0 cursor-pointer"
                   title="Copier l’ID"
                 >

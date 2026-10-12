@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import api from '../api/client';
+import copyText from '../utils/copyText';
 import { FAN_MAX, fanLayout, linkPath, itemColor, itemFade } from '../explorer/fanLayout';
 import {
   KNOWN_KINDS, PAIR_KINDS, CENTER_TYPE_LABEL, CATEGORY_ICONS, CATEGORY_LABELS,
@@ -57,12 +58,13 @@ function slaCountdown(dueAt, now) {
 function CopyLinkButton() {
   const [copied, setCopied] = useState(false);
   async function copy() {
-    try {
-      await navigator.clipboard.writeText(window.location.href);
+    // copyText gère le repli execCommand : navigator.clipboard n'existe pas
+    // en HTTP hors localhost (contexte non sécurisé).
+    if (await copyText(window.location.href)) {
       setCopied(true);
       toast.success('Lien de cette vue copié');
       window.setTimeout(() => setCopied(false), 2000);
-    } catch {
+    } else {
       toast.error('Copie impossible');
     }
   }

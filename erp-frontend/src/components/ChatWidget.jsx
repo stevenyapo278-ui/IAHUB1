@@ -4,6 +4,7 @@ import MarkdownContent from './MarkdownContent';
 import TypewriterText from './TypewriterText';
 import MarieLoader from './MarieLoader';
 import { postChatWithStream, TOOL_LABELS } from '../utils/chatStream';
+import copyText from '../utils/copyText';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip } from 'recharts';
 import { Download, BarChart2, Send, Paperclip, MessageSquare, Users, TrendingUp, AlertTriangle, Timer, BarChart3, HelpCircle, PlusCircle, X, Mic, MicOff, Bot, Check } from 'lucide-react';
 import VoiceVisualizer from './VoiceVisualizer';
@@ -78,8 +79,10 @@ function WidgetRenderer({ widget }) {
 
 function MessageActions({ msg, onReply }) {
   const [copied, setCopied] = useState(false);
-  function handleCopy() {
-    navigator.clipboard.writeText(msg.content);
+  async function handleCopy() {
+    // copyText gère le repli execCommand : navigator.clipboard n'existe pas
+    // en HTTP hors localhost (contexte non sécurisé).
+    if (!(await copyText(msg.content))) return;
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   }
