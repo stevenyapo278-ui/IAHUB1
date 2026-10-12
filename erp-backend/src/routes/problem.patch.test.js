@@ -23,6 +23,7 @@ jest.mock('../middleware/auth', () => ({
 }));
 jest.mock('../middleware/permissions', () => ({
   requirePermission: () => (req, res, next) => next(),
+  hasPermission: jest.fn(async () => true),
 }));
 jest.mock('../services/auditLogService', () => ({ auditLog: jest.fn(async () => {}) }));
 

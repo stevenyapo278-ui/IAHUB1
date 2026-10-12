@@ -5,7 +5,7 @@ const multer = require('multer');
 const { body, validationResult } = require('express-validator');
 const prisma = require('../prismaClient');
 const { authenticate } = require('../middleware/auth');
-const { requirePermission } = require('../middleware/permissions');
+const { requirePermission, hasPermission } = require('../middleware/permissions');
 const { auditLog } = require('../services/auditLogService');
 const { validateUpload, sanitizeTicketHtml } = require('../utils/security');
 
@@ -522,7 +522,6 @@ router.get('/:id/followups', async (req, res) => {
 
 router.post(
   '/:id/followups',
-  requirePermission('problems.manage', ['ADMIN', 'HOTLINE']),
   // Multipart : images collées (FormData) comme sur les tickets. Un appel JSON
   // reste accepté — multer laisse passer les requêtes non multipart.
   problemUpload.array('images', 10),
@@ -540,6 +539,48 @@ router.post(
     if (!problem) {
       dropUploadedFiles(req.files);
       return res.status(404).json({ error: 'Problème introuvable' });
+    }
+
+    // Droits de suivi — miroir de POST /tickets/:id/followups. On remplace
+    // requirePermission('problems.manage') (qui refusait tout technicien assigné)
+    // par des contrôles en ligne :
+    //  - problems.manage (SUPERADMIN, groupe de droits) : accès libre ;
+    //  - REQUESTER : uniquement ses propres problèmes ou ceux qu'il observe ;
+    //  - TECHNICIAN : assigné (direct ou multi-assignation) ou de son équipe,
+    //    jamais sur un problème résolu/fermé ;
+    //  - sinon (ADMIN/HOTLINE sans la permission) : 403.
+    if (!(await hasPermission(req.user, 'problems.manage'))) {
+      if (req.user.role === 'REQUESTER') {
+        const isOwn = problem.requesterId === req.user.sub;
+        if (!isOwn) {
+          const isObserver = await prisma.problem.findFirst({
+            where: { id: problemId, observers: { some: { id: req.user.sub } } },
+            select: { id: true },
+          });
+          if (!isObserver) {
+            dropUploadedFiles(req.files);
+            return res.status(404).json({ error: 'Problème introuvable' });
+          }
+        }
+      } else if (req.user.role === 'TECHNICIAN') {
+        if (['SOLVED', 'CLOSED'].includes(problem.status)) {
+          dropUploadedFiles(req.files);
+          return res.status(403).json({ error: 'Un technicien ne peut pas ajouter de suivi sur un problème résolu ou fermé.' });
+        }
+        const isAssigned = problem.assignedToId === req.user.sub;
+        const isMultiAssigned = !isAssigned && await prisma.problem.findFirst({
+          where: { id: problemId, assignees: { some: { id: req.user.sub } } },
+          select: { id: true },
+        });
+        const isTeamProblem = !isAssigned && !isMultiAssigned && problem.teamId != null && problem.teamId === req.user.teamId;
+        if (!isAssigned && !isMultiAssigned && !isTeamProblem) {
+          dropUploadedFiles(req.files);
+          return res.status(403).json({ error: 'Vous ne pouvez ajouter un suivi que sur les problèmes qui vous sont assignés ou qui appartiennent à votre équipe.' });
+        }
+      } else {
+        dropUploadedFiles(req.files);
+        return res.status(403).json({ error: 'Accès refusé' });
+      }
     }
 
     let images = [];

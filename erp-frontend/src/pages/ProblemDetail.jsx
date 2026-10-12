@@ -154,6 +154,29 @@ export default function ProblemDetail() {
 
   const [problem, setProblem] = useState(null);
   const [loading, setLoading] = useState(true);
+  // Droit d'ajouter un suivi — miroir du garde-fou serveur sur
+  // POST /problems/:id/followups (miroir de la logique des tickets) :
+  // - problems.manage (SUPERADMIN, groupe de droits) : accès libre ;
+  // - TECHNICIAN : assigné (direct ou multi-assignation) ou de son équipe,
+  //   jamais sur un problème résolu/fermé ;
+  // - REQUESTER : ses propres problèmes ou ceux qu'il observe ;
+  // - sinon (ADMIN/HOTLINE sans la permission) : composer masqué.
+  const isAssignedProblem = problem != null && (
+    problem.assignedToId === user?.id ||
+    (Array.isArray(problem.assignees) && problem.assignees.some((a) => a.id === user?.id))
+  );
+  const isTeamProblem = user?.role === 'TECHNICIAN' &&
+    problem != null &&
+    problem.teamId != null &&
+    problem.teamId === user?.teamId;
+  const isTechnicianClosedProblem = user?.role === 'TECHNICIAN' && ['SOLVED', 'CLOSED'].includes(problem?.status);
+  const isRequesterOfProblem = problem != null && (
+    problem.requesterId === user?.id ||
+    (Array.isArray(problem.observers) && problem.observers.some((o) => o.id === user?.id))
+  );
+  const canComment = canManage ||
+    (user?.role === 'TECHNICIAN' && !isTechnicianClosedProblem && (isAssignedProblem || isTeamProblem)) ||
+    (user?.role === 'REQUESTER' && isRequesterOfProblem);
   const [editMode, setEditMode] = useState(false);
   const [editForm, setEditForm] = useState({});
   const [saving, setSaving] = useState(false);
@@ -834,7 +857,7 @@ export default function ProblemDetail() {
             />
 
             {/* Composer : texte + captures (collage Ctrl+V, fichier, glisser-déposer) */}
-            {canManage && (
+            {canComment && (
               <div className="flex gap-2 mt-3 pt-3 border-t border-outline-variant/30">
                 <div className="flex-1 space-y-2">
                   <RichTextEditor

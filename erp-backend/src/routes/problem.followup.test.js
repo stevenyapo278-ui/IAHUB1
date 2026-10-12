@@ -5,15 +5,30 @@
 //   4. les extensions dangereuses sont refusées.
 // Même montage HTTP réel que problem.create.test.js (multer ne se joue pas hors (req, res)).
 jest.mock('../prismaClient', () => {
-  const state = { attachments: [], nextId: 1 };
+  const state = {
+    attachments: [],
+    nextId: 1,
+    problem: {
+      id: 1, title: 'Problème réseau', description: 'desc', status: 'NEW',
+      assignedToId: null, teamId: null, requesterId: 9,
+      assignees: [], observers: [],
+    },
+  };
   return {
     __state: state,
     problem: {
       findUnique: jest.fn(async ({ where, include } = {}) => {
         if (where.id !== 1) return null;
-        const base = { id: 1, title: 'Problème réseau', description: 'desc' };
-        if (include && include.attachments) return { ...base, attachments: [...state.attachments] };
-        return base;
+        if (include && include.attachments) return { ...state.problem, attachments: [...state.attachments] };
+        return { ...state.problem };
+      }),
+      findFirst: jest.fn(async ({ where } = {}) => {
+        if (where.id !== 1) return null;
+        const assigneeId = where && where.assignees && where.assignees.some && where.assignees.some.id;
+        if (assigneeId !== undefined && state.problem.assignees.includes(assigneeId)) return { id: 1 };
+        const observerId = where && where.observers && where.observers.some && where.observers.some.id;
+        if (observerId !== undefined && state.problem.observers.includes(observerId)) return { id: 1 };
+        return null;
       }),
     },
     problemAttachment: {
@@ -33,14 +48,19 @@ jest.mock('../prismaClient', () => {
     problemEvent: { create: jest.fn(async () => ({ id: 1 })) },
   };
 });
+// Utilisateur courant paramétrable par test (préfixe mockUser requis par jest.mock)
+let mockUser = { sub: 1, id: 1, email: 'admin@prosuma.ci', role: 'ADMIN' };
 jest.mock('../middleware/auth', () => ({
   authenticate: (req, res, next) => {
-    req.user = { sub: 1, id: 1, email: 'admin@prosuma.ci', role: 'ADMIN' };
+    req.user = mockUser;
     next();
   },
 }));
+// hasPermission paramétrable : true = détient problems.manage (ancien comportement)
+let mockHasPermission = true;
 jest.mock('../middleware/permissions', () => ({
   requirePermission: () => (req, res, next) => next(),
+  hasPermission: jest.fn(async () => mockHasPermission),
 }));
 jest.mock('../services/auditLogService', () => ({ auditLog: jest.fn(async () => {}) }));
 
@@ -84,6 +104,29 @@ async function postFollowup({ content, files = [] }) {
   const res = await fetch(`${base}/problems/1/followups`, { method: 'POST', body: fd });
   return { status: res.status, body: await res.json() };
 }
+
+async function postJson(pathname, payload) {
+  const res = await fetch(`${base}${pathname}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return { status: res.status, body: await res.json() };
+}
+
+// Réinitialise l'utilisateur et le problème avant chaque test (états mutables).
+beforeEach(() => {
+  mockUser = { sub: 1, id: 1, email: 'admin@prosuma.ci', role: 'ADMIN' };
+  mockHasPermission = true;
+  Object.assign(prisma.__state.problem, {
+    status: 'NEW',
+    assignedToId: null,
+    teamId: null,
+    requesterId: 9,
+    assignees: [],
+    observers: [],
+  });
+});
 
 describe('POST /problems/:id/followups — suivi avec captures', () => {
   it('accepte un suivi JSON simple (compatibilité existante)', async () => {
@@ -140,6 +183,93 @@ describe('POST /problems/:id/followups — suivi avec captures', () => {
 
     expect(res.status).toBe(404);
     expect(fs.readdirSync(ATTACHMENTS_DIR).length).toBe(before);
+  });
+});
+
+// Droits de suivi — miroir de POST /tickets/:id/followups : un technicien
+// assigné (direct ou multi) ou de l'équipe peut commenter, un ADMIN sans
+// problems.manage reste refusé (ancien comportement requirePermission conservé).
+describe('POST /problems/:id/followups — droits (miroir tickets)', () => {
+  it('un technicien assigné directement peut ajouter un suivi', async () => {
+    mockUser = { sub: 42, id: 42, email: 'tech@prosuma.ci', role: 'TECHNICIAN', teamId: 7 };
+    mockHasPermission = false;
+    prisma.__state.problem.assignedToId = 42;
+
+    const { status } = await postJson('/problems/1/followups', { content: 'Suivi du technicien' });
+    expect(status).toBe(201);
+  });
+
+  it('un technicien multi-assigné peut ajouter un suivi', async () => {
+    mockUser = { sub: 43, id: 43, email: 'tech2@prosuma.ci', role: 'TECHNICIAN', teamId: 7 };
+    mockHasPermission = false;
+    prisma.__state.problem.assignees = [43];
+
+    const { status } = await postJson('/problems/1/followups', { content: 'Suivi multi-assigné' });
+    expect(status).toBe(201);
+  });
+
+  it("un technicien de l'équipe du problème peut ajouter un suivi", async () => {
+    mockUser = { sub: 44, id: 44, email: 'tech3@prosuma.ci', role: 'TECHNICIAN', teamId: 7 };
+    mockHasPermission = false;
+    prisma.__state.problem.teamId = 7;
+
+    const { status } = await postJson('/problems/1/followups', { content: "Suivi de l'équipe" });
+    expect(status).toBe(201);
+  });
+
+  it('un technicien non assigné est refusé en 403', async () => {
+    mockUser = { sub: 45, id: 45, email: 'tech4@prosuma.ci', role: 'TECHNICIAN', teamId: 7 };
+    mockHasPermission = false;
+    prisma.__state.problem.teamId = 8;
+
+    const { status, body } = await postJson('/problems/1/followups', { content: 'Indu' });
+    expect(status).toBe(403);
+    expect(body.error).toMatch(/assignés ou qui appartiennent/);
+  });
+
+  it('un technicien assigné ne peut pas commenter un problème résolu', async () => {
+    mockUser = { sub: 42, id: 42, email: 'tech@prosuma.ci', role: 'TECHNICIAN', teamId: 7 };
+    mockHasPermission = false;
+    prisma.__state.problem.assignedToId = 42;
+    prisma.__state.problem.status = 'SOLVED';
+
+    const { status, body } = await postJson('/problems/1/followups', { content: 'Trop tard' });
+    expect(status).toBe(403);
+    expect(body.error).toMatch(/résolu ou fermé/);
+  });
+
+  it('un ADMIN sans problems.manage reste refusé en 403', async () => {
+    mockUser = { sub: 2, id: 2, email: 'admin2@prosuma.ci', role: 'ADMIN' };
+    mockHasPermission = false;
+
+    const { status, body } = await postJson('/problems/1/followups', { content: 'Sans droit' });
+    expect(status).toBe(403);
+    expect(body.error).toBe('Accès refusé');
+  });
+
+  it('le demandeur peut commenter son propre problème', async () => {
+    mockUser = { sub: 9, id: 9, email: 'demandeur@prosuma.ci', role: 'REQUESTER' };
+    mockHasPermission = false;
+
+    const { status } = await postJson('/problems/1/followups', { content: 'Question du demandeur' });
+    expect(status).toBe(201);
+  });
+
+  it("un demandeur étranger non observateur reçoit 404 (pas d'existence fuitée)", async () => {
+    mockUser = { sub: 10, id: 10, email: 'autre@prosuma.ci', role: 'REQUESTER' };
+    mockHasPermission = false;
+
+    const { status } = await postJson('/problems/1/followups', { content: 'Intrus' });
+    expect(status).toBe(404);
+  });
+
+  it("un observateur peut commenter (miroir des tickets)", async () => {
+    mockUser = { sub: 10, id: 10, email: 'observateur@prosuma.ci', role: 'REQUESTER' };
+    mockHasPermission = false;
+    prisma.__state.problem.observers = [10];
+
+    const { status } = await postJson('/problems/1/followups', { content: 'Vu et approuvé' });
+    expect(status).toBe(201);
   });
 });
 
