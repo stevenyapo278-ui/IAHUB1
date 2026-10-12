@@ -345,6 +345,10 @@ export default function TicketDetail() {
   const [problemLinkLoading, setProblemLinkLoading] = useState(false);
   const [linkingProblem, setLinkingProblem] = useState(null);
   const [escalating, setEscalating] = useState(false);
+  // Conversion en problème : choix garde/fermeture du ticket + état d'envoi
+  const [convertModalOpen, setConvertModalOpen] = useState(false);
+  const [converting, setConverting] = useState(false);
+  const [convertKeepOpen, setConvertKeepOpen] = useState(true);
   const [escalateModalOpen, setEscalateModalOpen] = useState(false);
   const [escalateTargetTeamId, setEscalateTargetTeamId] = useState('');
   const [escalateTargetUserId, setEscalateTargetUserId] = useState('');
@@ -1986,6 +1990,22 @@ export default function TicketDetail() {
                   >
                     <TrendingUp className="w-3.5 h-3.5" />
                     {escalating ? 'Escalade...' : 'Escalader'}
+                  </button>
+                )}
+                {canManageProblems && (
+                  <button
+                    onClick={() => {
+                      setConvertKeepOpen(true);
+                      setConvertModalOpen(true);
+                    }}
+                    disabled={converting || (linkedProblems?.length > 0)}
+                    title={linkedProblems?.length > 0
+                      ? `Déjà lié au problème #${linkedProblems[0].id} — détachez-le d'abord pour le convertir`
+                      : "Créer un problème racine à partir de ce ticket : la description et tous les suivis sont transposés, le ticket est lié au problème"}
+                    className="px-3 py-1.5 rounded-xl border border-rose-500/30 bg-rose-500/10 text-rose-600 dark:text-rose-300 hover:bg-rose-500/20 text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                  >
+                    <GitBranch className="w-3.5 h-3.5" />
+                    {converting ? 'Conversion…' : 'Transformer en problème'}
                   </button>
                 )}
                 <button
@@ -4242,6 +4262,79 @@ export default function TicketDetail() {
                   </button>
                 </div>
               </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══ MODALE : CONVERTIR EN PROBLÈME ═══ */}
+      {convertModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md animate-fadeIn" onClick={() => !converting && setConvertModalOpen(false)}>
+          <div className="w-full max-w-md rounded-2xl border border-outline-variant/40 bg-surface-container-lowest shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="px-5 pt-4 pb-3 border-b border-outline-variant/20 bg-surface-container-low/40">
+              <div className="flex items-center justify-between gap-3">
+                <h3 className="text-sm font-extrabold text-on-surface flex items-center gap-2">
+                  <GitBranch className="w-4 h-4 text-rose-500" />
+                  Transformer le ticket #{id} en problème
+                </h3>
+                <button
+                  onClick={() => !converting && setConvertModalOpen(false)}
+                  className="p-1.5 rounded-lg text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all cursor-pointer"
+                  title="Fermer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+            <div className="p-5 space-y-4">
+              <p className="text-xs text-on-surface-variant leading-relaxed">
+                La description et <strong>tous les suivis</strong> (auteur, contenu, dates) seront transposés dans un nouveau problème racine, et ce ticket y sera lié.
+              </p>
+              <div className="space-y-2">
+                <label className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-all ${convertKeepOpen ? 'border-primary/60 bg-primary/5' : 'border-outline-variant/40 hover:bg-surface-container'}`}>
+                  <input type="radio" name="convert-keep" checked={convertKeepOpen} onChange={() => setConvertKeepOpen(true)} className="mt-0.5 accent-[var(--color-primary,#6750a4)]" />
+                  <span>
+                    <span className="block text-xs font-bold text-on-surface">Garder le ticket ouvert</span>
+                    <span className="block text-[11px] text-on-surface-variant mt-0.5">Le ticket reste actif à côté du problème (suivi croisé).</span>
+                  </span>
+                </label>
+                <label className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-all ${!convertKeepOpen ? 'border-rose-500/60 bg-rose-500/5' : 'border-outline-variant/40 hover:bg-surface-container'}`}>
+                  <input type="radio" name="convert-keep" checked={!convertKeepOpen} onChange={() => setConvertKeepOpen(false)} className="mt-0.5 accent-[var(--color-primary,#6750a4)]" />
+                  <span>
+                    <span className="block text-xs font-bold text-on-surface">Fermer le ticket</span>
+                    <span className="block text-[11px] text-on-surface-variant mt-0.5">Le ticket passe en « Clôturé » — le problème devient le seul suivi.</span>
+                  </span>
+                </label>
+              </div>
+              <div className="flex items-center justify-end gap-2 pt-1">
+                <button
+                  onClick={() => setConvertModalOpen(false)}
+                  disabled={converting}
+                  className="px-3.5 py-2 rounded-xl border border-outline-variant/60 text-xs font-medium cursor-pointer hover:bg-surface-container-high disabled:opacity-50"
+                >
+                  Annuler
+                </button>
+                <button
+                  onClick={async () => {
+                    setConverting(true);
+                    try {
+                      const { data } = await api.post(`/problems/from-ticket/${id}`, { keepTicketOpen: convertKeepOpen });
+                      toast.success(`Problème #${data.problem.id} créé${convertKeepOpen ? '' : ' et ticket fermé'}.`);
+                      setConvertModalOpen(false);
+                      navigate(`/problems/${data.problem.id}`);
+                    } catch (err) {
+                      toast.error(err.response?.data?.error || 'Erreur lors de la conversion');
+                    } finally {
+                      setConverting(false);
+                    }
+                  }}
+                  disabled={converting}
+                  className="px-3.5 py-2 rounded-xl bg-primary text-on-primary text-xs font-bold cursor-pointer hover:opacity-90 disabled:opacity-50 flex items-center gap-1.5"
+                >
+                  {converting && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                  {converting ? 'Conversion…' : 'Convertir'}
+                </button>
+              </div>
             </div>
           </div>
         </div>

@@ -7,6 +7,7 @@ const prisma = require('../prismaClient');
 const { authenticate } = require('../middleware/auth');
 const { requirePermission, hasPermission } = require('../middleware/permissions');
 const { auditLog } = require('../services/auditLogService');
+const { logEvent } = require('../services/ticketEvent');
 const { validateUpload, sanitizeTicketHtml } = require('../utils/security');
 
 const router = express.Router();
@@ -71,10 +72,99 @@ function applyFollowupImageMarkers(content = '', images = []) {
   return out.replace(/<!--IMAGE_\d+-->?/gi, '');
 }
 
+// ── Garde-fous par rôle (miroir forbidTechnicianTicketEdits) ──────────
+// RÈGLE : un TECHNICIAN n'est jamais admin — sur un problème il ne modifie
+// que le STATUT, et uniquement sur un problème de SON ÉQUIPE encore actif.
+// Aucune permission ne peut l'assouplir.
+const TECHNICIAN_PROBLEM_EDIT_ERROR = 'Un technicien ne peut modifier que le statut des problèmes de son équipe.';
+const TECHNICIAN_PROBLEM_READONLY_ERROR = 'Problème hors de votre équipe : lecture seule. Ajoutez un suivi.';
+
+function forbidTechnicianProblemEdits(req, res, next) {
+  if (req.user && req.user.role === 'TECHNICIAN') {
+    return res.status(403).json({ error: TECHNICIAN_PROBLEM_EDIT_ERROR });
+  }
+  next();
+}
+
+// Middleware PATCH : un TECHNICIAN ne peut envoyer que { status }, et seulement
+// sur un problème actif de SON ÉQUIPE (miroir allowTechnicianStatusOnly).
+async function allowTechnicianProblemStatusOnly(req, res, next) {
+  if (!req.user || req.user.role !== 'TECHNICIAN') return next();
+
+  const id = Number(req.params.id);
+  const bodyKeys = Object.keys(req.body || {});
+
+  try {
+    const problem = await prisma.problem.findUnique({
+      where: { id },
+      select: { status: true, teamId: true },
+    });
+    if (!problem) return res.status(404).json({ error: 'Problème introuvable' });
+
+    if (['SOLVED', 'CLOSED'].includes(problem.status)) {
+      return res.status(403).json({ error: 'Aucune modification ne peut être apportée par un technicien sur un problème résolu ou fermé.' });
+    }
+
+    const isTeamProblem = Boolean(problem.teamId) && problem.teamId === req.user.teamId;
+    if (!isTeamProblem) {
+      return res.status(403).json({ error: TECHNICIAN_PROBLEM_READONLY_ERROR });
+    }
+
+    if (bodyKeys.some((k) => k !== 'status')) {
+      return res.status(403).json({ error: TECHNICIAN_PROBLEM_EDIT_ERROR });
+    }
+
+    req.isTechnicianStatusOnly = true;
+  } catch (err) {
+    return res.status(500).json({ error: 'Erreur lors de la vérification des droits.' });
+  }
+
+  next();
+}
+
+// Permission « problems.manage », sauf pour un TECHNICIAN en mode statut seul
+// (miroir requireTicketAssignOrTechnicianStatusOnly) : le plafond par rôle est
+// un droit, pas une permission déléguable.
+function requireProblemsManageOrTechnicianStatusOnly(req, res, next) {
+  if (req.isTechnicianStatusOnly) return next();
+  return requirePermission('problems.manage')(req, res, next);
+}
+
+// Suppression réservée aux rôles privilégiés (miroir requireDeleteTicketPermission)
+function requireDeleteProblemPermission(req, res, next) {
+  if (!req.user) return res.status(401).json({ error: 'Authentification requise' });
+  if (['SUPERADMIN', 'ADMIN', 'HOTLINE'].includes(req.user.role)) return next();
+  return res.status(403).json({ error: 'Seuls les administrateurs et la hotline peuvent supprimer un problème.' });
+}
+
+// Un demandeur ne consulte que ses propres problèmes ou ceux qu'il observe
+function isRequesterOnly(user) {
+  return user && user.role === 'REQUESTER';
+}
+
 // ── Liste des problèmes ───────────────────────────────────────────────
 // Statuts admis sur une création — sert aussi de reprise de données (ex. export GLPI).
 // Déclaré avant STATUS_GROUPS pour dériver le groupe NOT_CLOSED de la liste complète.
 const PROBLEM_STATUSES = ['NEW', 'IN_PROGRESS', 'ASSIGNED', 'PLANNED', 'WAITING', 'SOLVED', 'CLOSED', 'OBSERVED'];
+
+// Matrice de transitions (miroir VALID_TRANSITIONS des tickets) : on ne saute
+// jamais d'un statut terminal à un autre état sans repasser par un état actif.
+const PROBLEM_TRANSITIONS = {
+  NEW:         ['IN_PROGRESS', 'ASSIGNED', 'PLANNED', 'WAITING', 'OBSERVED', 'SOLVED', 'CLOSED'],
+  IN_PROGRESS: ['ASSIGNED', 'PLANNED', 'WAITING', 'OBSERVED', 'SOLVED', 'CLOSED'],
+  ASSIGNED:    ['IN_PROGRESS', 'PLANNED', 'WAITING', 'OBSERVED', 'SOLVED', 'CLOSED'],
+  PLANNED:     ['IN_PROGRESS', 'ASSIGNED', 'WAITING', 'SOLVED', 'CLOSED'],
+  WAITING:     ['IN_PROGRESS', 'ASSIGNED', 'OBSERVED', 'SOLVED', 'CLOSED'],
+  OBSERVED:    ['IN_PROGRESS', 'ASSIGNED', 'WAITING', 'SOLVED', 'CLOSED'],
+  SOLVED:      ['IN_PROGRESS', 'CLOSED'],
+  CLOSED:      ['IN_PROGRESS'],
+};
+
+function canProblemTransition(from, to) {
+  if (from === to) return true;
+  const allowed = PROBLEM_TRANSITIONS[from];
+  return allowed ? allowed.includes(to) : false;
+}
 
 // Groupes de statuts (miroir des groupes de la vue Tickets) : la valeur de `status`
 // peut être un statut unique, un groupe (OPEN_GROUP…) ou une liste CSV.
@@ -160,6 +250,19 @@ router.get('/', async (req, res) => {
       { requester: { fullName: contains } },
       { assignedTo: { fullName: contains } },
       ...(Number.isInteger(searchId) && searchId > 0 ? [{ id: { equals: searchId } }] : []),
+    ];
+  }
+
+  // Un demandeur ne liste que ses propres problèmes ou ceux qu'il observe
+  // (miroir du scoping des tickets dans ticketQueryService).
+  if (isRequesterOnly(req.user)) {
+    where.AND = [
+      {
+        OR: [
+          { requesterId: req.user.sub },
+          { observers: { some: { id: req.user.sub } } },
+        ],
+      },
     ];
   }
 
@@ -289,6 +392,120 @@ router.post(
   }
 );
 
+// ── Convertir un ticket en problème ───────────────────────────────────
+// Copie titre/description/assignation dans un nouveau problème, transpose
+// tous les suivi du ticket (auteur, contenu, visibilité, dates) puis lie le
+// ticket au problème. keepTicketOpen=false ferme le ticket d'office.
+router.post(
+  '/from-ticket/:ticketId',
+  forbidTechnicianProblemEdits,
+  requirePermission('problems.manage'),
+  async (req, res) => {
+    const ticketId = Number(req.params.ticketId);
+    const keepTicketOpen = req.body?.keepTicketOpen !== false;
+
+    const ticket = await prisma.ticket.findUnique({
+      where: { id: ticketId },
+      include: {
+        assignees: { select: { id: true } },
+        observers: { select: { id: true } },
+        followups: { orderBy: { createdAt: 'asc' } },
+      },
+    });
+    if (!ticket || ticket.deletedAt) return res.status(404).json({ error: 'Ticket introuvable' });
+
+    // Un ticket déjà rattaché à un problème racine n'est pas reconvertible
+    // (éviter un double problème pour le même incident)
+    const existingLink = await prisma.problemTicket.findFirst({ where: { ticketId } });
+    if (existingLink) {
+      return res.status(409).json({ error: `Ce ticket est déjà lié au problème #${existingLink.problemId}` });
+    }
+
+    // Demandeur principal : premier de requesterIds, sinon requesterId (miroir fiche ticket)
+    const requesterId = (Array.isArray(ticket.requesterIds) && ticket.requesterIds.length > 0)
+      ? ticket.requesterIds[0]
+      : (ticket.requesterId ?? null);
+
+    const problem = await prisma.$transaction(async (tx) => {
+      const p = await tx.problem.create({
+        data: {
+          title: ticket.title,
+          description: ticket.content,
+          status: 'NEW',
+          priority: ticket.priority || 'P3',
+          urgency: ticket.urgency || 'MEDIUM',
+          impact: ticket.impact || 'MEDIUM',
+          category: ticket.category || null,
+          locationId: ticket.locationId ?? null,
+          locationName: ticket.locationName || null,
+          dueDate: ticket.dueDate ?? null,
+          requesterId,
+          assignedToId: ticket.assignedToId ?? null,
+          teamId: ticket.teamId ?? null,
+          assignees: { set: (ticket.assignees || []).map((a) => ({ id: a.id })) },
+          observers: { set: (ticket.observers || []).map((o) => ({ id: o.id })) },
+        },
+      });
+
+      // Transposition des suivi — auteur, contenu HTML (les images inline
+      // /uploads/ticket-attachments/ restent servies par le static /uploads),
+      // visibilité privée et dates d'origine préservées.
+      if (ticket.followups.length > 0) {
+        await tx.problemFollowup.createMany({
+          data: ticket.followups.map((f) => ({
+            problemId: p.id,
+            authorId: f.authorId ?? null,
+            content: f.content,
+            isPrivate: Boolean(f.isPrivate),
+            createdAt: f.createdAt,
+          })),
+        });
+      }
+
+      // Lien ticket ↔ problème (la fiche des deux côtés l'affiche)
+      await tx.problemTicket.upsert({
+        where: { problemId_ticketId: { problemId: p.id, ticketId } },
+        update: {},
+        create: { problemId: p.id, ticketId },
+      });
+
+      await tx.problemEvent.create({
+        data: { problemId: p.id, type: 'CREATED', actor: req.user.email || 'SYSTEM', payload: { title: p.title, fromTicketId: ticketId } },
+      });
+
+      // Fermeture du ticket si demandé (transition NEW/OPEN… → CLOSED toujours valide)
+      if (!keepTicketOpen) {
+        await tx.ticket.update({
+          where: { id: ticketId },
+          data: { status: 'CLOSED', closedAt: new Date() },
+        });
+      }
+
+      return p;
+    });
+
+    // Trace dans le fil du ticket : le suivi indique la conversion et son statut
+    await prisma.followup.create({
+      data: {
+        ticketId,
+        authorId: req.user.sub,
+        source: 'erp',
+        content: keepTicketOpen
+          ? `<p>Converti en problème racine <strong>#${problem.id}</strong> — le ticket reste ouvert.</p>`
+          : `<p>Converti en problème racine <strong>#${problem.id}</strong> — ticket fermé.</p>`,
+      },
+    }).catch(() => {});
+    await logEvent(ticketId, keepTicketOpen ? 'CONVERTED_TO_PROBLEM' : 'CONVERTED_TO_PROBLEM_CLOSED', req.user.email || String(req.user.sub), { problemId: problem.id }).catch(() => {});
+
+    auditLog('PROBLEM_CREATED_FROM_TICKET', {
+      actor: req.user, targetType: 'Problem', targetId: problem.id, targetLabel: problem.title,
+      metadata: { ticketId, keepTicketOpen },
+    }).catch(() => {});
+
+    res.status(201).json({ problem, ticketClosed: !keepTicketOpen });
+  }
+);
+
 // ── Détail d'un problème ──────────────────────────────────────────────
 router.get('/:id', async (req, res) => {
   const id = Number(req.params.id);
@@ -318,21 +535,64 @@ router.get('/:id', async (req, res) => {
   });
 
   if (!problem) return res.status(404).json({ error: 'Problème introuvable' });
+
+  // Un demandeur ne consulte que ses propres problèmes ou ceux qu'il observe
+  // (404 = ne révèle pas l'existence des autres, miroir des tickets)
+  if (isRequesterOnly(req.user) &&
+      problem.requesterId !== req.user.sub &&
+      !(problem.observers || []).some((o) => o.id === req.user.sub)) {
+    return res.status(404).json({ error: 'Problème introuvable' });
+  }
+
+  // Les commentaires privés (isPrivate) ne sont visibles que par l'équipe
+  // (jamais par le demandeur) — miroir du filtrage des tickets
+  const isStaffMember = ['SUPERADMIN', 'ADMIN', 'HOTLINE', 'TECHNICIAN'].includes(req.user.role);
+  if (!isStaffMember && Array.isArray(problem.followups)) {
+    problem.followups = problem.followups.filter((f) => !f.isPrivate);
+  }
+
   res.json(problem);
 });
 
 // ── Modifier un problème ──────────────────────────────────────────────
 router.patch(
   '/:id',
-  requirePermission('problems.manage', ['ADMIN', 'HOTLINE']),
+  allowTechnicianProblemStatusOnly,
+  requireProblemsManageOrTechnicianStatusOnly,
   async (req, res) => {
     const id = Number(req.params.id);
     const existing = await prisma.problem.findUnique({ where: { id } });
     if (!existing) return res.status(404).json({ error: 'Problème introuvable' });
 
+    // Défense en profondeur (miroir de allowTechnicianProblemStatusOnly) : même
+    // si l'ordre des middlewares change, un TECHNICIAN ne passe jamais un autre
+    // champ que le statut.
+    if (req.user.role === 'TECHNICIAN' && Object.keys(req.body || {}).some((k) => k !== 'status')) {
+      return res.status(403).json({ error: TECHNICIAN_PROBLEM_EDIT_ERROR });
+    }
+
+    // Inconnus → 400 (miroir mass assignment des tickets)
     const allowed = ['title', 'description', 'status', 'priority', 'urgency', 'impact', 'category', 'locationId', 'locationName', 'dueDate', 'requesterId', 'assignedToId', 'teamId', 'assigneeIds', 'observerIds'];
+    for (const key of Object.keys(req.body || {})) {
+      if (!allowed.includes(key)) {
+        return res.status(400).json({ error: `Champ non autorisé : ${key}` });
+      }
+    }
     const data = {};
     const events = [];
+
+    // ── Validation du statut (valeur + transition, miroir des tickets) ──
+    if (req.body.status !== undefined) {
+      const target = String(req.body.status);
+      if (!PROBLEM_STATUSES.includes(target)) {
+        return res.status(400).json({ error: `Statut invalide (valeurs : ${PROBLEM_STATUSES.join(', ')})` });
+      }
+      if (!canProblemTransition(existing.status, target)) {
+        return res.status(400).json({
+          error: `Transition de statut invalide : ${existing.status} → ${target}. Transitions autorisées : ${(PROBLEM_TRANSITIONS[existing.status] || []).join(', ') || 'aucune'}`,
+        });
+      }
+    }
 
     for (const key of allowed) {
       if (req.body[key] !== undefined) {
@@ -425,7 +685,8 @@ router.patch(
 // ── Supprimer un problème ─────────────────────────────────────────────
 router.delete(
   '/:id',
-  requirePermission('problems.manage', ['ADMIN']),
+  forbidTechnicianProblemEdits,
+  requireDeleteProblemPermission,
   async (req, res) => {
     const id = Number(req.params.id);
     const existing = await prisma.problem.findUnique({ where: { id }, include: { _count: { select: { tickets: true } } } });
@@ -517,7 +778,9 @@ router.get('/:id/followups', async (req, res) => {
     include: { author: { select: { id: true, fullName: true, email: true, avatarUrl: true } } },
     orderBy: { createdAt: 'asc' },
   });
-  res.json(followups);
+  // Les commentaires privés ne sont visibles que par l'équipe (miroir des tickets)
+  const isStaffMember = ['SUPERADMIN', 'ADMIN', 'HOTLINE', 'TECHNICIAN'].includes(req.user.role);
+  res.json(isStaffMember ? followups : followups.filter((f) => !f.isPrivate));
 });
 
 router.post(

@@ -177,6 +177,19 @@ export default function ProblemDetail() {
   const canComment = canManage ||
     (user?.role === 'TECHNICIAN' && !isTechnicianClosedProblem && (isAssignedProblem || isTeamProblem)) ||
     (user?.role === 'REQUESTER' && isRequesterOfProblem);
+  // Plafond par rôle (miroir canEditTicketsRole côté tickets) : un TECHNICIAN
+  // ne modifie que le statut d'un problème de son équipe — jamais les champs,
+  // l'assignation, les observateurs ni la suppression.
+  const canEditProblemsRole = !['TECHNICIAN', 'REQUESTER'].includes(user?.role);
+  // Édition des champs / panneaux (assignation, demandeur, observateurs, liens…)
+  const canEditProblems = canEditProblemsRole && canManage;
+  // Statut : plafond technicien = statut seul, problème de SON ÉQUIPE, actif
+  const canChangeStatus = canManage && (
+    canEditProblemsRole ||
+    (isTeamProblem && !isTechnicianClosedProblem)
+  );
+  // Suppression : SUPERADMIN/ADMIN/HOTLINE uniquement (miroir serveur)
+  const canDeleteProblem = canManage && ['SUPERADMIN', 'ADMIN', 'HOTLINE'].includes(user?.role);
   const [editMode, setEditMode] = useState(false);
   const [editForm, setEditForm] = useState({});
   const [saving, setSaving] = useState(false);
@@ -242,7 +255,14 @@ export default function ProblemDetail() {
   async function handleSave() {
     setSaving(true);
     try {
-      await api.patch(`/problems/${id}`, editForm);
+      // N'envoyer que les champs éditables : le backend rejette (400) les
+      // champs inconnus, et editForm a été initialisé avec la fiche complète.
+      const EDITABLE = ['title', 'description', 'status', 'priority', 'urgency', 'impact', 'category', 'locationId', 'locationName', 'dueDate', 'requesterId', 'assignedToId', 'teamId', 'assigneeIds', 'observerIds'];
+      const payload = {};
+      for (const key of EDITABLE) {
+        if (editForm[key] !== undefined) payload[key] = editForm[key];
+      }
+      await api.patch(`/problems/${id}`, payload);
       toast.success('Problème mis à jour');
       setEditMode(false);
       loadProblem();
@@ -523,7 +543,7 @@ export default function ProblemDetail() {
             {problem.title}
           </h1>
         </div>
-        {canManage && (
+        {canEditProblems && (
           <div className="flex items-center gap-2 shrink-0">
             <button
               onClick={() => setEditMode(!editMode)}
@@ -532,20 +552,22 @@ export default function ProblemDetail() {
               <Pencil className="w-3.5 h-3.5" />
               {editMode ? 'Annuler' : 'Modifier'}
             </button>
-            <button
-              onClick={() => setShowDeleteConfirm(true)}
-              className="p-2 rounded-xl border border-red-500/20 text-red-600 hover:bg-red-500/10 transition-all cursor-pointer"
-              title="Supprimer le problème"
-            >
-              <Trash2 className="w-4 h-4" />
-            </button>
+            {canDeleteProblem && (
+              <button
+                onClick={() => setShowDeleteConfirm(true)}
+                className="p-2 rounded-xl border border-red-500/20 text-red-600 hover:bg-red-500/10 transition-all cursor-pointer"
+                title="Supprimer le problème"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+            )}
           </div>
         )}
       </div>
 
       {/* ── Badges : statut (sélecteur), priorité, catégorie ───────────── */}
       <div className="flex items-center gap-2 flex-wrap pb-4 border-b border-outline-variant/30">
-        {canManage ? (
+        {canChangeStatus ? (
           <StatusSelect status={problem.status} onChange={handleStatusChange} />
         ) : (
           <StatusBadge status={problem.status} />
@@ -910,7 +932,7 @@ export default function ProblemDetail() {
                 Assignation
               </span>
             </h3>
-            {canManage ? (
+            {canEditProblems ? (
               <div className="space-y-2.5">
                 <RemoteUserMultiSelect
                   value={(problem.assignees && problem.assignees.length > 0)
@@ -971,7 +993,7 @@ export default function ProblemDetail() {
                 Demandeur
               </span>
             </h3>
-            {canManage ? (
+            {canEditProblems ? (
               <RemoteUserSelect
                 value={problem.requesterId || ''}
                 onChange={async (val) => {
@@ -1007,7 +1029,7 @@ export default function ProblemDetail() {
                 Observateurs {problem.observers?.length > 0 && `(${problem.observers.length})`}
               </span>
             </h3>
-            {canManage ? (
+            {canEditProblems ? (
               <RemoteUserMultiSelect
                 value={(problem.observers || []).map((o) => o.id)}
                 onChange={async (vals) => {
