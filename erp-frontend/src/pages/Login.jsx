@@ -1,10 +1,9 @@
 import { lazy, useEffect, useState, Suspense } from 'react';
 
 const VARIANTS = [
-  { id: 'classic', loader: () => import('./login/LoginClassic') },
-  { id: 'split', loader: () => import('./login/LoginSplitShowcase') },
   { id: 'hero', loader: () => import('./login/LoginHeroGradient') },
   { id: 'minimal', loader: () => import('./login/LoginMinimalCard') },
+  { id: 'particles', loader: () => import('./login/LoginParticles') },
 ];
 
 const COMPONENT_CACHE = {};

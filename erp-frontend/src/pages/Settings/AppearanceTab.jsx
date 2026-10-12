@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import api from '../../api/client';
 import { itemVariants } from './SettingsComponents';
 import {
-  Palette,
+  Atom,
   Eye,
   Shuffle,
   CalendarDays,
@@ -12,41 +12,33 @@ import {
   ExternalLink,
   AlertTriangle,
   Sparkles,
-  Columns2,
   Layers,
   Minus,
 } from 'lucide-react';
 
-const VALID_VARIANTS = ['classic', 'split', 'hero', 'minimal'];
+const VALID_VARIANTS = ['hero', 'minimal', 'particles'];
 
 const VARIANT_META = {
-  classic: {
-    label: 'Classique',
-    shortLabel: 'Classic',
-    desc: 'Design historique — deux colonnes, branding sombre + carte formulaire premium',
-    icon: Palette,
-    badge: 'Historique',
-  },
-  split: {
-    label: 'Split Showcase',
-    shortLabel: 'Split',
-    desc: 'Katalyst split — colonne showcase sombre à gauche, formulaire à droite',
-    icon: Columns2,
-    badge: 'Katalyst 1',
-  },
   hero: {
     label: 'Hero Gradient',
     shortLabel: 'Hero',
     desc: 'Carte flottante à deux volets — dégradé bleu/indigo à gauche',
     icon: Sparkles,
-    badge: 'Katalyst 2',
+    badge: 'Katalyst',
   },
   minimal: {
     label: 'Minimal Card',
     shortLabel: 'Minimal',
     desc: 'Centré minimaliste — anneaux concentriques + carte unique',
     icon: Layers,
-    badge: 'Katalyst 3',
+    badge: 'Katalyst',
+  },
+  particles: {
+    label: 'Particules liées',
+    shortLabel: 'Particles',
+    desc: 'Scène WebGPU plein écran — 4096 particules liées suivant le curseur, bloom',
+    icon: Atom,
+    badge: 'WebGPU',
   },
 };
 
@@ -109,7 +101,7 @@ export default function AppearanceTab() {
             : 'daily_rotation',
           loginThemeFixedVariant: VALID_VARIANTS.includes(data.loginThemeFixedVariant)
             ? data.loginThemeFixedVariant
-            : 'classic',
+            : 'hero',
           loginThemeEnabledVariants: Array.isArray(data.loginThemeEnabledVariants) &&
             data.loginThemeEnabledVariants.length > 0
             ? [...new Set(data.loginThemeEnabledVariants.filter((v) => VALID_VARIANTS.includes(v)))]
@@ -136,7 +128,7 @@ export default function AppearanceTab() {
     if (!settings || !draft) return false;
     return (
       draft.loginThemeMode !== (settings.loginThemeMode || 'daily_rotation') ||
-      draft.loginThemeFixedVariant !== (settings.loginThemeFixedVariant || 'classic') ||
+      draft.loginThemeFixedVariant !== (settings.loginThemeFixedVariant || 'hero') ||
       JSON.stringify([...draft.loginThemeEnabledVariants].sort()) !==
         JSON.stringify([...(settings.loginThemeEnabledVariants || VALID_VARIANTS)].sort())
     );
@@ -187,7 +179,7 @@ export default function AppearanceTab() {
     if (!settings) return;
     setDraft({
       loginThemeMode: settings.loginThemeMode || 'daily_rotation',
-      loginThemeFixedVariant: settings.loginThemeFixedVariant || 'classic',
+      loginThemeFixedVariant: settings.loginThemeFixedVariant || 'hero',
       loginThemeEnabledVariants: settings.loginThemeEnabledVariants?.length
         ? [...settings.loginThemeEnabledVariants]
         : [...VALID_VARIANTS],
@@ -281,7 +273,7 @@ export default function AppearanceTab() {
               </div>
               <p className="text-xs text-on-surface-variant">
                 Mode serveur : <strong>{MODE_META[draft.loginThemeMode]?.label}</strong> · Cache 5 s ·{' '}
-                <code className="bg-surface-container-high px-1 rounded text-[11px]">?design=classic|split|hero|minimal</code> force l'aperçu sans toucher à la config
+                <code className="bg-surface-container-high px-1 rounded text-[11px]">?design=hero|minimal|particles</code> force l'aperçu sans toucher à la config
               </p>
             </div>
           </div>
@@ -306,7 +298,7 @@ export default function AppearanceTab() {
           </span>
         </div>
         <p className="text-xs text-on-surface-variant leading-relaxed max-w-3xl">
-          La page <code className="bg-surface-container-high px-1 rounded text-[11px]">/login</code> était en rotation quotidienne aléatoire (déterministe sur 4 thèmes). Vous pouvez désormais figer un thème, garder la rotation mais en filtrant les variantes, ou passer en tirage aléatoire à chaque chargement.
+          La page <code className="bg-surface-container-high px-1 rounded text-[11px]">/login</code> tourne en rotation quotidienne (déterministe sur {VALID_VARIANTS.length} thèmes). Vous pouvez figer un thème, garder la rotation mais filtrer les variantes, ou passer en tirage aléatoire à chaque chargement.
         </p>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-md">
@@ -418,7 +410,7 @@ export default function AppearanceTab() {
             <h4 className="font-bold text-on-surface">
               {draft.loginThemeMode === 'random' ? 'Tirage aléatoire — variantes autorisées' : 'Rotation quotidienne — variantes incluses'}
             </h4>
-            <span className="text-xs text-on-surface-variant">({draft.loginThemeEnabledVariants.length}/4)</span>
+            <span className="text-xs text-on-surface-variant">({draft.loginThemeEnabledVariants.length}/{VALID_VARIANTS.length})</span>
           </div>
           <p className="text-xs text-on-surface-variant leading-relaxed">
             {draft.loginThemeMode === 'random'

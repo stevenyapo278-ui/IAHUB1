@@ -497,7 +497,7 @@ router.post('/switch-role', authenticate, async (req, res) => {
 // ── Thème de la page de connexion — public (sans auth) ──────────────────────────
 // Utilisé par Login.jsx pour savoir quelle variante afficher selon la config SUPERADMIN.
 // Réponse mise en cache côté client (60s) pour éviter de spammer la DB à chaque refresh.
-const VALID_LOGIN_VARIANTS = ['classic', 'split', 'hero', 'minimal'];
+const VALID_LOGIN_VARIANTS = ['hero', 'minimal', 'particles'];
 const VALID_LOGIN_MODES = ['daily_rotation', 'fixed', 'random'];
 
 function getLoginDayOfYear(date) {
@@ -533,13 +533,13 @@ router.get('/login-theme', async (req, res) => {
   if (!settings) {
     settings = {
       loginThemeMode: 'daily_rotation',
-      loginThemeFixedVariant: 'classic',
+      loginThemeFixedVariant: 'hero',
       loginThemeEnabledVariants: [...VALID_LOGIN_VARIANTS],
     };
   }
   // Normalisation défensive (valeurs legacy / null)
   const mode = VALID_LOGIN_MODES.includes(settings.loginThemeMode) ? settings.loginThemeMode : 'daily_rotation';
-  const fixedVariant = VALID_LOGIN_VARIANTS.includes(settings.loginThemeFixedVariant) ? settings.loginThemeFixedVariant : 'classic';
+  const fixedVariant = VALID_LOGIN_VARIANTS.includes(settings.loginThemeFixedVariant) ? settings.loginThemeFixedVariant : 'hero';
   const enabledVariants = Array.isArray(settings.loginThemeEnabledVariants) && settings.loginThemeEnabledVariants.length > 0
     ? [...new Set(settings.loginThemeEnabledVariants.filter((v) => VALID_LOGIN_VARIANTS.includes(v)))]
     : [...VALID_LOGIN_VARIANTS];
