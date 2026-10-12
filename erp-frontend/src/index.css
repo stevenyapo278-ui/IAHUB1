@@ -2723,6 +2723,15 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 .dashboard-widget .drag-handle:active {
   cursor: grabbing;
 }
+/* Mode édition sur un écran trop étroit : la réorganisation est verrouillée
+   (layout persisté uniquement à 12 colonnes / conteneur > 1200px). */
+.dashboard-grid--locked .dashboard-widget .drag-handle,
+.dashboard-grid--locked .dashboard-widget .drag-handle:active {
+  cursor: default;
+}
+.dashboard-grid--locked .react-grid-item > .react-resizable-handle {
+  display: none;
+}
 
 /* ── Placeholder (silhouette pendant le drag) ─────────────────────────── */
 .react-grid-item.react-grid-placeholder {

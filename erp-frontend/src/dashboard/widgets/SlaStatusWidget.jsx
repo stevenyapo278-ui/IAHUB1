@@ -34,7 +34,7 @@ export default function SlaStatusWidget({ slaAnalytics, config }) {
       </div>
 
       <div className="overflow-x-auto">
-        <table className="w-full border-collapse text-sm">
+        <table className="w-full min-w-[320px] border-collapse text-sm">
           <thead>
             <tr className="border-b border-outline-variant/20">
               <th className="px-3 py-2 text-left text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">Priorité</th>

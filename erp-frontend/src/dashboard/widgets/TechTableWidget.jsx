@@ -21,7 +21,7 @@ export default function TechTableWidget({ techPerformance, config }) {
 
   return (
     <div className="h-full overflow-x-auto">
-      <table className="w-full border-collapse text-sm">
+      <table className="w-full min-w-[420px] border-collapse text-sm">
         <thead>
           <tr className="border-b border-outline-variant/20">
             <th className="px-4 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">Technicien</th>

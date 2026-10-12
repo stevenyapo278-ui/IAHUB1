@@ -7,28 +7,31 @@ import {
 import { LAYOUT_PRESETS } from './layoutPresets';
 
 const PERIODS = [
-  { key: '7d', label: '7 jours', days: 7 },
-  { key: '30d', label: '30 jours', days: 30 },
-  { key: '90d', label: '3 mois', days: 90 },
-  { key: '180d', label: '6 mois', days: 180 },
+  { key: '7d', label: '7 jours', shortLabel: '7j', days: 7 },
+  { key: '30d', label: '30 jours', shortLabel: '30j', days: 30 },
+  { key: '90d', label: '3 mois', shortLabel: '3m', days: 90 },
+  { key: '180d', label: '6 mois', shortLabel: '6m', days: 180 },
 ];
 
 function SegmentedControl({ options, value, onChange }) {
   return (
-    <div className="flex items-center gap-0.5 p-0.5 rounded-xl bg-surface-container border border-outline-variant/30">
+    <div className="flex shrink-0 items-center gap-0.5 p-0.5 rounded-xl bg-surface-container border border-outline-variant/30">
       {options.map((opt) => {
         const isActive = opt.key === value;
         return (
           <button
             key={opt.key}
             onClick={() => onChange(opt.key)}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+            aria-label={`Période : ${opt.label}`}
+            title={opt.label}
+            className={`px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
               isActive
                 ? 'bg-primary text-on-primary shadow-sm'
                 : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high'
             }`}
           >
-            {opt.label}
+            <span className="sm:hidden">{opt.shortLabel}</span>
+            <span className="hidden sm:inline">{opt.label}</span>
           </button>
         );
       })}
@@ -54,6 +57,7 @@ export default function DashboardToolbar({
   onPeriodChange,
   onDownloadReport,
   reportLoading,
+  editAvailable = true,
 }) {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -106,17 +110,17 @@ export default function DashboardToolbar({
       transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
       className="p-4 sm:p-5 rounded-2xl border border-outline-variant/30 bg-surface-container-lowest shadow-sm"
     >
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between flex-wrap gap-3">
         {/* Left: Dashboard selector + New dashboard */}
-        <div className="flex items-center gap-2.5">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
           {/* Dashboard dropdown */}
-          <div className="relative" ref={dropdownRef}>
+          <div className="relative max-w-full" ref={dropdownRef}>
             <button
               onClick={() => setDropdownOpen(!dropdownOpen)}
-              className="flex items-center gap-2 px-3 py-2 rounded-xl border border-outline-variant/30 bg-surface-container-low hover:bg-surface-container transition-colors text-sm font-semibold text-on-surface"
+              className="flex items-center gap-2 px-3 py-2 rounded-xl border border-outline-variant/30 bg-surface-container-low hover:bg-surface-container transition-colors text-sm font-semibold text-on-surface whitespace-nowrap"
             >
               <LayoutDashboard className="w-4 h-4 text-primary shrink-0" />
-              <span className="truncate max-w-[180px]">
+              <span className="truncate max-w-[40vw] sm:max-w-[180px]">
                 {activeDashboard?.name || 'Sélectionner'}
               </span>
               <ChevronDown className={`w-3.5 h-3.5 text-on-surface-variant transition-transform ${dropdownOpen ? 'rotate-180' : ''}`} />
@@ -238,7 +242,7 @@ export default function DashboardToolbar({
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
             onClick={onCreateDashboard}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-outline-variant/30 bg-surface-container-low hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors text-xs font-semibold"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-outline-variant/30 bg-surface-container-low hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors text-xs font-semibold whitespace-nowrap"
           >
             <Plus className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">Nouveau</span>
@@ -246,7 +250,7 @@ export default function DashboardToolbar({
         </div>
 
         {/* Right: Edit mode, Add widget, Period, Download */}
-        <div className="flex items-center gap-2.5">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
           {/* Edit mode badge */}
           <AnimatePresence>
             {isEditing && (
@@ -254,13 +258,23 @@ export default function DashboardToolbar({
                 initial={{ opacity: 0, scale: 0.9 }}
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.9 }}
-                className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 text-[10px] font-bold uppercase tracking-wider border border-blue-500/20"
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 text-[10px] font-bold uppercase tracking-wider border border-blue-500/20 whitespace-nowrap"
               >
                 <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
                 Mode édition
               </motion.span>
             )}
           </AnimatePresence>
+
+          {/* Écran trop étroit pour la réorganisation (voir DashboardGrid) */}
+          {isEditing && !editAvailable && (
+            <span
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 text-[10px] font-bold uppercase tracking-wider border border-amber-500/20 whitespace-nowrap"
+              role="status"
+            >
+              Glisser/déposer indisponible sous 1200&nbsp;px
+            </span>
+          )}
 
           {/* Add widget button (edit mode only) */}
           <AnimatePresence>
@@ -272,10 +286,11 @@ export default function DashboardToolbar({
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
                 onClick={onAddWidget}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20 transition-colors text-xs font-semibold"
+                title="Ajouter un widget"
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20 transition-colors text-xs font-semibold whitespace-nowrap"
               >
                 <Plus className="w-3.5 h-3.5" />
-                Widget
+                <span className="hidden sm:inline">Widget</span>
               </motion.button>
             )}
           </AnimatePresence>
@@ -291,7 +306,7 @@ export default function DashboardToolbar({
                   whileHover={{ scale: 1.02 }}
                   whileTap={{ scale: 0.98 }}
                   onClick={() => setPresetOpen(!presetOpen)}
-                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-outline-variant/30 bg-surface-container-low hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors text-xs font-semibold"
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-outline-variant/30 bg-surface-container-low hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors text-xs font-semibold whitespace-nowrap"
                   title="Réorganiser les widgets avec un preset"
                 >
                   <Shuffle className="w-3.5 h-3.5" />
@@ -340,7 +355,7 @@ export default function DashboardToolbar({
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
                 onClick={onAutoDistribute}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-outline-variant/30 bg-surface-container-low hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors text-xs font-semibold"
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-outline-variant/30 bg-surface-container-low hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors text-xs font-semibold whitespace-nowrap"
                 title="Répartir les widgets automatiquement (sans trou)"
               >
                 <AlignVerticalSpaceAround className="w-3.5 h-3.5" />
@@ -351,13 +366,22 @@ export default function DashboardToolbar({
 
           {/* Edit mode toggle */}
           <motion.button
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
+            whileHover={editAvailable ? { scale: 1.02 } : {}}
+            whileTap={editAvailable ? { scale: 0.98 } : {}}
             onClick={onToggleEdit}
-            className={`flex items-center gap-1.5 px-3 py-2 rounded-xl font-bold text-xs transition-all ${
+            title={
+              isEditing
+                ? 'Terminer la mise en page'
+                : editAvailable
+                  ? 'Déplacer et redimensionner les widgets'
+                  : 'Réorganisation disponible à partir de 1200 px de large'
+            }
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-xl font-bold text-xs transition-all whitespace-nowrap ${
               isEditing
                 ? 'bg-primary text-on-primary shadow-sm shadow-primary/20'
-                : 'border border-outline-variant/30 bg-surface-container-low hover:bg-surface-container text-on-surface-variant hover:text-on-surface'
+                : editAvailable
+                  ? 'border border-outline-variant/30 bg-surface-container-low hover:bg-surface-container text-on-surface-variant hover:text-on-surface'
+                  : 'border border-dashed border-outline-variant/60 bg-surface-container-low/50 text-on-surface-variant/60 cursor-not-allowed'
             }`}
           >
             {isEditing ? (
@@ -380,7 +404,7 @@ export default function DashboardToolbar({
             onClick={onReset}
             disabled={resetting || dashboards.length === 0}
             title="Restaurer le tableau de bord par défaut (remplace les widgets actuels)"
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-outline-variant/30 bg-surface-container-low hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors text-xs font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-outline-variant/30 bg-surface-container-low hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors text-xs font-semibold whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <RotateCcw className={`w-3.5 h-3.5 ${resetting ? 'animate-spin' : ''}`} />
             <span className="hidden sm:inline">{resetting ? 'Réinitialisation…' : 'Réinitialiser'}</span>
@@ -395,10 +419,12 @@ export default function DashboardToolbar({
             whileTap={{ scale: 0.98 }}
             onClick={onDownloadReport}
             disabled={reportLoading}
-            className="px-3.5 py-2 rounded-xl bg-primary text-on-primary font-bold text-xs shadow-sm shadow-primary/20 hover:shadow-md transition-all flex items-center gap-1.5 disabled:opacity-50"
+            title={reportLoading ? 'Génération du rapport…' : 'Télécharger le rapport PDF'}
+            aria-label={reportLoading ? 'Génération du rapport…' : 'Télécharger le rapport PDF'}
+            className="px-3.5 py-2 rounded-xl bg-primary text-on-primary font-bold text-xs shadow-sm shadow-primary/20 hover:shadow-md transition-all flex items-center gap-1.5 whitespace-nowrap disabled:opacity-50"
           >
-            <Download className="w-3.5 h-3.5" />
-            {reportLoading ? 'Génération...' : 'Rapport PDF'}
+            <Download className="w-3.5 h-3.5 shrink-0" />
+            <span className="hidden sm:inline">{reportLoading ? 'Génération…' : 'Rapport PDF'}</span>
           </motion.button>
         </div>
       </div>

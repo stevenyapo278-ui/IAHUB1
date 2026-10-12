@@ -66,6 +66,10 @@ export default function DashboardPage() {
   const [activePeriod, setActivePeriod] = useState('30d');
   const [reportLoading, setReportLoading] = useState(false);
   const [resetting, setResetting] = useState(false);
+  // Breakpoint courant de la grille — le layout persisté n'existe qu'à 12
+  // colonnes (conteneur > 1200px) : en dessous, la réorganisation est verrouillée.
+  const [gridBreakpoint, setGridBreakpoint] = useState('lg');
+  const canRearrange = gridBreakpoint === 'lg';
 
   // Confirmations via ConfirmDialog (modale standard de la plateforme)
   const [deleteConfirm, setDeleteConfirm] = useState(null); // { id, name } | null
@@ -523,6 +527,23 @@ export default function DashboardPage() {
     [activeDashboardId, flushLayoutSave],
   );
 
+  // Bascule du mode édition — la réorganisation (glisser/redimensionner) n'est
+  // possible que sur le layout source (12 colonnes) : ailleurs on explique plutôt
+  // que d'appliquer des changements silencieusement perdus.
+  const handleToggleEdit = useCallback(() => {
+    if (isEditing) {
+      // En quittant le mode édition : sauvegarde immédiate du layout pending
+      flushLayoutSave();
+      setIsEditing(false);
+      return;
+    }
+    if (!canRearrange) {
+      toast.info('Réorganisation disponible à partir de 1200 px de large.');
+      return;
+    }
+    setIsEditing(true);
+  }, [isEditing, canRearrange, flushLayoutSave]);
+
   return (
     <div className="px-4 sm:px-6 lg:px-8 pt-4 sm:pt-6 pb-8 space-y-5 min-h-screen">
       {/* Toolbar */}
@@ -534,13 +555,8 @@ export default function DashboardPage() {
         onRenameDashboard={handleRenameDashboard}
         onDeleteDashboard={handleDeleteDashboard}
         isEditing={isEditing}
-        onToggleEdit={() => {
-          // En quittant le mode édition : sauvegarde immédiate du layout pending
-          setIsEditing((prev) => {
-            if (prev) flushLayoutSave();
-            return !prev;
-          });
-        }}
+        editAvailable={canRearrange}
+        onToggleEdit={handleToggleEdit}
         onAddWidget={() => setShowPicker(true)}
         onApplyPreset={handleApplyPreset}
         onAutoDistribute={handleAutoDistribute}
@@ -585,6 +601,7 @@ export default function DashboardPage() {
           onLayoutChange={handleLayoutChange}
           onRemoveWidget={handleRemoveWidget}
           onWidgetDrop={isEditing ? handleWidgetDrop : null}
+          onBreakpointChange={setGridBreakpoint}
           renderWidget={(widget) => (
             <WidgetRenderer
               widget={widget}
