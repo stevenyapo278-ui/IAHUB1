@@ -181,9 +181,12 @@ async function backfillEmailRagJob() {
       `[server] Backfill RAG mails : ${stats.emails} email(s) + ${stats.messages} message(s) indexé(s), ${stats.failed} échec(s)`
     );
   }
+  if (stats.reembedded > 0) {
+    console.log(`[server] Backfill RAG mails : ${stats.reembedded} chunk(s) ré-embeddé(s)`);
+  }
   if (stats.chunksWithoutEmbedding > 0) {
     console.warn(
-      `[server] Backfill RAG mails : ${stats.chunksWithoutEmbedding} chunk(s) sans embedding — recherche FTS seule (provider IA indisponible à l'indexation ?)`
+      `[server] Backfill RAG mails : ${stats.chunksWithoutEmbedding} chunk(s) encore sans embedding — recherche FTS seule (provider IA indisponible à l'indexation ?)`
     );
   }
 }

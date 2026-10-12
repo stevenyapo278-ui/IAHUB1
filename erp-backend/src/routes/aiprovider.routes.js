@@ -4,6 +4,7 @@ const prisma = require('../prismaClient');
 const { authenticate } = require('../middleware/auth');
 const { requirePermission } = require('../middleware/permissions');
 const { syncProviderModels } = require('../utils/modelSync');
+const { EMBEDDING_DIMENSIONS } = require('../utils/embeddings');
 const { auditLog } = require('../services/auditLogService');
 const cacheStore = require('../services/cacheStore');
 
@@ -210,7 +211,7 @@ router.post('/:id/models', [body('name').notEmpty()], async (req, res) => {
 
 router.patch('/models/:modelId', async (req, res) => {
   const modelId = Number(req.params.modelId);
-  const { label, isDefault, isActive } = req.body;
+  const { label, isDefault, isActive, type } = req.body;
 
   const model = await prisma.aiModel.findFirst({ where: { id: modelId, isDeleted: false } });
   if (!model) return res.status(404).json({ error: 'Modèle introuvable' });
@@ -223,6 +224,15 @@ router.patch('/models/:modelId', async (req, res) => {
   if (label !== undefined) data.label = label;
   if (isDefault !== undefined) data.isDefault = isDefault;
   if (isActive !== undefined) data.isActive = isActive;
+  // Le type (CHAT / EMBEDDING / RERANK) détermine quelles fonctions peuvent utiliser le
+  // modèle — corriger le type d'un modèle d'embedding sync en CHAT le retire des sélecteurs
+  // de chat et l'active pour la recherche vectorielle.
+  if (type !== undefined) {
+    if (!['CHAT', 'EMBEDDING', 'RERANK'].includes(type)) {
+      return res.status(400).json({ error: 'Type invalide (CHAT, EMBEDDING ou RERANK attendu)' });
+    }
+    data.type = type;
+  }
 
   const updated = await prisma.aiModel.update({ where: { id: modelId }, data });
   invalidateProviderCaches();
@@ -444,6 +454,55 @@ router.post('/models/:modelId/test', async (req, res) => {
 
     const apiKey = key.apiKey;
     const t0 = Date.now();
+
+    // ── Modèles d'embedding ────────────────────────────────────────────────
+    // Un modèle d'embedding n'expose NI /chat/completions NI /generateContent
+    // (Gemini renvoie 404 sur gemini-embedding-001) : on appelle l'endpoint
+    // d'embedding du fournisseur et on contrôle la dimension du vecteur produit.
+    // Le nom est vérifié en plus du type : la synchronisation des modèles depuis
+    // l'API crée tous les modèles en CHAT, y compris les modèles d'embedding.
+    const isEmbedding = model.type === 'EMBEDDING' || /embedding/i.test(model.name);
+    if (isEmbedding) {
+      const base = provider.baseUrl || (
+        provider.name === 'gemini' ? 'https://generativelanguage.googleapis.com/v1beta' :
+        provider.name === 'openai' ? 'https://api.openai.com/v1' :
+        provider.name === 'mistral' ? 'https://api.mistral.ai/v1' :
+        provider.name === 'nvidia' ? 'https://integrate.api.nvidia.com/v1' : ''
+      );
+      if (!base) return res.json({ ok: false, error: 'URL de base non configurée pour ce fournisseur' });
+
+      let vector;
+      const r = provider.name === 'gemini'
+        ? await fetch(`${base}/models/${model.name}:embedContent`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+            body: JSON.stringify({
+              model: `models/${model.name}`,
+              content: { parts: [{ text: 'Ping' }] },
+              outputDimensionality: EMBEDDING_DIMENSIONS,
+            }),
+          })
+        : await fetch(`${base}/embeddings`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+            body: JSON.stringify({ model: model.name, input: 'Ping' }),
+          });
+
+      const body = await r.json().catch(() => ({}));
+      vector = provider.name === 'gemini' ? body.embedding?.values : body.data?.[0]?.embedding;
+
+      if (!r.ok) {
+        const errDetail = body.error?.message || body.message || `HTTP ${r.status}`;
+        return res.json({ ok: false, error: errDetail });
+      }
+      if (!Array.isArray(vector)) {
+        return res.json({ ok: false, error: 'Réponse sans vecteur — modèle probablement non compatible embeddings' });
+      }
+      if (vector.length !== EMBEDDING_DIMENSIONS) {
+        return res.json({ ok: false, error: `Vecteur de ${vector.length} dimensions, ${EMBEDDING_DIMENSIONS} attendues par la base` });
+      }
+      return res.json({ ok: true, latencyMs: Date.now() - t0, dimensions: vector.length });
+    }
 
     switch (provider.name) {
       case 'openai':

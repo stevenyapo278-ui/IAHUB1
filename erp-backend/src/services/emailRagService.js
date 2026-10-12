@@ -163,7 +163,7 @@ async function indexTicketMessage(messageId) {
  * modéré (les nouveaux mails sont déjà indexés en temps réel par les hooks).
  */
 async function backfillEmailRag({ batchSize = 30 } = {}) {
-  const stats = { emails: 0, messages: 0, failed: 0, chunksWithoutEmbedding: 0 };
+  const stats = { emails: 0, messages: 0, failed: 0, reembedded: 0, embedFailed: 0, chunksWithoutEmbedding: 0 };
 
   const emails = await prisma.$queryRawUnsafe(
     `SELECT e.id FROM "IncomingEmail" e
@@ -202,6 +202,31 @@ async function backfillEmailRag({ batchSize = 30 } = {}) {
     } catch (e) {
       stats.failed++;
       console.warn(`[emailRag] backfill message #${row.id} échoué:`, e.message);
+    }
+  }
+
+  // ── Réparation des chunks sans embedding ──
+  // L'anti-join ci-dessus ne voit que les mails/messages SANS chunks : un chunk
+  // créé pendant une panne ou sans clé IA (embedding NULL) restait en FTS seul
+  // POUR TOUJOURS — la recherche vectorielle était alors dégradée en silence.
+  // Second lot borné (batchSize par passage) : idempotent, le passage suivant
+  // prend la suite, et le compteur final reflète ce qui reste encore à réparer.
+  const nullChunks = await prisma.$queryRawUnsafe(
+    `SELECT id, content FROM "EmailRagChunk" WHERE embedding IS NULL ORDER BY id LIMIT $1`,
+    batchSize
+  );
+  for (const c of nullChunks || []) {
+    try {
+      const vector = await generateEmbedding(c.content);
+      await prisma.$executeRawUnsafe(
+        `UPDATE "EmailRagChunk" SET embedding = $1::vector, "updatedAt" = now() WHERE id = $2 AND embedding IS NULL`,
+        toVectorLiteral(vector), c.id
+      );
+      stats.reembedded++;
+    } catch (e) {
+      stats.embedFailed++;
+      // Limité : sans clé IA, chaque passage réessaye les mêmes 30 chunks.
+      if (stats.embedFailed <= 3) console.warn(`[emailRag] ré-embedding chunk ${c.id} échoué:`, e.message);
     }
   }
 
@@ -270,7 +295,7 @@ async function searchEmailRag(query, opts = {}) {
 
   let embedding = null;
   try {
-    const vector = await generateEmbedding(query);
+    const vector = await generateEmbedding(query, 'RETRIEVAL_QUERY');
     embedding = toVectorLiteral(vector);
   } catch (e) {
     console.warn('[emailRag] generateEmbedding échoué, fallback FTS seul:', e.message);
@@ -414,6 +439,32 @@ async function searchEmailRag(query, opts = {}) {
     }
   } else {
     finalResults = finalResults.slice(0, topK);
+  }
+
+  // ── Repli métadonnées : recherche par NOM de personne ──
+  // Un prénom/nom (« Marie Diallo ») est trop court pour que l'embedding seul
+  // soit fiable : le vecteur se dilue et, sur un corpus de taille réduite, la
+  // requête pouvait ne rien renvoyer alors que l'expéditeur est bien présent.
+  // On retombe alors sur une correspondance littérale sur l'expéditeur et l'objet,
+  // TOUJOURS avec les mêmes filtres (dont le cloisonnement RBAC par ticket).
+  if (finalResults.length === 0 && query.trim().length >= 2) {
+    const { where, values } = buildFilters(3);
+    const metadataMatch = `(metadata->>'fromName' ILIKE $1 OR metadata->>'fromEmail' ILIKE $1 OR metadata->>'subject' ILIKE $1)`;
+    const innerWhere = where ? `WHERE ${where.slice(6)} AND ${metadataMatch}` : `WHERE ${metadataMatch}`;
+    try {
+      const byMetadata = await prisma.$queryRawUnsafe(
+        `SELECT id, "sourceType", "sourceId", "chunkIndex", content, metadata, "createdAt",
+                0 AS similarity, 0 AS text_rank, 0 AS combined_score
+         FROM "EmailRagChunk"
+         ${innerWhere}
+         ORDER BY "createdAt" DESC
+         LIMIT $2`,
+        `%${query.trim()}%`, topK, ...values
+      );
+      finalResults = byMetadata.slice(0, topK);
+    } catch (e) {
+      console.warn('[emailRag] repli métadonnées échoué:', e.message);
+    }
   }
 
   return finalResults;

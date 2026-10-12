@@ -22,6 +22,13 @@ const PROVIDER_ICONS = {
   nvidia: 'stadia_controller',
 };
 
+// Un modèle d'embedding n'expose pas /chat/completions (ni /generateContent côté Gemini) :
+// le backend bascule alors sur l'endpoint d'embedding. Le nom est vérifié en plus du type
+// car la synchronisation des modèles depuis l'API les crée tous en CHAT.
+function isTestableModel(model) {
+  return model.type === 'CHAT' || model.type === 'EMBEDDING' || /embedding/i.test(model.name || '');
+}
+
 function ProviderModal({ provider, onClose, onUpdate }) {
   const [tab, setTab] = useState('models');
   const [syncing, setSyncing] = useState(null);
@@ -257,7 +264,7 @@ function ProviderModal({ provider, onClose, onUpdate }) {
                     { field: 'isActive', headerName: 'Actif', width: 80, cellRenderer: (p) => <div className="flex justify-center"><input type="checkbox" className="w-4 h-4 accent-primary cursor-pointer" checked={p.value} onChange={(e) => handleToggleModelActive(p.data.id, e.target.checked)} /></div> },
                     { field: 'actions', headerName: '', width: 140, sortable: false, filter: false, cellRenderer: (p) => (
                       <div className="flex items-center justify-end gap-1">
-                        {p.data.type === 'CHAT' && <><motion.button onClick={() => handleTestModel(p.data.id)} disabled={testModelResults[p.data.id]?.loading} whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }} className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-semibold border border-outline-variant/30 text-on-surface-variant hover:border-primary/40 hover:text-primary disabled:opacity-50"><span className="material-symbols-outlined text-[12px]">network_check</span></motion.button>{testModelResults[p.data.id] && !testModelResults[p.data.id].loading && <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold border ${testModelResults[p.data.id].ok ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20' : 'bg-red-500/10 text-red-500 border-red-500/20'}`}><span className="material-symbols-outlined text-[9px]">{testModelResults[p.data.id].ok ? 'check_circle' : 'cancel'}</span>{testModelResults[p.data.id].ok ? `${testModelResults[p.data.id].latencyMs}ms` : 'Échec'}</span>}</>}
+                        {isTestableModel(p.data) && <><motion.button onClick={() => handleTestModel(p.data.id)} disabled={testModelResults[p.data.id]?.loading} whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }} className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-semibold border border-outline-variant/30 text-on-surface-variant hover:border-primary/40 hover:text-primary disabled:opacity-50"><span className="material-symbols-outlined text-[12px]">network_check</span></motion.button>{testModelResults[p.data.id] && !testModelResults[p.data.id].loading && <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold border ${testModelResults[p.data.id].ok ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20' : 'bg-red-500/10 text-red-500 border-red-500/20'}`}><span className="material-symbols-outlined text-[9px]">{testModelResults[p.data.id].ok ? 'check_circle' : 'cancel'}</span>{testModelResults[p.data.id].ok ? (testModelResults[p.data.id].dimensions ? `${testModelResults[p.data.id].dimensions}d · ${testModelResults[p.data.id].latencyMs}ms` : `${testModelResults[p.data.id].latencyMs}ms`) : 'Échec'}</span>}</>}
                         <DeleteButton onClick={() => setPendingDelete({ type: 'model', id: p.data.id })} />
                       </div>
                     ) },

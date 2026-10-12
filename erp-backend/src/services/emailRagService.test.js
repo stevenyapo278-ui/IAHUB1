@@ -338,8 +338,8 @@ describe('backfillEmailRag', () => {
   });
 
   it('sélectionne par anti-join (NOT EXISTS) et non par "N plus récents"', async () => {
-    // 1er appel = sélection des emails, 2e = sélection des messages, 3e = comptage
-    prisma.$queryRawUnsafe.mockResolvedValueOnce([]).mockResolvedValueOnce([]).mockResolvedValueOnce([{ c: 0 }]);
+    // 1er appel = sélection des emails, 2e = messages, 3e = chunks à ré-embèder, 4e = comptage
+    prisma.$queryRawUnsafe.mockResolvedValueOnce([]).mockResolvedValueOnce([]).mockResolvedValueOnce([]).mockResolvedValueOnce([{ c: 0 }]);
     const stats = await backfillEmailRag({ batchSize: 30 });
     const sql = prisma.$queryRawUnsafe.mock.calls[0][0];
     // L'anti-join est ce qui fait progresser le rattrapage : sans lui, le
@@ -347,12 +347,13 @@ describe('backfillEmailRag', () => {
     expect(sql).toContain('NOT EXISTS');
     expect(sql).toContain("c.\"sourceType\" = 'INCOMING_EMAIL'");
     expect(prisma.$queryRawUnsafe.mock.calls[0][1]).toBe(30);
-    expect(stats).toEqual({ emails: 0, messages: 0, failed: 0, chunksWithoutEmbedding: 0 });
+    expect(stats).toEqual({ emails: 0, messages: 0, failed: 0, reembedded: 0, embedFailed: 0, chunksWithoutEmbedding: 0 });
   });
 
   it('indexe les lignes retournées et continue sur erreur sans s\'arrêter', async () => {
     prisma.$queryRawUnsafe
       .mockResolvedValueOnce([{ id: 1 }, { id: 2 }])
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([{ c: 2 }]);
     prisma.incomingEmail.findUnique.mockResolvedValue({ id: 1, subject: 'S', fromEmail: 'a@b.c', bodyPreview: 'x' });
@@ -364,5 +365,49 @@ describe('backfillEmailRag', () => {
     const stats = await backfillEmailRag({ batchSize: 10 });
     expect(stats.emails).toBe(1);
     expect(stats.failed).toBe(1);
+  });
+
+  it('ré-embède les chunks créés sans embedding (réparation FTS → vectoriel)', async () => {
+    // Sans ce pass, un chunk indexé pendant une panne de clé IA restait en FTS
+    // seul pour toujours : l'anti-join ne voit que les SOURCES sans chunks.
+    prisma.$queryRawUnsafe
+      .mockResolvedValueOnce([]) // emails
+      .mockResolvedValueOnce([]) // messages
+      .mockResolvedValueOnce([
+        { id: 7, content: 'contenu sans vecteur' },
+        { id: 8, content: 'autre contenu sans vecteur' },
+      ])
+      .mockResolvedValueOnce([{ c: 0 }]); // comptage APRÈS réparation
+    prisma.$executeRawUnsafe.mockResolvedValue(1);
+
+    const stats = await backfillEmailRag({ batchSize: 30 });
+
+    expect(stats.reembedded).toBe(2);
+    expect(stats.embedFailed).toBe(0);
+    expect(stats.chunksWithoutEmbedding).toBe(0);
+    const updates = prisma.$executeRawUnsafe.mock.calls.filter(([sql]) => sql.includes('UPDATE "EmailRagChunk"'));
+    expect(updates).toHaveLength(2);
+    expect(updates[0][0]).toContain('embedding = $1::vector');
+    expect(updates[0][0]).toContain('embedding IS NULL'); // idempotent
+    expect(updates[0][1]).toBe('[0.01]'); // toVectorLiteral(vector)
+    expect(updates[0][2]).toBe(7);
+  });
+
+  it('compte un échec de ré-embedding sans interrompre le backfill', async () => {
+    generateEmbedding.mockRejectedValueOnce(new Error('pas de clé IA'));
+    prisma.$queryRawUnsafe
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ id: 9, content: 'x' }])
+      .mockResolvedValueOnce([{ c: 1 }]);
+
+    const stats = await backfillEmailRag({ batchSize: 5 });
+
+    expect(stats.reembedded).toBe(0);
+    expect(stats.embedFailed).toBe(1);
+    expect(stats.chunksWithoutEmbedding).toBe(1);
+    // aucune écriture UPDATE si l'embedding a échoué
+    const updates = prisma.$executeRawUnsafe.mock.calls.filter(([sql]) => sql.includes('UPDATE "EmailRagChunk"'));
+    expect(updates).toHaveLength(0);
   });
 });

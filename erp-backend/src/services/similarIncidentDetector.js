@@ -230,7 +230,7 @@ async function findSimilarByText(text, limit = 5, minScore = 0.4) {
   if (!inputText) return [];
 
   try {
-    const embedding = await generateEmbedding(inputText);
+    const embedding = await generateEmbedding(inputText, 'RETRIEVAL_QUERY');
     const vectorLiteral = toVectorLiteral(embedding);
 
     const results = await prisma.$queryRawUnsafe(

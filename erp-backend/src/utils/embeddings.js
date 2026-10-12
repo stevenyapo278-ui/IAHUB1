@@ -66,10 +66,19 @@ async function getEmbeddingProvider() {
 
 async function embedWithGemini(config, text) {
   const baseUrl = config.baseUrl || 'https://generativelanguage.googleapis.com/v1beta';
+  // taskType optimise le vecteur selon l'usage (RETRIEVAL_DOCUMENT / RETRIEVAL_QUERY).
+  // NB : ces champs doivent rester au TOP LEVEL — l'objet "embedContentConfig" est
+  // accepté mais ignoré silencieusement par l'API, ce qui renvoie 3072 dimensions.
+  const body = {
+    model: `models/${config.model}`,
+    content: { parts: [{ text }] },
+    outputDimensionality: EMBEDDING_DIMENSIONS,
+  };
+  if (config.taskType) body.taskType = config.taskType;
   const res = await fetch(`${baseUrl}/models/${config.model}:embedContent`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-goog-api-key': config.apiKey },
-    body: JSON.stringify({ model: `models/${config.model}`, content: { parts: [{ text }] }, outputDimensionality: EMBEDDING_DIMENSIONS }),
+    body: JSON.stringify(body),
   });
   if (!res.ok) {
     let detail = '';
@@ -113,33 +122,43 @@ async function essaiEmbedding(config, text) {
   return vector;
 }
 
-// Génère une clé de cache à partir du texte (hash SHA-256, normalisé)
-function cacheKey(text) {
+// Génère une clé de cache à partir du texte (hash SHA-256, normalisé) ET de la portée
+// du modèle (fournisseur/modèle/taskType). Sans cette portée, un changement de modèle
+// resservait l'ancien vecteur pendant tout le TTL du cache — deux modèles vivant dans
+// des espaces de vecteurs incompatibles produisent alors des scores cosinus faux.
+function cacheKey(text, scope) {
   const normalized = (text || '').trim().toLowerCase().replace(/\s+/g, ' ');
-  return `${EMBEDDING_CACHE_PREFIX}${crypto.createHash('sha256').update(normalized).digest('hex')}`;
+  const digest = crypto.createHash('sha256').update(normalized).digest('hex');
+  return `${EMBEDDING_CACHE_PREFIX}${scope}:${digest}`;
 }
 
 // Génère l'embedding (vecteur de 768 dimensions) d'un texte en essayant TOUS les fournisseurs/
 // modèles actifs disponibles dans l'ordre, et en gardant le premier qui produit un vecteur
 // compatible — load balancing par compatibilité : un fournisseur incompatible (mauvaise taille,
 // clé invalide, quota dépassé) ne bloque pas la génération si un autre fournisseur actif convient.
-async function generateEmbedding(text) {
-  // Vérifier le cache d'abord
-  const key = cacheKey(text);
-  const cached = cacheStore.get(key);
-  if (cached) return cached;
-
+//
+// taskType : 'RETRIEVAL_DOCUMENT' par défaut (contenu indexé), 'RETRIEVAL_QUERY' pour une
+// requête de recherche — le même texte produit des vecteurs différents selon le taskType.
+async function generateEmbedding(text, taskType = 'RETRIEVAL_DOCUMENT') {
   const candidates = await listEmbeddingCandidates();
   if (candidates.length === 0) {
     throw new Error('Aucun fournisseur IA actif ne supporte la génération d\'embeddings (configurez une clé pour Gemini, OpenAI, NVIDIA ou Mistral)');
   }
 
+  // Lecture sous la portée du candidat nominal, écriture sous celle du candidat gagnant.
+  // En pratique il n'y a qu'un seul fournisseur d'embedding configuré (les deux coïncident) ;
+  // si un repli l'emporte, on a simplement un cache miss au lieu d'un vecteur périmé.
+  const nominal = candidates[0];
+  const readKey = cacheKey(text, `${nominal.providerName}/${nominal.model}:${taskType}`);
+  const cached = cacheStore.get(readKey);
+  if (cached) return cached;
+
   const failures = [];
   for (const config of candidates) {
     try {
-      const vector = await essaiEmbedding(config, text);
+      const vector = await essaiEmbedding({ ...config, taskType }, text);
       // Mettre en cache le résultat
-      cacheStore.set(key, vector, EMBEDDING_CACHE_TTL, { maxEntries: EMBEDDING_CACHE_MAX });
+      cacheStore.set(cacheKey(text, `${config.providerName}/${config.model}:${taskType}`), vector, EMBEDDING_CACHE_TTL, { maxEntries: EMBEDDING_CACHE_MAX });
       return vector;
     } catch (err) {
       failures.push(`${config.providerName}/${config.model} : ${err.message}`);

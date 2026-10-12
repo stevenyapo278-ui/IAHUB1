@@ -1,6 +1,7 @@
 const { PrismaClient } = require('@prisma/client');
 const bcrypt = require('bcryptjs');
 const { PERMISSION_KEYS } = require('../src/config/permissions');
+const { fixModelTypes, inferModelType } = require('../src/utils/modelSync');
 
 // ── Permissions par défaut pour chaque rôle ─────────────────────────────────
 // Chaque rôle a un groupe de permissions dédié qui reproduit fidèlement l'accès
@@ -149,10 +150,19 @@ async function main() {
 
       if (!existingModel) {
         await prisma.aiModel.create({
-          data: { providerId: provider.id, name: modelName, isDefault: i === 0 },
+          data: { providerId: provider.id, name: modelName, type: inferModelType(modelName), isDefault: i === 0 },
         });
       }
     }
+  }
+
+  // Les API de synchronisation ne exposent pas le type des modèles : tout arrive en CHAT,
+  // y compris les modèles d'embedding (gemini-embedding-001) — qui deviennent alors
+  // invisibles pour la recherche vectorielle et proposés à tort dans les sélecteurs de
+  // chat, où ils échouent en 404. Correction idempotente à chaque seed.
+  const typeFix = await fixModelTypes();
+  if (typeFix.fixed > 0) {
+    console.log(`${typeFix.fixed} modèle(s) de type incorrect corrigé(s) (embedding/rerank).`);
   }
 
   // Catégories de tickets par défaut (mode autonome : la plateforme fonctionne sans GLPI).
