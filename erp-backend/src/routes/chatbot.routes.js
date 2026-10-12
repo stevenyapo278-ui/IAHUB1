@@ -258,6 +258,29 @@ router.post('/conversations/:id/archive', authenticate, async (req, res) => {
 router.post('/', authenticate, async (req, res) => {
   const startTime = Date.now();
 
+  // Mode streaming (SSE) : le front reçoit des événements `tool` pendant que la
+  // boucle agentic s'exécute (jusqu'à 6 tours LLM = plusieurs dizaines de secondes),
+  // puis un événement `final` contenant la réponse complète. Sans ça, l'utilisateur
+  // ne voit RIEN pendant toute la recherche.
+  const streaming = req.query.stream === '1' && typeof req.accepts === 'function' && req.accepts('text/event-stream') !== false;
+  const sse = (event, data) => {
+    if (!res.writableEnded) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  };
+  const onToolEvent = streaming
+    ? ({ name, phase }) => sse('tool', { name, phase, elapsedMs: Date.now() - startTime })
+    : undefined;
+  if (streaming) {
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache, no-transform',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+    // Heartbeat : certains reverse-proxy coupent une connexion SSE inactive.
+    const heartbeat = setInterval(() => { if (!res.writableEnded) res.write(': ping\n\n'); }, 15000);
+    res.on('close', () => clearInterval(heartbeat));
+  }
+
   try {
     const { message, history = [], conversationId, isBrainstorm } = req.body;
 
@@ -337,7 +360,7 @@ router.post('/', authenticate, async (req, res) => {
 
     let result;
     try {
-      result = await handleMessage(message.trim(), dbHistory.length > 0 ? dbHistory : history, req.user, conv?.pendingTicketData || null, convId, { existingSummary, summaryModelId, isBrainstorm: !!isBrainstorm });
+      result = await handleMessage(message.trim(), dbHistory.length > 0 ? dbHistory : history, req.user, conv?.pendingTicketData || null, convId, { existingSummary, summaryModelId, isBrainstorm: !!isBrainstorm, onToolEvent });
     } catch (handlerErr) {
       console.error('[chatbot] ═══ ERREUR HANDLEMESSAGE ═══');
       console.error('[chatbot] Message:', message.trim().substring(0, 200));
@@ -418,10 +441,20 @@ router.post('/', authenticate, async (req, res) => {
       console.warn('[chatbot] lecture state pendingConfirmation:', stateErr.message);
     }
 
-    res.json({ ...result, conversationId: convId, pendingConfirmation });
+    if (streaming) {
+      sse('final', { ...result, conversationId: convId, pendingConfirmation, durationMs });
+      res.end();
+    } else {
+      res.json({ ...result, conversationId: convId, pendingConfirmation });
+    }
   } catch (err) {
     console.error('[chatbot] Erreur:', err.stack || err);
-    res.status(500).json({ error: 'Erreur interne du chatbot.' });
+    if (streaming) {
+      sse('error', { error: 'Erreur interne du chatbot.' });
+      res.end();
+    } else {
+      res.status(500).json({ error: 'Erreur interne du chatbot.' });
+    }
   }
 });
 

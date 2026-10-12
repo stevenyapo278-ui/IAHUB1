@@ -1,8 +1,10 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import MarkdownContent from '../components/MarkdownContent';
 import TypewriterText from '../components/TypewriterText';
 import MarieLoader from '../components/MarieLoader';
+import { postChatWithStream, TOOL_LABELS } from '../utils/chatStream';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip } from 'recharts';
 import {
   Send, Paperclip, Plus, MessageSquare, Trash2, BarChart2, Download,
@@ -261,6 +263,8 @@ export default function ChatPage() {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  // Outil en cours d'exécution pendant la boucle agentic (streaming SSE).
+  const [activeTool, setActiveTool] = useState(null);
   const [replyTo, setReplyTo] = useState(null);
   const [attachment, setAttachment] = useState(null);
   const [attachmentPreview, setAttachmentPreview] = useState(null);
@@ -441,8 +445,9 @@ export default function ChatPage() {
         const res = await api.post('/chat', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
         data = res.data;
       } else {
-        const res = await api.post('/chat', payload);
-        data = res.data;
+        data = await postChatWithStream(payload, {
+          onTool: (t) => setActiveTool(t ? { name: t.name, startedAt: Date.now() } : null),
+        });
       }
 
       if (data && data.isBrainstormMode !== undefined) {
@@ -463,6 +468,7 @@ export default function ChatPage() {
       setMessages((prev) => [...prev, { role: 'assistant', content: "Désolé, une erreur est survenue. Réessayez." }]);
     } finally {
       setLoading(false);
+      setActiveTool(null);
       setTimeout(() => inputRef.current?.focus(), 50);
     }
   }
@@ -676,7 +682,13 @@ export default function ChatPage() {
                 </div>
               )}
               {messages.map((msg, i) => (
-                <div key={msg.id || i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} group ${isArchived ? 'opacity-75' : ''} animate-fade-in`}>
+                <motion.div
+                  key={msg.id || i}
+                  initial={{ opacity: 0, y: 14, scale: 0.985 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
+                  className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} group ${isArchived ? 'opacity-75' : ''}`}
+                >
                   <div className={`max-w-[92%] rounded-2xl px-4 py-3 text-[13.5px] leading-relaxed ${
                     msg.role === 'user'
                       ? 'bg-primary text-white rounded-br-md'
@@ -686,9 +698,29 @@ export default function ChatPage() {
                     {msg.widget && <WidgetRenderer widget={msg.widget} />}
                     {msg.sources && msg.sources.length > 0 && (
                       <div className="mt-2 pt-2 border-t border-outline-variant/30">
-                        <p className="text-[10px] opacity-60 flex items-center gap-1">
-                          Sources : {msg.sources.map((s) => s.title).join(', ')}
+                        <p className="text-[10px] opacity-60 flex items-center gap-1 mb-1.5">
+                          <span className="material-symbols-outlined text-[10px]">menu_book</span>
+                          Sources
                         </p>
+                        <div className="flex flex-wrap gap-1">
+                          {msg.sources.map((s, si) => (
+                            s.href ? (
+                              <Link
+                                key={si}
+                                to={s.href}
+                                className="inline-flex items-center gap-1 rounded-full bg-primary/10 text-primary px-2 py-0.5 text-[10px] font-medium hover:bg-primary/20 transition-colors"
+                              >
+                                <span className="material-symbols-outlined text-[10px]">{s.kind === 'email' ? 'mail' : 'school'}</span>
+                                {s.title}
+                              </Link>
+                            ) : (
+                              <span key={si} className="inline-flex items-center gap-1 rounded-full bg-outline-variant/30 px-2 py-0.5 text-[10px] text-on-surface-variant">
+                                <span className="material-symbols-outlined text-[10px]">{s.kind === 'email' ? 'mail' : 'school'}</span>
+                                {s.title}
+                              </span>
+                            )
+                          ))}
+                        </div>
                       </div>
                     )}
                     {msg.action?.type === 'ticket_created' && (
@@ -714,12 +746,25 @@ export default function ChatPage() {
                     )}
                     <MessageActions msg={msg} onReply={handleReply} />
                   </div>
-                </div>
+                </motion.div>
               ))}
               {loading && (
                 <div className="flex justify-start">
-                  <div className="bg-surface-container border border-outline-variant/40 rounded-2xl rounded-bl-md px-4 py-3 flex items-center">
-                    <MarieLoader />
+                  <div className="bg-surface-container border border-outline-variant/40 rounded-2xl rounded-bl-md px-4 py-3 flex flex-col gap-2 min-w-[160px]">
+                    {/* Outil en cours pendant la boucle agentic (jusqu'à 6 tours LLM) */}
+                    {activeTool && (
+                      <div className="flex items-center gap-1.5 text-[11px] text-on-surface-variant">
+                        <span className="relative flex h-1.5 w-1.5">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
+                          <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-primary" />
+                        </span>
+                        <span className="material-symbols-outlined text-[12px]">search</span>
+                        <span className="truncate max-w-[140px]">{TOOL_LABELS[activeTool.name] || activeTool.name}</span>
+                      </div>
+                    )}
+                    <div className="flex items-center">
+                      <MarieLoader />
+                    </div>
                   </div>
                 </div>
               )}

@@ -1,11 +1,15 @@
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { Link } from 'react-router-dom';
 
 function preprocessMarkdown(content) {
   if (!content || typeof content !== 'string') return '';
 
-  // Convertir les références #123456 en liens cliquables
-  let formatted = content.replace(/#(\d{2,6})\b/g, '[#$1](/tickets/$1)');
+  // Convertir les références #123456 en liens cliquables.
+  // Le lookahead (?!\]\(\/tickets\/\d) empêche de ré-écrire "#101" À L'INTÉRIEUR d'un
+  // lien déjà formé — sinon on produisait du markdown imbriqué ([[#101](...)](...))
+  // que react-markdown ne sait pas parser, et le lien s'affichait en texte brut.
+  let formatted = content.replace(/#(\d{2,6})\b(?!\]\(\/tickets\/\d)/g, '[#$1](/tickets/$1)');
 
   // 1) Séparer les lignes de tableau concaténées sur une même ligne
   //    Pattern: "| cell | cell | | cell | cell |" → lignes séparées
@@ -43,11 +47,15 @@ const markdownComponents = {
   ul: ({ children }) => <ul className="my-1 space-y-0.5">{children}</ul>,
   ol: ({ children }) => <ol className="my-1 ml-4 space-y-0.5 list-decimal">{children}</ol>,
   li: ({ children }) => <li className="ml-4 list-disc text-[13px]">{children}</li>,
-  a: ({ href, children }) => (
-    <a href={href} target={href?.startsWith('http') ? '_blank' : '_self'} rel="noreferrer" className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-primary/10 text-primary font-bold hover:underline transition-colors text-[11px]">
-      {children}
-    </a>
-  ),
+  a: ({ href, children }) => {
+    const isExternal = /^https?:\/\//i.test(href || '');
+    const isSafe = isExternal || /^\/(?!\/)/.test(href || '');
+    const className = 'inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-primary/10 text-primary font-bold hover:underline transition-colors text-[11px]';
+    // Lien interne → navigation SPA (Link) au lieu d'un rechargement complet de page
+    if (!isSafe) return <span className={className}>{children}</span>;
+    if (!isExternal) return <Link to={href} className={className}>{children}</Link>;
+    return <a href={href} target="_blank" rel="noreferrer" className={className}>{children}</a>;
+  },
   code: ({ children, className }) => {
     if (className) return <code className={`${className} bg-surface-container-high px-1 rounded text-[12px]`}>{children}</code>;
     return <code className="bg-surface-container-high px-1 rounded text-[12px]">{children}</code>;

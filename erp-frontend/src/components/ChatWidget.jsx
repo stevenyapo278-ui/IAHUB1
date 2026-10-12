@@ -1,7 +1,9 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import MarkdownContent from './MarkdownContent';
+import TypewriterText from './TypewriterText';
 import MarieLoader from './MarieLoader';
+import { postChatWithStream, TOOL_LABELS } from '../utils/chatStream';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip } from 'recharts';
 import { Download, BarChart2, Send, Paperclip, MessageSquare, Users, TrendingUp, AlertTriangle, Timer, BarChart3, HelpCircle, PlusCircle, X, Mic, MicOff, Bot, Check } from 'lucide-react';
 import VoiceVisualizer from './VoiceVisualizer';
@@ -163,6 +165,8 @@ export default function ChatWidget() {
 
   // Conversation management
   const [conversationId, setConversationId] = useState(null);
+  // Outil en cours d'exécution pendant la boucle agentic (streaming SSE).
+  const [activeTool, setActiveTool] = useState(null);
   // Action en attente de confirmation côté serveur (ex: rapport à envoyer)
   const [pendingAction, setPendingAction] = useState(null);
   const [conversations, setConversations] = useState([]);
@@ -342,7 +346,10 @@ export default function ChatWidget() {
         if (isBrainstormMode) formData.append('isBrainstorm', 'true');
         ({ data } = await api.post('/chat', formData, { headers: { 'Content-Type': 'multipart/form-data' } }));
       } else {
-        ({ data } = await api.post('/chat', { message: userMessage, history, conversationId: conversationId || undefined, isBrainstorm: isBrainstormMode }));
+        data = await postChatWithStream(
+          { message: userMessage, history, conversationId: conversationId || undefined, isBrainstorm: isBrainstormMode },
+          { onTool: (t) => setActiveTool(t ? { name: t.name, startedAt: Date.now() } : null) }
+        );
       }
       if (data && data.isBrainstormMode !== undefined) {
         setIsBrainstormMode(data.isBrainstormMode);
@@ -357,7 +364,10 @@ export default function ChatWidget() {
       removeAttachment();
     } catch {
       setMessages((prev) => [...prev, { role: 'assistant', content: "Désolé, une erreur est survenue. Réessayez." }]);
-    } finally { setLoading(false); }
+    } finally {
+      setLoading(false);
+      setActiveTool(null);
+    }
   }
 
   function handleKeyDown(e) {
@@ -500,16 +510,45 @@ export default function ChatWidget() {
             {/* Messages */}
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
               {messages.map((msg, i) => (
-                <div key={msg.id || i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} group`}>
+                <motion.div
+                  key={msg.id || i}
+                  initial={{ opacity: 0, y: 12, scale: 0.985 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+                  className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} group`}
+                >
                   <div className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-[13px] leading-relaxed ${msg.role === 'user' ? 'bg-primary text-white rounded-br-md' : 'bg-surface-container border border-outline-variant/40 text-on-surface rounded-bl-md'}`}>
-                    {msg.role === 'assistant' ? <MarkdownContent content={msg.content} /> : msg.content}
+                    {/* Les messages chargés depuis l'historique ont un id → rendu direct ;
+                        seules les réponses fraîches (sans id) s'animent. */}
+                    {msg.role === 'assistant'
+                      ? (msg.id ? <MarkdownContent content={msg.content} /> : <TypewriterText content={msg.content} isNew />)
+                      : msg.content}
                     {msg.widget && <WidgetRenderer widget={msg.widget} />}
                     {msg.sources && msg.sources.length > 0 && (
                       <div className="mt-2 pt-2 border-t border-outline-variant/30">
-                        <p className="text-[10px] opacity-60 flex items-center gap-1">
+                        <p className="text-[10px] opacity-60 flex items-center gap-1 mb-1.5">
                           <span className="material-symbols-outlined text-[10px]">menu_book</span>
-                          Sources : {msg.sources.map((s) => s.title).join(', ')}
+                          Sources
                         </p>
+                        <div className="flex flex-wrap gap-1">
+                          {msg.sources.map((s, si) => (
+                            s.href ? (
+                              <a
+                                key={si}
+                                href={s.href}
+                                className="inline-flex items-center gap-1 rounded-full bg-primary/10 text-primary px-2 py-0.5 text-[10px] font-medium hover:bg-primary/20 transition-colors"
+                              >
+                                <span className="material-symbols-outlined text-[10px]">{s.kind === 'email' ? 'mail' : 'school'}</span>
+                                {s.title}
+                              </a>
+                            ) : (
+                              <span key={si} className="inline-flex items-center gap-1 rounded-full bg-outline-variant/30 px-2 py-0.5 text-[10px] text-on-surface-variant">
+                                <span className="material-symbols-outlined text-[10px]">{s.kind === 'email' ? 'mail' : 'school'}</span>
+                                {s.title}
+                              </span>
+                            )
+                          ))}
+                        </div>
                       </div>
                     )}
                     {msg.action?.type === 'ticket_created' && (
@@ -530,12 +569,26 @@ export default function ChatWidget() {
                     )}
                     <MessageActions msg={msg} onReply={handleReply} />
                   </div>
-                </div>
+                </motion.div>
               ))}
               {loading && (
                 <div className="flex justify-start">
-                  <div className="bg-surface-container border border-outline-variant/40 rounded-2xl rounded-bl-md px-4 py-3 flex items-center">
-                    <MarieLoader />
+                  <div className="bg-surface-container border border-outline-variant/40 rounded-2xl rounded-bl-md px-4 py-3 flex flex-col gap-2 min-w-[160px]">
+                    {/* Outil en cours pendant la boucle agentic : donne un retour
+                        concret au lieu d'un simple loader pendant des dizaines de seconde */}
+                    {activeTool && (
+                      <div className="flex items-center gap-1.5 text-[11px] text-on-surface-variant">
+                        <span className="relative flex h-1.5 w-1.5">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
+                          <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-primary" />
+                        </span>
+                        <span className="material-symbols-outlined text-[12px]">search</span>
+                        <span className="truncate max-w-[140px]">{TOOL_LABELS[activeTool.name] || activeTool.name}</span>
+                      </div>
+                    )}
+                    <div className="flex items-center">
+                      <MarieLoader />
+                    </div>
                   </div>
                 </div>
               )}
