@@ -8,6 +8,7 @@ const { logger } = require('../utils/logger');
 const analyticsTools = require('../services/analyticsTools');
 const { applySla } = require('../services/slaService');
 const { searchKnowledge } = require('../services/knowledgeSearch');
+const { searchEmailRag } = require('../services/emailRagService');
 const { searchTeams, searchTickets, buildSearchQuery, findTicketsForPersonAnyRole, handleMessage, executeTool: chatbotExecuteTool, normalizeStatusFilter, OPEN_GROUP_STATUSES, buildPersonTicketSummary } = require('../services/chatbotService');
 const { buildToolResultPayload, toGeminiResponse } = require('../services/voicePayloads');
 const jwt = require('jsonwebtoken');
@@ -45,10 +46,31 @@ const TICKET_SELECT = {
   team: { select: { name: true } },
 };
 
+// Retire les balises HTML d'un texte de ticket/suivi. Les contenus ticket sont
+// stockés en HTML (`<p>…</p>`) : les injecter tels quels dans la carte vocale
+// affichait les balises en clair au lieu du texte.
+function stripHtml(text) {
+  if (!text) return '';
+  return String(text)
+    .replace(/<br\s*\/?>/gi, ' ')
+    .replace(/<\/(p|div|li|tr|h[1-6])>/gi, ' ')
+    .replace(/<[^>]*>/g, '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function formatTicket(t) {
   return {
-    id: t.id, titre: t.title,
-    description: (t.content || '').substring(0, 200),
+    id: t.id, titre: stripHtml(t.title),
+    // Strip AVANT de tronquer : couper en plein milieu d'une balise laissait une
+    // moitié de tag visible (ex: « <p>Imprimante du 2e éta »).
+    description: stripHtml(t.content).substring(0, 200),
     statut: t.status, priorite: t.priority,
     categorie: t.category || '',
     lieu: t.locationName || '',
@@ -350,7 +372,7 @@ Ne réponds JAMAIS de mémoire : appelle toujours cet outil pour les chiffres.`,
       },
       {
         name: 'search_emails',
-        description: 'Rechercher dans les contenus des mails (entrant + fils de ticket) : dernier mail d\'un expéditeur, fil d\'un ticket, mails d\'une période ou sur un sujet. Retourne extraits avec expéditeur, objet, date, ticket lié.',
+        description: 'Rechercher dans les contenus des mails (entrant + fils de ticket) : dernier mail d\'un expéditeur, fil d\'un ticket, mails d\'une période ou sur un sujet. MAIS AUSSI dès qu\'une PERSONNE ou un COMPTE est en cause (« une demande pour X ? », « ce compte ») : utilise ce tool avec query="nom ou login" MÊME SANS le mot « mail ». Retourne extraits avec expéditeur, objet, date, ticket lié.',
         parameters: {
           type: 'object',
           properties: {
@@ -649,7 +671,7 @@ async function executeTool(name, args, { user = null, sessionHistory = null, ws 
           ticket: formatTicket(ticket),
           suivi: (ticket.followups || []).map((f) => ({
             auteur: f.author?.fullName || '',
-            contenu: (f.content || '').substring(0, 200),
+            contenu: stripHtml(f.content).substring(0, 200),
             prive: f.isPrivate,
             date: f.createdAt?.toISOString?.() || '',
           })),
@@ -989,13 +1011,15 @@ async function executeTool(name, args, { user = null, sessionHistory = null, ws 
       }
 
       case 'search_knowledge': {
-        const result = await searchKnowledge(args.query, 5);
+        const result = await searchKnowledge(args.query, { topK: 5 });
         if (!result || !result.length) return { total: 0, articles: [], message: 'Aucun article trouvé' };
         return {
           articles: result.map((r) => ({
             titre: r.title || r.documentTitle || '',
-            contenu: (r.content || r.text || '').substring(0, 200),
-            score: r.score || r.similarity || 0,
+            // Champ réel de searchKnowledge : `similarity` (pas `score`, qui n'existe pas)
+            score: Number(r.combined_score ?? r.similarity ?? 0),
+            // Synthèse vocale : 200 caractères suffisent, Gemini reformule en phrase
+            extrait: (r.content || '').replace(/\s+/g, ' ').trim().substring(0, 200),
           })),
           total: result.length,
         };
@@ -1021,8 +1045,36 @@ async function executeTool(name, args, { user = null, sessionHistory = null, ws 
       case 'find_similar_tickets':
         return await chatbotExecuteTool(name, args, user);
 
-      case 'search_emails':
-        return await chatbotExecuteTool(name, args, user);
+      case 'search_emails': {
+        // Format COURT pour la synthèse vocale : le formatage texte du chatbot
+        // (600 caractères/extrait + en-têtes) est illisible à l'oral et inonde le
+        // contexte de Gemini. On renvoie une ligne par mail, Gemini reformule.
+        const results = await searchEmailRag(args.query, {
+          fromEmail: args.fromEmail || null,
+          ticketId: args.ticketId || null,
+          conversationId: args.conversationId || null,
+          dateFrom: args.dateFrom || null,
+          dateTo: args.dateTo || null,
+          direction: args.direction || null,
+          topK: Math.min(Math.max(Number(args.limit) || 5, 1), 10),
+          viewer: user ? { sub: user.sub || user.id, role: user.role } : null,
+        });
+        if (!results || !results.length) return { total: 0, mails: [], message: 'Aucun mail trouvé' };
+        return {
+          total: results.length,
+          mails: results.map((r) => {
+            const m = r.metadata || {};
+            const raw = (r.content || '').replace(/<\/?mail_contenu>/gi, '').replace(/\s+/g, ' ').trim();
+            return {
+              de: m.fromEmail || 'inconnu',
+              objet: m.subject || 'sans objet',
+              date: m.receivedAt || r.createdAt || null,
+              ticketId: m.ticketId ?? m.erpTicketId ?? null,
+              extrait: raw.substring(0, 180),
+            };
+          }),
+        };
+      }
 
       case 'send_ticket_report':
         return await chatbotExecuteTool(name, args, user);
@@ -1339,6 +1391,7 @@ function setupVoiceLive() {
             '- Date de création, "dernier ticket créé", "tickets récents" → search_tickets avec limit=1 (tri du plus récent, champ "creeLe" = date)',
             '- Tickets d\'une équipe, d\'une catégorie ou d\'une personne → search_tickets (params team / category / person)',
             '- Mails (dernier mail, fil d\'un ticket) → search_emails',
+            '- Question sur un COMPTE ou une PERSONNE (« y a-t-il une demande pour X ? », « ce compte ») → search_users + search_emails(query="nom ou login") MÊME SANS le mot « mail », puis search_tickets — ne réponds JAMAIS à partir des seuls tickets sans avoir interrogé les mails.',
             '- Tickets similaires / doublons → find_similar_tickets',
             '- Ajouter un suivi/commentaire sur un ticket → add_ticket_followup (demande d\'abord la confirmation)',
             '- Classements détaillés techniciens/lieux → get_top_technicians / get_top_locations',

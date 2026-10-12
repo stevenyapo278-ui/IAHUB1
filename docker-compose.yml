@@ -87,6 +87,10 @@ services:
       - ./certs:/app/certs:ro
     ports:
       - "${PORT:-4000}:4000"
+      # Serveur WebSocket vocal (MARIE) : serveur HTTP/HTTPS distinct écoutant sur
+      # VOICE_LIVE_PORT. Sans cette publication, le front (qui se connecte en dur sur
+      # hostname:4001) reçoit « Connexion WebSocket échouée » et boucle en reconnexion.
+      - "${VOICE_LIVE_PORT:-4001}:${VOICE_LIVE_PORT:-4001}"
     networks:
       - ia-hub-network
 
