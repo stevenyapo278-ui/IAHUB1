@@ -1,6 +1,7 @@
 const prisma = require('../prismaClient');
 const { getBreaker } = require('../utils/circuitBreaker');
 const { logger } = require('../utils/logger');
+const { trackAiUsage } = require('./aiUsageTracker');
 
 // ── Circuit breaker dédié au vocal ────────────────────────────────────
 const voiceBreaker = getBreaker('ai-voice', { maxFailures: 5, resetTimeoutMs: 30000, halfOpenMaxRequests: 1 });
@@ -58,6 +59,7 @@ async function transcribeAudio(audioBuffer, mimeType = 'audio/webm') {
 
     logger.info(`[voice] STT request — mime=${mimeType}, size=${audioBase64.length} b64 chars`);
 
+    const start = Date.now();
     const res = await fetch(`${baseUrl}/models/${model}:generateContent`, {
       method: 'POST',
       signal: AbortSignal.timeout(30000),
@@ -73,6 +75,21 @@ async function transcribeAudio(audioBuffer, mimeType = 'audio/webm') {
 
     const data = await res.json();
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
+
+    // Suivi de consommation (tokens réels rapportés par Gemini)
+    const ut = data.usageMetadata;
+    if (ut?.totalTokenCount) {
+      trackAiUsage(
+        {
+          promptTokens: ut.promptTokenCount || 0,
+          completionTokens: ut.candidatesTokenCount || 0,
+          totalTokens: ut.totalTokenCount,
+        },
+        'gemini',
+        'voice',
+        { model, durationMs: Date.now() - start }
+      ).catch(() => {});
+    }
 
     logger.info(`[voice] STT result: "${text.substring(0, 100)}"`);
     return { text };
@@ -106,6 +123,7 @@ async function synthesizeAudio(text, voiceName = 'Kore') {
 
     logger.info(`[voice] TTS request — voice="${voiceName}", textLen=${text.length}`);
 
+    const start = Date.now();
     const res = await fetch(`${baseUrl}/models/${model}:generateContent`, {
       method: 'POST',
       signal: AbortSignal.timeout(60000),
@@ -125,6 +143,21 @@ async function synthesizeAudio(text, voiceName = 'Kore') {
     if (!audioPart?.inlineData?.data) {
       logger.error('[voice] TTS: no audio data in response', JSON.stringify(data).substring(0, 500));
       throw new Error('Aucune donnée audio retournée par Gemini TTS');
+    }
+
+    // Suivi de consommation (tokens réels rapportés par Gemini)
+    const ut = data.usageMetadata;
+    if (ut?.totalTokenCount) {
+      trackAiUsage(
+        {
+          promptTokens: ut.promptTokenCount || 0,
+          completionTokens: ut.candidatesTokenCount || 0,
+          totalTokens: ut.totalTokenCount,
+        },
+        'gemini',
+        'voice',
+        { model, durationMs: Date.now() - start }
+      ).catch(() => {});
     }
 
     const sampleRate = 24000; // Gemini TTS sort du PCM 16-bit 24kHz mono

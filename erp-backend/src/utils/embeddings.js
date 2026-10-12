@@ -1,6 +1,7 @@
 const prisma = require('../prismaClient');
 const crypto = require('crypto');
 const cacheStore = require('../services/cacheStore');
+const { trackAiUsage } = require('../services/aiUsageTracker');
 
 // Colonne pgvector figée à 768 dimensions (cf. prisma/schema.prisma — choisi pour matcher
 // Gemini text-embedding-004 qui produit nativement 768 dimensions) — chaque candidat
@@ -75,6 +76,7 @@ async function embedWithGemini(config, text) {
     outputDimensionality: EMBEDDING_DIMENSIONS,
   };
   if (config.taskType) body.taskType = config.taskType;
+  const start = Date.now();
   const res = await fetch(`${baseUrl}/models/${config.model}:embedContent`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-goog-api-key': config.apiKey },
@@ -86,6 +88,16 @@ async function embedWithGemini(config, text) {
     throw new Error(`Gemini ${res.status} : ${detail || res.statusText} (vérifiez la clé API et l'activation de l'API Embedding dans Google AI Studio)`);
   }
   const data = await res.json();
+  // Suivi de consommation : Gemini renvoie usageMetadata.totalTokenCount.
+  const totalTokens = data.usageMetadata?.totalTokenCount || 0;
+  if (totalTokens > 0) {
+    trackAiUsage(
+      { promptTokens: totalTokens, completionTokens: 0, totalTokens },
+      'gemini',
+      'embedding',
+      { model: config.model, durationMs: Date.now() - start }
+    ).catch(() => {});
+  }
   return data.embedding.values;
 }
 
@@ -99,6 +111,7 @@ async function embedWithOpenAICompat(config, text) {
   if (config.providerName === 'openai') body.dimensions = EMBEDDING_DIMENSIONS;
   if (config.providerName === 'nvidia') body.input_type = 'query';
 
+  const start = Date.now();
   const res = await fetch(`${baseUrl}/embeddings`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${config.apiKey}` },
@@ -106,6 +119,16 @@ async function embedWithOpenAICompat(config, text) {
   });
   if (!res.ok) throw new Error(`Échec de la génération d'embedding ${config.providerName} (${res.status})`);
   const data = await res.json();
+  // Suivi de consommation : OpenAI-compatible renvoie usage.prompt_tokens.
+  const promptTokens = data.usage?.prompt_tokens || 0;
+  if (promptTokens > 0) {
+    trackAiUsage(
+      { promptTokens, completionTokens: 0, totalTokens: promptTokens },
+      config.providerName,
+      'embedding',
+      { model: config.model, durationMs: Date.now() - start }
+    ).catch(() => {});
+  }
   return data.data?.[0]?.embedding;
 }
 

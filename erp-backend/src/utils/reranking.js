@@ -1,4 +1,5 @@
 const prisma = require('../prismaClient');
+const { trackAiUsage } = require('../services/aiUsageTracker');
 
 const DEFAULT_RERANK_MODEL = {
   nvidia: 'nvidia/llama-nemotron-rerank-1b-v2',
@@ -49,6 +50,7 @@ async function rerank(query, passages) {
 
   const config = candidates[0];
   console.log(`[Reranking] Re-ranking de ${passages.length} fragments via ${config.providerName}/${config.model}...`);
+  const start = Date.now();
 
   try {
     if (config.providerName === 'nvidia') {
@@ -73,6 +75,15 @@ async function rerank(query, passages) {
       }
 
       const data = await res.json();
+      // Suivi : NVIDIA NIM renvoie usage.prompt_tokens (tokens d'entrée facturés).
+      const nvidiaTokens = data.usage?.prompt_tokens || 0;
+      if (nvidiaTokens > 0) {
+        trackAiUsage(
+          { promptTokens: nvidiaTokens, completionTokens: 0, totalTokens: nvidiaTokens },
+          'nvidia', 'rerank',
+          { model: config.model, durationMs: Date.now() - start }
+        ).catch(() => {});
+      }
       
       const scored = passages.map((p, idx) => {
         const ranking = data.rankings?.find((r) => r.index === idx);
@@ -108,6 +119,15 @@ async function rerank(query, passages) {
       }
 
       const data = await res.json();
+      // Suivi : Cohere renvoie meta.billed_units.input_tokens (tokens facturés).
+      const cohereTokens = data.meta?.billed_units?.input_tokens || 0;
+      if (cohereTokens > 0) {
+        trackAiUsage(
+          { promptTokens: Math.round(cohereTokens), completionTokens: 0, totalTokens: Math.round(cohereTokens) },
+          'cohere', 'rerank',
+          { model: config.model, durationMs: Date.now() - start }
+        ).catch(() => {});
+      }
 
       const scored = passages.map((p, idx) => {
         const result = data.results?.find((r) => r.index === idx);

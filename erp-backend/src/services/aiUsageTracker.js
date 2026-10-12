@@ -25,13 +25,19 @@ async function isAiEnabled() {
 
 /**
  * Enregistre l'appel IA et track les tokens consommés.
- * Appelé après chaque `callProviderWithFallback` réussi.
+ * Appelé après chaque appel provider réussi (chat, email, embeddings, vision,
+ * vocal, rerank, tests…).
  *
  * @param {Object} usage - { promptTokens, completionTokens, totalTokens }
  * @param {string} provider - nom du provider (gemini, openai, etc.)
- * @param {string} usageContext - contexte (email, chatbot, background, vision)
+ * @param {string} usageContext - feature (email, chatbot, background, vision, voice, embedding, rerank, test)
+ * @param {Object} [options]
+ * @param {string} [options.model] - nom du modèle appelé
+ * @param {number} [options.userId] - utilisateur à l'origine (null = système)
+ * @param {number} [options.durationMs] - durée de l'appel réseau
+ * @param {boolean} [options.estimated] - true si tokens estimés (len/4) et non rapportés par le provider
  */
-async function trackAiUsage(usage, provider, usageContext = 'email') {
+async function trackAiUsage(usage, provider, usageContext = 'email', options = {}) {
   if (!usage || !usage.totalTokens) return;
 
   try {
@@ -40,9 +46,13 @@ async function trackAiUsage(usage, provider, usageContext = 'email') {
       data: {
         provider: provider || 'unknown',
         usage: usageContext,
+        model: options.model || null,
+        userId: options.userId ?? null,
         promptTokens: usage.promptTokens || 0,
         completionTokens: usage.completionTokens || 0,
         totalTokens: usage.totalTokens || 0,
+        durationMs: Number.isFinite(options.durationMs) ? Math.round(options.durationMs) : null,
+        estimated: options.estimated === true,
       },
     });
 
@@ -127,7 +137,7 @@ async function getAiUsageStats(days = 7) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
-  const [totalTokens, todayTokens, byProvider, byDay, totalCalls] = await Promise.all([
+  const [totalTokens, todayTokens, byProvider, byFeature, byModel, byUser, byDay, totalCalls] = await Promise.all([
     prisma.aiUsageLog.aggregate({ where: { createdAt: { gte: since } }, _sum: { totalTokens: true } }),
     prisma.aiUsageLog.aggregate({ where: { createdAt: { gte: today } }, _sum: { totalTokens: true } }),
     prisma.aiUsageLog.groupBy({
@@ -137,6 +147,31 @@ async function getAiUsageStats(days = 7) {
       _count: { id: true },
       orderBy: { _sum: { totalTokens: 'desc' } },
     }),
+    prisma.aiUsageLog.groupBy({
+      by: ['usage'],
+      where: { createdAt: { gte: since } },
+      _sum: { totalTokens: true, promptTokens: true, completionTokens: true },
+      _count: { id: true },
+      orderBy: { _sum: { totalTokens: 'desc' } },
+    }),
+    prisma.aiUsageLog.groupBy({
+      by: ['model'],
+      where: { createdAt: { gte: since }, model: { not: null } },
+      _sum: { totalTokens: true },
+      _count: { id: true },
+      orderBy: { _sum: { totalTokens: 'desc' } },
+      take: 20,
+    }),
+    prisma.$queryRaw`
+      SELECT u."id" as "userId", u."fullName", u."email",
+             SUM(a."totalTokens") as "totalTokens", COUNT(a."id") as calls
+      FROM "AiUsageLog" a
+      JOIN "User" u ON u."id" = a."userId"
+      WHERE a."createdAt" >= ${since} AND a."userId" IS NOT NULL
+      GROUP BY u."id", u."fullName", u."email"
+      ORDER BY SUM(a."totalTokens") DESC
+      LIMIT 20
+    `,
     prisma.$queryRaw`
       SELECT DATE("createdAt") as date, SUM("totalTokens") as "totalTokens", COUNT(*) as calls
       FROM "AiUsageLog"
@@ -160,6 +195,15 @@ async function getAiUsageStats(days = 7) {
       ? Math.round((todayTokens._sum?.totalTokens || 0) / settings.aiDailyTokenBudget * 100)
       : null,
     byProvider,
+    byFeature,
+    byModel,
+    byUser: (byUser || []).map((r) => ({
+      userId: r.userId,
+      fullName: r.fullName,
+      email: r.email,
+      totalTokens: Number(r.totalTokens || 0),
+      calls: Number(r.calls || 0),
+    })),
     byDay,
   };
 }

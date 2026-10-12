@@ -38,6 +38,7 @@ import {
   UserCircle,
   Menu,
   X,
+  Coins,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { toast } from 'sonner';
@@ -92,6 +93,7 @@ const systemItems = [
   { to: '/ai-weekly-reports', label: 'Apprentissage IA', icon: BrainCircuit, color: 'text-purple-400', permission: 'aiweeklyreports.manage', fallbackRoles: ['ADMIN', 'HOTLINE'] },
   { to: '/prompts', label: 'Prompts IA', icon: Terminal, color: 'text-violet-400', permission: 'prompts.manage', fallbackRoles: ['ADMIN'] },
   { to: '/chat-monitor', label: 'Monitoring Chatbot', icon: Activity, color: 'text-rose-400', permission: null, roles: ['SUPERADMIN'] },
+  { to: '/ai-monitor', label: 'Consommation IA', icon: Coins, color: 'text-amber-400', permission: null, roles: ['ADMIN', 'SUPERADMIN'] },
   { to: '/permission-groups', label: 'Groupes de droits', icon: ShieldCheck, color: 'text-cyan-400', permission: 'users.manage', fallbackRoles: ['ADMIN'] },
   { to: '/settings', label: 'Paramètres', icon: Settings, color: 'text-on-surface-variant', permission: ['settings.ai', 'settings.email', 'settings.integrations', 'automation.manage'], fallbackRoles: ['ADMIN'] },
   { to: '/documentation', label: 'Documentation', icon: FileText, color: 'text-blue-400', permission: null },

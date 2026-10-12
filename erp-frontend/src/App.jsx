@@ -44,6 +44,7 @@ const Problems = lazy(() => import('./pages/Problems'));
 const ProblemDetail = lazy(() => import('./pages/ProblemDetail'));
 const ChatPage = lazy(() => import('./pages/ChatPage'));
 const ChatMonitor = lazy(() => import('./pages/ChatMonitor'));
+const AiMonitor = lazy(() => import('./pages/AiMonitor'));
 const FormRequest = lazy(() => import('./pages/FormRequest'));
 const ExplorerPage = lazy(() => import('./pages/ExplorerPage'));
 
@@ -124,6 +125,14 @@ export default function App() {
               element={
                 <ProtectedRoute roles={['SUPERADMIN']}>
                   <ChatMonitor />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="ai-monitor"
+              element={
+                <ProtectedRoute roles={['ADMIN', 'SUPERADMIN']}>
+                  <AiMonitor />
                 </ProtectedRoute>
               }
             />

@@ -11,6 +11,7 @@ const { searchKnowledge } = require('../services/knowledgeSearch');
 const { searchEmailRag } = require('../services/emailRagService');
 const { searchTeams, searchTickets, buildSearchQuery, findTicketsForPersonAnyRole, handleMessage, executeTool: chatbotExecuteTool, normalizeStatusFilter, OPEN_GROUP_STATUSES, buildPersonTicketSummary } = require('../services/chatbotService');
 const { buildToolResultPayload, toGeminiResponse } = require('../services/voicePayloads');
+const { trackAiUsage } = require('../services/aiUsageTracker');
 const jwt = require('jsonwebtoken');
 
 // Modèle Live officiel GA (doc Google Cloud Gemini Enterprise Agent Platform) :
@@ -1482,6 +1483,19 @@ function setupVoiceLive() {
                     logger.info(`[voice-live] audio out (tour): ${audioOutChunks} chunk(s), ${audioOutBytes} octets envoyés au client`);
                     audioOutChunks = 0;
                     audioOutBytes = 0;
+                  }
+                  // Suivi tokens (estimé) : on mesure les transcripts AVANT de les vider.
+                  // len/4 est l'heuristique standard — marqué estimated=true en BDD.
+                  if (inputTranscriptBuf || outputTranscriptBuf) {
+                    const turnIn = Math.ceil((inputTranscriptBuf || '').length / 4);
+                    const turnOut = Math.ceil((outputTranscriptBuf || '').length / 4);
+                    if (turnIn + turnOut > 0) {
+                      trackAiUsage(
+                        { promptTokens: turnIn, completionTokens: turnOut, totalTokens: turnIn + turnOut },
+                        'gemini', 'voice',
+                        { model: LIVE_MODEL, estimated: true, userId: currentUser?.id ?? null }
+                      ).catch(() => {});
+                    }
                   }
                   if (inputTranscriptBuf) {
                     ws.send(JSON.stringify({ type: 'transcript', role: 'user', text: inputTranscriptBuf, final: true }));

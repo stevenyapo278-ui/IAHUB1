@@ -416,6 +416,7 @@ async function callProvider(provider, prompt, usage = 'email', forcedModelId = n
   }
 
   let lastError;
+  const startedAt = Date.now();
   for (const key of keys) {
     for (const modelCandidate of modelCandidates) {
       try {
@@ -438,6 +439,9 @@ async function callProvider(provider, prompt, usage = 'email', forcedModelId = n
             result = await callOpenAICompat(provider, key.apiKey, modelCandidate || 'meta/llama-3.1-8b-instruct', prompt, usage, callOpts);
         }
         recordAiSuccess(provider.name);
+        // Expose le modèle réellement appelé + la latence pour le suivi de tokens.
+        result.model = modelCandidate || null;
+        result.durationMs = Date.now() - startedAt;
         return result;
       } catch (err) {
         lastError = err.message;
@@ -503,12 +507,15 @@ async function callProviderWithFallback(providers, prompt, usage = 'email', opti
       // Tracker les tokens de manière asynchrone (ne pas bloquer l'appelant)
       if (result.usage && result.usage.totalTokens > 0) {
         const { trackAiUsage } = require('./aiUsageTracker');
-        trackAiUsage(result.usage, provider.name, usage).catch(() => {});
+        trackAiUsage(result.usage, provider.name, usage, {
+          model: result.model || null,
+          durationMs: result.durationMs || null,
+        }).catch(() => {});
       }
 
       // Si tools ont été demandés, retourner le résultat complet (text + toolCalls)
       if (tools) {
-        return { text, toolCalls: result.toolCalls || null, usage: result.usage };
+        return { text, toolCalls: result.toolCalls || null, usage: result.usage, model: result.model, durationMs: result.durationMs };
       }
       return text;
     } catch (err) {
@@ -720,6 +727,33 @@ async function analyzeEmail({ subject, body, from, fromName, senderRole, senderT
 // ═══════════════════════════════════════════════════════════════════════════
 // ANALYSE VISION IA DES CAPTURES D'ÉCRAN ET IMAGES JOINTES
 // ═══════════════════════════════════════════════════════════════════════════
+
+// Normalise la réponse `usage` (dont le format diffère par provider) vers
+// { promptTokens, completionTokens, totalTokens } et l'enregistre.
+// Gemini → usageMetadata.{promptTokenCount,candidatesTokenCount,totalTokenCount}
+// Anthropic → usage.{input_tokens,output_tokens}
+// OpenAI-compatible → usage.{prompt_tokens,completion_tokens,total_tokens}
+function trackVisionUsage(providerName, modelName, rawUsage, durationMs) {
+  if (!rawUsage) return;
+  const { trackAiUsage } = require('./aiUsageTracker');
+  let usage;
+  if (providerName === 'gemini') {
+    const promptTokens = rawUsage.promptTokenCount || 0;
+    const completionTokens = rawUsage.candidatesTokenCount || 0;
+    usage = { promptTokens, completionTokens, totalTokens: rawUsage.totalTokenCount || (promptTokens + completionTokens) };
+  } else if (providerName === 'anthropic') {
+    const promptTokens = rawUsage.input_tokens || 0;
+    const completionTokens = rawUsage.output_tokens || 0;
+    usage = { promptTokens, completionTokens, totalTokens: promptTokens + completionTokens };
+  } else {
+    const promptTokens = rawUsage.prompt_tokens || 0;
+    const completionTokens = rawUsage.completion_tokens || 0;
+    usage = { promptTokens, completionTokens, totalTokens: rawUsage.total_tokens || (promptTokens + completionTokens) };
+  }
+  if (!usage.totalTokens) return;
+  trackAiUsage(usage, providerName, 'vision', { model: modelName, durationMs }).catch(() => {});
+}
+
 async function analyzeSingleImage(provider, apiKey, modelName, imageBase64, mimeType, prompt) {
   const normMime = (mimeType || 'image/png').toLowerCase();
   const safeMime = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/gif'].includes(normMime) ? normMime : 'image/png';
@@ -728,6 +762,7 @@ async function analyzeSingleImage(provider, apiKey, modelName, imageBase64, mime
     case 'gemini': {
       const base = provider.baseUrl || 'https://generativelanguage.googleapis.com/v1beta';
       const model = modelName || 'gemini-3.5-flash';
+      const start = Date.now();
       const res = await fetch(`${base}/models/${model}:generateContent`, {
         method: 'POST',
         signal: AbortSignal.timeout(25000),
@@ -744,11 +779,13 @@ async function analyzeSingleImage(provider, apiKey, modelName, imageBase64, mime
       });
       if (!res.ok) throw new Error(`Gemini vision HTTP ${res.status}`);
       const data = await res.json();
+      trackVisionUsage(provider.name, model, data.usageMetadata, Date.now() - start);
       return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
     }
     case 'anthropic': {
       const baseUrl = provider.baseUrl || 'https://api.anthropic.com';
       const model = modelName || 'claude-3-5-sonnet-20241022';
+      const start = Date.now();
       const res = await fetch(`${baseUrl}/v1/messages`, {
         method: 'POST',
         signal: AbortSignal.timeout(25000),
@@ -767,12 +804,14 @@ async function analyzeSingleImage(provider, apiKey, modelName, imageBase64, mime
       });
       if (!res.ok) throw new Error(`Anthropic vision HTTP ${res.status}`);
       const data = await res.json();
+      trackVisionUsage(provider.name, model, data.usage, Date.now() - start);
       return data.content?.[0]?.text || '';
     }
     default: {
       // OpenAI / OpenAI-compatible
       const baseUrl = provider.baseUrl || 'https://api.openai.com/v1';
       const model = modelName || 'gpt-4o-mini';
+      const start = Date.now();
       const res = await fetch(`${baseUrl}/chat/completions`, {
         method: 'POST',
         signal: AbortSignal.timeout(25000),
@@ -792,6 +831,7 @@ async function analyzeSingleImage(provider, apiKey, modelName, imageBase64, mime
       });
       if (!res.ok) throw new Error(`OpenAI vision HTTP ${res.status}`);
       const data = await res.json();
+      trackVisionUsage(provider.name, model, data.usage, Date.now() - start);
       return data.choices?.[0]?.message?.content || '';
     }
   }

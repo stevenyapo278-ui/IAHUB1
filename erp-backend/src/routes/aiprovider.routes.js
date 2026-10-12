@@ -6,7 +6,30 @@ const { requirePermission } = require('../middleware/permissions');
 const { syncProviderModels } = require('../utils/modelSync');
 const { EMBEDDING_DIMENSIONS } = require('../utils/embeddings');
 const { auditLog } = require('../services/auditLogService');
+const { trackAiUsage } = require('../services/aiUsageTracker');
 const cacheStore = require('../services/cacheStore');
+
+// Normalise la réponse `usage` (format différent par provider) et enregistre la
+// consommation dans le contexte 'test' (test de modèle depuis l'UI Paramètres > IA).
+function trackTestUsage(providerName, modelName, rawUsage, durationMs) {
+  if (!rawUsage) return;
+  let usage;
+  if (providerName === 'gemini') {
+    const promptTokens = rawUsage.promptTokenCount || 0;
+    const completionTokens = rawUsage.candidatesTokenCount || 0;
+    usage = { promptTokens, completionTokens, totalTokens: rawUsage.totalTokenCount || (promptTokens + completionTokens) };
+  } else if (providerName === 'anthropic') {
+    const promptTokens = rawUsage.input_tokens || 0;
+    const completionTokens = rawUsage.output_tokens || 0;
+    usage = { promptTokens, completionTokens, totalTokens: promptTokens + completionTokens };
+  } else {
+    const promptTokens = rawUsage.prompt_tokens || 0;
+    const completionTokens = rawUsage.completion_tokens || 0;
+    usage = { promptTokens, completionTokens, totalTokens: rawUsage.total_tokens || (promptTokens + completionTokens) };
+  }
+  if (!usage.totalTokens) return;
+  trackAiUsage(usage, providerName, 'test', { model: modelName, durationMs }).catch(() => {});
+}
 
 // La liste des fournisseurs et les pages détail (/api/ai-providers/:id) sont mises en cache
 // (TTL 5s, voir app.js) : toute écriture (provider, modèle, clé, sync) doit invalider
@@ -491,6 +514,13 @@ router.post('/models/:modelId/test', async (req, res) => {
       const body = await r.json().catch(() => ({}));
       vector = provider.name === 'gemini' ? body.embedding?.values : body.data?.[0]?.embedding;
 
+      // Suivi consommation : le test d'embedding consomme des tokens.
+      trackTestUsage(
+        provider.name, model.name,
+        provider.name === 'gemini' ? body.usageMetadata : body.usage,
+        Date.now() - t0
+      );
+
       if (!r.ok) {
         const errDetail = body.error?.message || body.message || `HTTP ${r.status}`;
         return res.json({ ok: false, error: errDetail });
@@ -532,6 +562,8 @@ router.post('/models/:modelId/test', async (req, res) => {
           const errDetail = body.error?.message || body.message || `HTTP ${r.status}`;
           return res.json({ ok: false, error: errDetail });
         }
+        const okBody = await r.json().catch(() => ({}));
+        trackTestUsage(provider.name, model.name, okBody.usage, Date.now() - t0);
         break;
       }
       case 'anthropic': {
@@ -555,6 +587,8 @@ router.post('/models/:modelId/test', async (req, res) => {
           const errDetail = body.error?.message || body.message || `HTTP ${r.status}`;
           return res.json({ ok: false, error: errDetail });
         }
+        const okBody = await r.json().catch(() => ({}));
+        trackTestUsage(provider.name, model.name, okBody.usage, Date.now() - t0);
         break;
       }
       case 'gemini': {
@@ -573,6 +607,8 @@ router.post('/models/:modelId/test', async (req, res) => {
           const errDetail = body.error?.message || body.message || `HTTP ${r.status}`;
           return res.json({ ok: false, error: errDetail });
         }
+        const okBody = await r.json().catch(() => ({}));
+        trackTestUsage(provider.name, model.name, okBody.usageMetadata, Date.now() - t0);
         break;
       }
       default: {

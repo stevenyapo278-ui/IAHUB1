@@ -1,5 +1,6 @@
 const prisma = require('../prismaClient');
 const { formatProviderHttpError, compactErrorMessage } = require('../utils/aiErrorFormatter');
+const { trackAiUsage } = require('./aiUsageTracker');
 
 
 /* ── Helper : décoder les entités HTML provenant de GLPI ────────────── */
@@ -223,6 +224,7 @@ async function callAI(prompt, maxTokens = 2048) {
 
 async function makeAIRequest(providerName, baseUrl, apiKey, model, prompt, maxTokens) {
   if (providerName === 'anthropic') {
+    const start = Date.now();
     const res = await fetch(`${baseUrl}/v1/messages`, {
       method: 'POST',
       signal: AbortSignal.timeout(60000),
@@ -242,6 +244,7 @@ async function makeAIRequest(providerName, baseUrl, apiKey, model, prompt, maxTo
       throw new Error(formatProviderHttpError({ label: 'Anthropic', status: res.status, body: bodyText }));
     }
     const data = await res.json();
+    trackComparisonUsage(providerName, model, data.usage, Date.now() - start);
     return data.content?.[0]?.text || '';
   }
 
@@ -257,6 +260,7 @@ async function makeAIRequest(providerName, baseUrl, apiKey, model, prompt, maxTo
     let lastErr = null;
     for (const m of fallbackModels) {
       try {
+        const start = Date.now();
         const res = await fetch(`${baseUrl}/models/${m}:generateContent`, {
           method: 'POST',
           signal: AbortSignal.timeout(60000),
@@ -272,6 +276,7 @@ async function makeAIRequest(providerName, baseUrl, apiKey, model, prompt, maxTo
           continue; // Essayer le prochain modèle de secours
         }
         const data = await res.json();
+        trackComparisonUsage(providerName, m, data.usageMetadata, Date.now() - start);
         return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
       } catch (e) {
         lastErr = e.message;
@@ -282,6 +287,7 @@ async function makeAIRequest(providerName, baseUrl, apiKey, model, prompt, maxTo
   }
 
   // OpenAI-compatible (OpenAI, Mistral, NVIDIA, etc.)
+  const start = Date.now();
   const res = await fetch(`${baseUrl}/chat/completions`, {
     method: 'POST',
     signal: AbortSignal.timeout(60000),
@@ -301,7 +307,30 @@ async function makeAIRequest(providerName, baseUrl, apiKey, model, prompt, maxTo
     throw new Error(formatProviderHttpError({ label: providerName, status: res.status, body: bodyText }));
   }
   const data = await res.json();
+  trackComparisonUsage(providerName, model, data.usage, Date.now() - start);
   return data.choices?.[0]?.message?.content || '';
+}
+
+// Normalise la réponse `usage` (format différent par provider) et enregistre la
+// consommation dans le contexte 'background' (analyse de tickets en arrière-plan).
+function trackComparisonUsage(providerName, modelName, rawUsage, durationMs) {
+  if (!rawUsage) return;
+  let usage;
+  if (providerName === 'gemini') {
+    const promptTokens = rawUsage.promptTokenCount || 0;
+    const completionTokens = rawUsage.candidatesTokenCount || 0;
+    usage = { promptTokens, completionTokens, totalTokens: rawUsage.totalTokenCount || (promptTokens + completionTokens) };
+  } else if (providerName === 'anthropic') {
+    const promptTokens = rawUsage.input_tokens || 0;
+    const completionTokens = rawUsage.output_tokens || 0;
+    usage = { promptTokens, completionTokens, totalTokens: promptTokens + completionTokens };
+  } else {
+    const promptTokens = rawUsage.prompt_tokens || 0;
+    const completionTokens = rawUsage.completion_tokens || 0;
+    usage = { promptTokens, completionTokens, totalTokens: rawUsage.total_tokens || (promptTokens + completionTokens) };
+  }
+  if (!usage.totalTokens) return;
+  trackAiUsage(usage, providerName, 'background', { model: modelName, durationMs }).catch(() => {});
 }
 
 /* ── Analyse principale ────────────────────────────────────────────────── */

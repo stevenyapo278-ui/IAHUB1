@@ -1804,15 +1804,21 @@ model DashboardWidget {
 model AiUsageLog {
   id               Int      @id @default(autoincrement())
   provider         String // nom du provider (gemini, openai, anthropic, etc.)
-  usage            String // contexte d'utilisation (email, chatbot, background, vision)
+  usage            String // feature / contexte (email, chatbot, background, vision, voice, embedding, rerank, test)
+  model            String? // nom du modèle appelé (ex: gemini-3.5-flash)
+  userId           Int? // utilisateur à l'origine de l'appel (null = système/background)
   promptTokens     Int      @default(0)
   completionTokens Int      @default(0)
   totalTokens      Int      @default(0)
+  durationMs       Int? // durée de l'appel réseau (ms)
+  estimated        Boolean  @default(false) // true = tokens estimés (len/4), false = rapportés par le provider
   createdAt        DateTime @default(now())
 
   @@index([provider])
   @@index([createdAt])
   @@index([usage])
+  @@index([model])
+  @@index([userId])
 }
 
 // ── Formulaires de demande (importés depuis GLPI FormCreator) ───────────────
