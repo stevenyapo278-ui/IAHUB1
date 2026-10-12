@@ -124,9 +124,23 @@ function sanitizeTicketHtml(html) {
   // Supprimer les event handlers (on*="...")
   cleaned = cleaned.replace(/\son\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '');
 
-  // Supprimer les protocoles javascript: et data: dans les href/src
-  cleaned = cleaned.replace(/href\s*=\s*(?:"javascript:[^"]*"|'javascript:[^']*')/gi, 'href=""');
-  cleaned = cleaned.replace(/src\s*=\s*(?:"javascript:[^"]*"|'javascript:[^']*')/gi, 'src=""');
+  // Supprimer les protocoles javascript: et data: dans les href/src.
+  // Gère les guillemets simples, doubles et les attributs non encadrés.
+  // Les data: sont bloqués partout (href, src) sauf les images raster dans <img src="data:image/...">
+  // (png/jpeg/gif/webp) qui sont inoffensifs et conservent l'affichage des captures collées.
+  const isUnsafeUrl = (value, attr) => {
+    const v = String(value || '').trim().toLowerCase();
+    if (v.startsWith('javascript:')) return true;
+    if (v.startsWith('data:')) {
+      const safeRasterImage = /^data:image\/(?:png|jpe?g|gif|webp|bmp|x-icon|vnd\.microsoft\.icon)[;,]/.test(v);
+      return !(safeRasterImage && attr.toLowerCase() === 'src');
+    }
+    return false;
+  };
+  cleaned = cleaned.replace(/\b(href|src)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/gi, (match, attr, dq, sq, unquoted) => {
+    const value = dq ?? sq ?? unquoted ?? '';
+    return isUnsafeUrl(value, attr) ? `${attr}=""` : match;
+  });
 
   // Autoriser uniquement les balises HTML sûres
   const SAFE_TAGS = new Set([
@@ -146,6 +160,8 @@ function sanitizeTicketHtml(html) {
         const altMatch = match.match(/alt\s*=\s*["']([^"']*)["']/i);
         const src = srcMatch ? srcMatch[1] : '';
         const alt = altMatch ? altMatch[1] : '';
+        // Src vide (protocole dangereux retiré ci-dessus) : la balise ne sert à rien → on la supprime
+        if (!src || isUnsafeUrl(src, 'src')) return '';
         return `<img src="${src}" alt="${alt}" />`;
       }
       // Pour a, garder href et target uniquement

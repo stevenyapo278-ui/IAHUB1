@@ -297,7 +297,16 @@ async function processMessage(message, account) {
   // ne couvre qu'une petite partie du contenu réel.
   const fullThreadText = htmlToText(bodyHtml);
   const previewIsTruncated = fullThreadText.length > bodyPreview.length + 100; // marge : évite de remplacer par du bruit HTML
-  const bodyForAnalysis = previewIsTruncated ? fullThreadText : bodyPreview;
+  let bodyForAnalysis = previewIsTruncated ? fullThreadText : bodyPreview;
+  // Point faible n°4 : le bodyPreview de Graph est du texte brut SANS marqueur d'image.
+  // Si on l'utilise tel quel, l'analyse IA ne voit pas qu'une image est présente dans le mail.
+  // On ré-injecte les marqueurs [image] (mêmes marqueurs que htmlToText) avant envoi au prompt.
+  if (!previewIsTruncated && /<img\b/i.test(bodyHtml || '')) {
+    const imgMarkers = (bodyHtml.match(/<img\b/gi) || []).map(() => '[image]').join(' ');
+    if (imgMarkers && !bodyForAnalysis.includes('[image]')) {
+      bodyForAnalysis = `${bodyForAnalysis}\n${imgMarkers}`;
+    }
+  }
   let cleanBody = await stripSignature(bodyForAnalysis);
   // Zone de signature (texte retiré par le stripper, ou fin du message en fallback) —
   // utilisée pour la détection STRICTE du lieu (signature + adresse email vs table Location)
@@ -1154,7 +1163,8 @@ async function processMessage(message, account) {
             const fallbackTicket = await prisma.ticket.create({
               data: {
                 title: (subject || '(Email sans analyse IA)').substring(0, 200),
-                content: (bodyPreview || bodyHtml || '').substring(0, 5000),
+                // htmlToText : jamais de HTML brut (ni <img src="cid:..."> non résolu) dans Ticket.content
+                content: (htmlToText(bodyHtml) || bodyPreview || '').substring(0, 5000),
                 status: 'NEW',
                 approvalStatus: 'PENDING',
                 priority: 'P3',

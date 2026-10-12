@@ -3,6 +3,7 @@ const { getActiveProviders, callProviderWithFallback, callAiWithRetry } = requir
 const { emitTicketCreated, emitTicketAssigned, emitTicketUpdated } = require('../utils/socket');
 const { sendTicketCreationNotification, sendAssignmentNotificationEmail } = require('./emailSender');
 const { sanitizeTicketHtml } = require('../utils/security');
+const { htmlToText } = require('../utils/htmlToText');
 const { recordFirstResponse, applySla } = require('./slaService');
 const { logEvent } = require('./ticketEvent');
 const analyticsTools = require('./analyticsTools');
@@ -2912,7 +2913,8 @@ async function checkTicketStatus(ticketId) {
   if (ticket.closedAt) r += `• **Fermé le :** ${new Date(ticket.closedAt).toLocaleDateString('fr-FR')}\n`;
 
   if (ticket.content) {
-    r += `\n**Description complète :**\n${ticket.content}\n`;
+    // HTML converti en texte : jamais de balises (ni images inline) dans le prompt
+    r += `\n**Description complète :**\n${htmlToText(ticket.content)}\n`;
   }
 
   // Suivis / commentaires récents
@@ -3041,7 +3043,7 @@ async function getTicketSummary(ticketId) {
   if (ticket.approvalStatus && ticket.approvalStatus !== 'NOT_REQUIRED') r += `**Approbation :** ${ticket.approvalStatus}\n`;
   if (ticket.escalationLevel > 0) r += `**Escalade :** niveau ${ticket.escalationLevel}\n`;
 
-  r += `\n**Description :**\n${(ticket.content || 'Aucune description').substring(0, 800)}\n`;
+  r += `\n**Description :**\n${htmlToText(ticket.content || 'Aucune description').substring(0, 800)}\n`;
 
   // Liens
   const allLinks = [
@@ -3073,7 +3075,7 @@ async function getTicketSummary(ticketId) {
   if (ticket.followups?.length > 0) {
     r += `\n**Derniers commentaires :**\n`;
     for (const c of ticket.followups) {
-      r += `• *${c.author?.fullName || 'Inconnu'}* (${new Date(c.createdAt).toLocaleDateString('fr-FR')}) : ${(c.content || '').substring(0, 200)}\n`;
+      r += `• *${c.author?.fullName || 'Inconnu'}* (${new Date(c.createdAt).toLocaleDateString('fr-FR')}) : ${htmlToText(c.content || '').substring(0, 200)}\n`;
     }
   }
   return r;
