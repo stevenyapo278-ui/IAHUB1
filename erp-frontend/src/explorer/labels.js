@@ -53,10 +53,11 @@ export const STATUS_LABELS = {
   IN_PROGRESS: 'En cours', ASSIGNED: 'Assigné', WAITING: 'En attente', OBSERVED: 'Observé',
 };
 
-// Modes d'affichage (?mode=graph|mind|neural)
+// Modes d'affichage (?mode=graph|mind|force|neural)
 export const MODES = [
   { key: 'graph', label: 'Graphe' },
   { key: 'mind', label: 'Carte mentale' },
+  { key: 'force', label: 'Cosmos' },
   { key: 'neural', label: 'Neurones' },
 ];
 export const KNOWN_MODES = MODES.map((m) => m.key);

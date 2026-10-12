@@ -4,7 +4,7 @@ import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
 import {
   ArrowLeft, User, MapPin, Search, ChevronDown, ChevronRight, X, Ticket,
   ExternalLink, LocateFixed, Loader2, Plus, RotateCcw, AlertCircle,
-  Copy, Check, Sparkles, Pin, RefreshCw, Share2, Network, BrainCircuit,
+  Copy, Check, Sparkles, Pin, RefreshCw, Share2, Network, BrainCircuit, Orbit,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import api from '../api/client';
@@ -17,6 +17,8 @@ import MindMapMode from '../explorer/MindMapMode';
 
 // Mode réseau de neurones : chunk lazy (three.js isolé de la page /explorer)
 const NeuralMode = lazy(() => import('../explorer/NeuralMode'));
+// Mode Cosmos : chunk lazy (d3-force isolé de la page /explorer)
+const ForceMode = lazy(() => import('../explorer/ForceMode'));
 
 // ─── Exploration en 3 niveaux ───────────────────────────────────────────────
 // Centre (n'importe quel kind du registre backend) → catégories (compteurs) →
@@ -736,12 +738,13 @@ export default function ExplorerPage() {
         </div>
       ) : null}
 
-      {/* Mode d'affichage : graphe · carte mentale · réseau de neurones */}
+      {/* Mode d'affichage : graphe · carte mentale · cosmos · réseau de neurones */}
       {!isMobile && (
         <div role="group" aria-label="Mode d'affichage" className="flex rounded-xl border border-outline-variant/30 bg-surface-container-lowest p-1">
           {[
             { key: 'graph', label: 'Graphe', Icon: Share2 },
             { key: 'mind', label: 'Carte mentale', Icon: Network },
+            { key: 'force', label: 'Cosmos', Icon: Orbit },
             { key: 'neural', label: 'Neurones', Icon: BrainCircuit },
           ].map(({ key, label, Icon }) => (
             <button
@@ -1135,6 +1138,29 @@ export default function ExplorerPage() {
               onMore={openListAll}
               onPickCenter={() => setPickerOpen(true)}
             />
+          </div>
+        )}
+
+        {/* ── Desktop : Cosmos (mode=force, d3-force) ──────────────────── */}
+        {!isMobile && mode === 'force' && (
+          <div className="mt-4 overflow-x-auto rounded-2xl border border-outline-variant/30 bg-surface-container-lowest p-2">
+            <Suspense
+              fallback={
+                <div className="flex h-[620px] items-center justify-center gap-2 text-sm text-slate-400">
+                  <Loader2 size={16} className="animate-spin" /> Chargement du mode Cosmos…
+                </div>
+              }
+            >
+              <ForceMode
+                key={`${centerType}:${centerId}:${pinType || ''}:${pinId || ''}`}
+                centerType={centerType}
+                centerId={centerId}
+                pinType={hasPin ? pinType : null}
+                pinId={hasPin ? pinId : null}
+                onRecenter={hop}
+                onPickCenter={() => setPickerOpen(true)}
+              />
+            </Suspense>
           </div>
         )}
 
