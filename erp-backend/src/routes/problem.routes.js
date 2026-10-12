@@ -442,8 +442,8 @@ router.post(
           requesterId,
           assignedToId: ticket.assignedToId ?? null,
           teamId: ticket.teamId ?? null,
-          assignees: { set: (ticket.assignees || []).map((a) => ({ id: a.id })) },
-          observers: { set: (ticket.observers || []).map((o) => ({ id: o.id })) },
+          assignees: { connect: (ticket.assignees || []).map((a) => ({ id: a.id })) },
+          observers: { connect: (ticket.observers || []).map((o) => ({ id: o.id })) },
         },
       });
 
@@ -495,7 +495,13 @@ router.post(
           : `<p>Converti en problème racine <strong>#${problem.id}</strong> — ticket fermé.</p>`,
       },
     }).catch(() => {});
-    await logEvent(ticketId, keepTicketOpen ? 'CONVERTED_TO_PROBLEM' : 'CONVERTED_TO_PROBLEM_CLOSED', req.user.email || String(req.user.sub), { problemId: problem.id }).catch(() => {});
+    // Type de l'énumération TicketEventType — LINKED avec payload explicite
+    // (les valeurs hors énumération feraient échouer Prisma)
+    await logEvent(ticketId, 'LINKED', req.user.email || String(req.user.sub), {
+      problemId: problem.id,
+      convertedToProblem: true,
+      ticketKeptOpen: keepTicketOpen,
+    }).catch(() => {});
 
     auditLog('PROBLEM_CREATED_FROM_TICKET', {
       actor: req.user, targetType: 'Problem', targetId: problem.id, targetLabel: problem.title,

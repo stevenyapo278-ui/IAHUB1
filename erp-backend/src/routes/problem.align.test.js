@@ -364,7 +364,11 @@ describe('Conversion ticket → problème', () => {
       expect.objectContaining({ data: expect.objectContaining({ type: 'CREATED', payload: expect.objectContaining({ fromTicketId: 1 }) }) })
     );
     expect(prisma.followup.create).toHaveBeenCalled();
-    expect(logEvent).toHaveBeenCalledWith(1, 'CONVERTED_TO_PROBLEM', expect.any(String), { problemId: 42 });
+    expect(logEvent).toHaveBeenCalledWith(1, 'LINKED', expect.any(String), {
+      problemId: 42,
+      convertedToProblem: true,
+      ticketKeptOpen: true,
+    });
   });
 
   it('ferme le ticket quand keepTicketOpen=false', async () => {
@@ -376,7 +380,11 @@ describe('Conversion ticket → problème', () => {
     expect(prisma.__tx.ticket.update).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ status: 'CLOSED' }) })
     );
-    expect(logEvent).toHaveBeenCalledWith(1, 'CONVERTED_TO_PROBLEM_CLOSED', expect.any(String), { problemId: 42 });
+    expect(logEvent).toHaveBeenCalledWith(1, 'LINKED', expect.any(String), {
+      problemId: 42,
+      convertedToProblem: true,
+      ticketKeptOpen: false,
+    });
   });
 
   it('retourne 404 si le ticket est introuvable', async () => {
