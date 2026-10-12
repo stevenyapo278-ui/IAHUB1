@@ -307,6 +307,10 @@ router.get('/stats', async (req, res) => {
 router.post(
   '/',
   requirePermission('problems.manage', ['ADMIN', 'HOTLINE']),
+  // Multipart : images collées dans la description (FormData + marqueurs
+  // <!--IMAGE_n-->), miroir de la création de ticket. Un appel JSON reste
+  // accepté — multer laisse passer les requêtes non multipart.
+  problemUpload.array('images', 10),
   [
     body('title').notEmpty().trim(),
     body('description').notEmpty().trim(),
@@ -319,7 +323,20 @@ router.post(
   ],
   async (req, res) => {
     const errors = validationResult(req);
-    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+    if (!errors.isEmpty()) {
+      dropUploadedFiles(req.files);
+      return res.status(400).json({ errors: errors.array() });
+    }
+
+    // Images validées AVANT création : jamais de problème orphelin d'images
+    // refusées (extension non autorisée). Contexte image uniquement.
+    for (const file of req.files || []) {
+      const validation = validateUpload(file.originalname, file.mimetype, 'followup');
+      if (!validation.valid) {
+        dropUploadedFiles(req.files);
+        return res.status(400).json({ error: validation.error });
+      }
+    }
 
     const {
       title, description, priority, urgency, impact, category, locationName,
@@ -336,7 +353,10 @@ router.post(
         continue;
       }
       const val = Number(raw);
-      if (!Number.isInteger(val)) return res.status(400).json({ error: `${key} invalide` });
+      if (!Number.isInteger(val)) {
+        dropUploadedFiles(req.files);
+        return res.status(400).json({ error: `${key} invalide` });
+      }
       ids[key] = val;
     }
 
@@ -344,13 +364,17 @@ router.post(
     // une FK violée → 500 au lieu d'un 400 explicite.
     if (ids.requesterId !== null) {
       const requester = await prisma.user.findUnique({ where: { id: ids.requesterId }, select: { id: true } });
-      if (!requester) return res.status(400).json({ error: 'Utilisateur introuvable' });
+      if (!requester) {
+        dropUploadedFiles(req.files);
+        return res.status(400).json({ error: 'Utilisateur introuvable' });
+      }
     }
 
     // Antidater l'ouverture n'appartient qu'à un administrateur
     let createdAtValue;
     if (createdAt) {
       if (!['ADMIN', 'SUPERADMIN'].includes(req.user.role)) {
+        dropUploadedFiles(req.files);
         return res.status(403).json({ error: "Seul un administrateur peut fixer la date de création d'un problème" });
       }
       createdAtValue = new Date(createdAt);
@@ -359,7 +383,9 @@ router.post(
     const problem = await prisma.problem.create({
       data: {
         title,
-        description,
+        // Sanitisée comme le contenu des tickets — les marqueurs <!--IMAGE_n-->
+        // passent (commentaires HTML) et sont remplacés juste après.
+        description: sanitizeTicketHtml(description),
         status: status || 'NEW',
         priority: priority || 'P3',
         urgency: urgency || 'MEDIUM',
@@ -386,6 +412,23 @@ router.post(
     await prisma.problemEvent.create({
       data: { problemId: problem.id, type: 'CREATED', actor: req.user.email || 'SYSTEM', payload: { title } },
     });
+
+    // Images collées : enregistrées comme pièces jointes puis marqueurs
+    // <!--IMAGE_n--> remplacés par les <img> (miroir de la création de ticket).
+    // Un échec ne fait pas échouer la création — on retire au moins les marqueurs.
+    if (req.files && req.files.length > 0) {
+      try {
+        const saved = await saveProblemAttachments(req.files, problem.id);
+        const finalDescription = sanitizeTicketHtml(applyFollowupImageMarkers(problem.description, saved));
+        await prisma.problem.update({ where: { id: problem.id }, data: { description: finalDescription } });
+        problem.description = finalDescription;
+      } catch (err) {
+        console.error('[problem.routes] Images collées de la description perdues:', err.message);
+        const withoutMarkers = sanitizeTicketHtml(String(problem.description || '').replace(/<!--IMAGE_\d+-->?/gi, ''));
+        problem.description = withoutMarkers;
+        await prisma.problem.update({ where: { id: problem.id }, data: { description: withoutMarkers } }).catch(() => {});
+      }
+    }
 
     res.status(201).json(problem);
     auditLog('PROBLEM_CREATED', { actor: req.user, targetType: 'Problem', targetId: problem.id, targetLabel: title }).catch(() => {});
@@ -607,6 +650,9 @@ router.patch(
         if (key === 'assigneeIds' || key === 'observerIds') continue;
         let val = req.body[key];
         if (key === 'dueDate' && val) val = new Date(val);
+        // Description HTML : nettoyée comme le contenu des tickets (miroir de
+        // data.content = sanitizeTicketHtml(...) côté PATCH /tickets/:id).
+        if (key === 'description' && typeof val === 'string') val = sanitizeTicketHtml(val);
 
         // Identifiants : coercition en entier (un select envoie des chaînes) et
         // contrôle d'existence — sinon Prisma lève une FK violée → 500.
@@ -950,6 +996,50 @@ router.delete(
     });
 
     res.json({ success: true });
+  }
+);
+
+// ── Images de la description (collage Ctrl+V / clic / glisser-déposer) ──
+// Miroir de POST /tickets/:id/content-images : l'image est téléversée tout de
+// suite, son URL relative (/uploads/…) est renvoyée et le <img> est ajouté à
+// l'enregistrement de la description. Fichier enregistré sans ligne en base
+// (comme côté ticket) — le static /uploads le sert ensuite.
+router.post(
+  '/:id/content-images',
+  forbidTechnicianProblemEdits,
+  requirePermission('problems.manage'),
+  problemUpload.array('images', 10),
+  async (req, res) => {
+    const problemId = Number(req.params.id);
+    const problem = await prisma.problem.findUnique({ where: { id: problemId }, select: { id: true } });
+    if (!problem) {
+      dropUploadedFiles(req.files);
+      return res.status(404).json({ error: 'Problème introuvable' });
+    }
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ error: 'Aucune image fournie' });
+    }
+
+    const uploaded = [];
+    for (const file of req.files) {
+      const validation = validateUpload(file.originalname, file.mimetype, 'followup');
+      if (!validation.valid) {
+        dropUploadedFiles(req.files);
+        return res.status(400).json({ error: validation.error });
+      }
+      const ext = path.extname(file.originalname) || '.png';
+      const safeFilename = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext}`;
+      const destPath = path.join(PROBLEM_ATTACHMENTS_DIR, safeFilename);
+      try {
+        fs.renameSync(file.path, destPath);
+      } catch {
+        fs.copyFileSync(file.path, destPath);
+        fs.unlinkSync(file.path);
+      }
+      uploaded.push({ url: `/uploads/problem-attachments/${safeFilename}`, filename: file.originalname });
+    }
+
+    res.json({ images: uploaded });
   }
 );
 

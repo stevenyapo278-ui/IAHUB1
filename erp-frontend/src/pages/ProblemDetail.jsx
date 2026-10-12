@@ -16,7 +16,7 @@ import ActivityStream, { buildTimeline } from '../components/ActivityStream';
 import ImageAttachmentsEditor from '../components/ImageAttachmentsEditor';
 import RemoteUserMultiSelect from '../components/RemoteUserMultiSelect';
 import RemoteUserSelect from '../components/RemoteUserSelect';
-import { clipboardImageFiles, imageItemsFromFiles, revokeImageItems } from '../utils/imageAttachments';
+import { clipboardImageFiles, imageItemsFromFiles, revokeImageItems, imageSrc } from '../utils/imageAttachments';
 import { sanitizeHtml, richTextIsEmpty } from '../utils/sanitize';
 import { readFollowupDraft, writeFollowupDraft } from '../utils/followupDraft';
 import RichTextEditor from '../components/RichTextEditor';
@@ -112,6 +112,24 @@ function initialsOf(name) {
   return (name || '').split(/\s+/).filter(Boolean).map((w) => w[0]).join('').slice(0, 2).toUpperCase() || '—';
 }
 
+// Découpe le HTML de la description en texte + balises <img> (miroir de
+// extractCleanTextAndImages de TicketDetail) : l'édition porte sur le texte,
+// les images réapparaissent en vignettes et repartent en fin de description.
+function extractCleanTextAndImages(content) {
+  if (!content || typeof content !== 'string') return { text: '', images: [] };
+  const imgRegex = /<img[^>]+src=["']([^"']+)["'][^>]*>|<!--IMAGE_\d+-->?/gi;
+  const images = [];
+  let match;
+  while ((match = imgRegex.exec(content)) !== null) {
+    if (match[0].startsWith('<img')) images.push(match[0]);
+  }
+  const text = content
+    .replace(/<img[^>]+src=["']([^"']+)["'][^>]*>/gi, '')
+    .replace(/<!--IMAGE_\d+-->?/gi, '')
+    .trim();
+  return { text, images };
+}
+
 // Puce méta compacte (miroir MetaChip de TicketDetail)
 function MetaChip({ icon: Icon, children, title }) {
   return (
@@ -192,6 +210,10 @@ export default function ProblemDetail() {
   const canDeleteProblem = canManage && ['SUPERADMIN', 'ADMIN', 'HOTLINE'].includes(user?.role);
   const [editMode, setEditMode] = useState(false);
   const [editForm, setEditForm] = useState({});
+  // Images de la description en cours d'édition (téléversées à l'ajout,
+  // miroir editingContentImages de TicketDetail)
+  const [editImages, setEditImages] = useState([]);
+  const [uploadingEditImages, setUploadingEditImages] = useState(false);
   const [saving, setSaving] = useState(false);
   const [showLinkModal, setShowLinkModal] = useState(false);
   // Brouillon du suivi en cours de rédaction — même principe que TicketDetail :
@@ -252,6 +274,51 @@ export default function ProblemDetail() {
     }
   }, [canManage]);
 
+  // ── Édition de la description (miroir startEditContent de TicketDetail) ──
+  function startEdit() {
+    const { text, images } = extractCleanTextAndImages(problem?.description || '');
+    setEditForm({ ...problem, description: text });
+    setEditImages(images.map((html, i) => ({ id: `desc-${i}`, url: imageSrc(html) })));
+    setEditMode(true);
+  }
+
+  function cancelEdit() {
+    setEditMode(false);
+    setEditImages([]);
+  }
+
+  // Téléversement immédiat des images de la description (collage, clic, drop)
+  async function uploadDescriptionImages(files) {
+    const list = Array.from(files || []).filter((f) => f?.type?.startsWith('image/'));
+    if (list.length === 0) return;
+    setUploadingEditImages(true);
+    try {
+      const fd = new FormData();
+      list.forEach((f) => fd.append('images', f));
+      const { data } = await api.post(`/problems/${id}/content-images`, fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      const imgs = data.images || [];
+      if (imgs.length > 0) {
+        setEditImages((prev) => [...prev, ...imgs.map((img, i) => ({
+          id: `desc-${Date.now()}-${i}`, url: img.url, filename: img.filename,
+        }))]);
+        toast.success(imgs.length > 1 ? `${imgs.length} images ajoutées` : 'Image ajoutée — elle partira avec la description');
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.error || "Erreur lors de l'envoi de l'image");
+    } finally {
+      setUploadingEditImages(false);
+    }
+  }
+
+  function handleEditDescriptionPaste(e) {
+    const files = clipboardImageFiles(e);
+    if (files.length === 0) return;
+    e.preventDefault();
+    uploadDescriptionImages(files);
+  }
+
   async function handleSave() {
     setSaving(true);
     try {
@@ -262,9 +329,20 @@ export default function ProblemDetail() {
       for (const key of EDITABLE) {
         if (editForm[key] !== undefined) payload[key] = editForm[key];
       }
+      // Les images collées/ajoutées repartent en <img> en fin de description
+      // (miroir handleSaveContent de TicketDetail).
+      if (payload.description !== undefined) {
+        let desc = (payload.description || '').trim();
+        const tags = editImages
+          .filter((img) => img.url)
+          .map((img) => `<img src="${img.url}" alt="image jointe" />`);
+        if (tags.length > 0) desc += `${desc ? '\n\n' : ''}${tags.join('\n\n')}`;
+        payload.description = desc;
+      }
       await api.patch(`/problems/${id}`, payload);
       toast.success('Problème mis à jour');
       setEditMode(false);
+      setEditImages([]);
       loadProblem();
     } catch (err) {
       toast.error(err.response?.data?.error || 'Erreur mise à jour');
@@ -546,7 +624,7 @@ export default function ProblemDetail() {
         {canEditProblems && (
           <div className="flex items-center gap-2 shrink-0">
             <button
-              onClick={() => setEditMode(!editMode)}
+              onClick={() => (editMode ? cancelEdit() : startEdit())}
               className="px-3 py-2 rounded-xl border border-outline-variant/60 text-xs font-medium flex items-center gap-1.5 cursor-pointer hover:bg-surface-container-high"
             >
               <Pencil className="w-3.5 h-3.5" />
@@ -621,7 +699,15 @@ export default function ProblemDetail() {
                 <div>
                   <label className="block text-xs font-medium text-on-surface-variant mb-1">Description</label>
                   <textarea value={editForm.description || ''} onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
+                    onPaste={handleEditDescriptionPaste}
                     rows={5} className={`${inputCls} w-full resize-none`} />
+                  <div className="mt-2">
+                    <ImageAttachmentsEditor
+                      items={editImages}
+                      onChange={setEditImages}
+                      onFiles={uploadDescriptionImages}
+                    />
+                  </div>
                 </div>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                   <div>
@@ -662,11 +748,11 @@ export default function ProblemDetail() {
                   </select>
                 </div>
                 <div className="flex justify-end gap-2 pt-1">
-                  <button onClick={() => setEditMode(false)}
+                  <button onClick={cancelEdit}
                     className="px-4 py-2 rounded-xl border border-outline-variant/60 text-sm font-medium cursor-pointer hover:bg-surface-container-high">
                     Annuler
                   </button>
-                  <button onClick={handleSave} disabled={saving}
+                  <button onClick={handleSave} disabled={saving || uploadingEditImages}
                     className="px-4 py-2 rounded-xl bg-primary text-on-primary text-sm font-bold cursor-pointer hover:opacity-90 disabled:opacity-50">
                     {saving ? <RefreshCw className="w-4 h-4 animate-spin inline" /> : 'Enregistrer'}
                   </button>
@@ -695,9 +781,18 @@ export default function ProblemDetail() {
                   <InfoTile icon={MapPin} label="Lieu" value={problem.locationName || '—'} tone="slate" title={problem.locationName} />
                 </div>
 
-                <p className="text-sm text-on-surface-variant leading-relaxed whitespace-pre-wrap">
-                  {problem.description || <span className="italic">Aucune description.</span>}
-                </p>
+                {problem.description && (problem.description.includes('<') || problem.description.includes('&#') || problem.description.includes('&lt;')) ? (
+                  // HTML (description convertie depuis un ticket, images inline) :
+                  // rendu sanitisé, miroir de l'affichage de la description ticket.
+                  <div
+                    className="text-sm text-on-surface-variant leading-relaxed break-words [&_img]:max-w-full [&_img]:rounded-xl [&_img]:border [&_img]:border-outline-variant/50 [&_img]:my-3 [&_a]:text-blue-600 [&_a]:underline [&_p]:mb-2 [&_p]:last:mb-0 [&_ul]:list-disc [&_ul]:pl-4 [&_ul]:my-1.5 [&_ol]:list-decimal [&_ol]:pl-4 [&_ol]:my-1.5 [&_li]:mb-0.5 [&_strong]:font-semibold [&_b]:font-semibold [&_h1]:text-lg [&_h1]:font-bold [&_h2]:text-base [&_h2]:font-bold [&_h3]:text-sm [&_h3]:font-bold [&_table]:w-full [&_table]:border-collapse [&_th]:border [&_th]:border-outline-variant/30 [&_th]:p-2 [&_td]:border [&_td]:border-outline-variant/30 [&_td]:p-2"
+                    dangerouslySetInnerHTML={{ __html: sanitizeHtml(problem.description) }}
+                  />
+                ) : (
+                  <p className="text-sm text-on-surface-variant leading-relaxed whitespace-pre-wrap">
+                    {problem.description || <span className="italic">Aucune description.</span>}
+                  </p>
+                )}
 
                 {/* Pièces jointes : captures / fichiers uploadés */}
                 <div className="pt-4 border-t border-outline-variant/30">

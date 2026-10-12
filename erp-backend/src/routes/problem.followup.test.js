@@ -175,14 +175,19 @@ describe('POST /problems/:id/followups — suivi avec captures', () => {
   });
 
   it('refuse le suivi sur un problème inexistant et libère les fichiers', async () => {
+    // Contenu unique : les suites tournent en parallèle dans le même dossier,
+    // on identifie donc notre fichier par son contenu et non par un compte.
+    const content = Buffer.from(`unique-missing-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     const fd = new FormData();
     fd.append('content', 'Inexistant <!--IMAGE_0-->');
-    fd.append('images', new Blob([PNG], { type: 'image/png' }), 'x.png');
-    const before = fs.readdirSync(ATTACHMENTS_DIR).length;
+    fd.append('images', new Blob([content], { type: 'image/png' }), 'x.png');
     const res = await fetch(`${base}/problems/999/followups`, { method: 'POST', body: fd });
 
     expect(res.status).toBe(404);
-    expect(fs.readdirSync(ATTACHMENTS_DIR).length).toBe(before);
+    const leftovers = fs.readdirSync(ATTACHMENTS_DIR).filter((name) => {
+      try { return fs.readFileSync(path.join(ATTACHMENTS_DIR, name)).equals(content); } catch { return false; }
+    });
+    expect(leftovers).toHaveLength(0);
   });
 });
 

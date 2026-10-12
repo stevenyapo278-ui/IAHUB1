@@ -16,6 +16,8 @@ import RemoteUserSelect from '../components/RemoteUserSelect';
 import PaginationButtons from '../components/PaginationButtons';
 import ProblemFilterBar from '../components/ProblemFilterBar';
 import ProblemFilterDrawer from '../components/ProblemFilterDrawer';
+import ImageAttachmentsEditor from '../components/ImageAttachmentsEditor';
+import { clipboardImageFiles, imageItemsFromFiles, revokeImageItems } from '../utils/imageAttachments';
 
 const STATUS_LABELS = {
   NEW: 'Nouveau', IN_PROGRESS: 'En cours', ASSIGNED: 'Attribué', PLANNED: 'Planifié',
@@ -426,14 +428,40 @@ function CreateProblemModal({ onClose, onCreated }) {
   const [form, setForm] = useState({ title: '', description: '', priority: 'P3', urgency: 'MEDIUM', impact: 'MEDIUM', category: '', requesterId: '' });
   const [submitting, setSubmitting] = useState(false);
   const [categories, setCategories] = useState([]);
+  // Images collées dans la description (miroir de la création de ticket) :
+  // gardées en local (aperçu blob://) et envoyées avec le formulaire.
+  const [pastedImages, setPastedImages] = useState([]);
+  const pastedImagesRef = useRef(pastedImages);
+  useEffect(() => { pastedImagesRef.current = pastedImages; }, [pastedImages]);
+  // Libère les aperçus blob:// à la fermeture du modale (annulation ou création)
+  useEffect(() => () => revokeImageItems(pastedImagesRef.current), []);
 
   useEffect(() => {
     api.get('/categories').then(({ data }) => setCategories(Array.isArray(data) ? data : data.categories || [])).catch(() => {});
   }, []);
 
+  // Images de la description : collage (Ctrl+V), bouton ou glisser-déposer
+  function addFormImages(files) {
+    const items = imageItemsFromFiles(files, 'problem');
+    if (items.length === 0) return;
+    setPastedImages((prev) => [...prev, ...items]);
+    toast.success(
+      items.length > 1
+        ? `${items.length} images ajoutées — elles partiront avec le problème`
+        : 'Image ajoutée — elle partira avec le problème',
+    );
+  }
+
+  function handlePaste(e) {
+    const files = clipboardImageFiles(e);
+    if (files.length === 0) return;
+    e.preventDefault();
+    addFormImages(files);
+  }
+
   async function handleSubmit(e) {
     e.preventDefault();
-    if (!form.title.trim() || !form.description.trim()) return toast.error('Titre et description requis');
+    if (!form.title.trim() || (!form.description.trim() && pastedImages.length === 0)) return toast.error('Titre et description requis');
     setSubmitting(true);
     try {
       // requesterId arrive en chaîne du sélecteur : coercition en entier pour Prisma
@@ -441,8 +469,29 @@ function CreateProblemModal({ onClose, onCreated }) {
         ...form,
         requesterId: form.requesterId ? Number(form.requesterId) : null,
       };
-      const { data } = await api.post('/problems', payload);
+
+      let data;
+      if (pastedImages.length > 0) {
+        // Multipart : images + marqueurs <!--IMAGE_n--> dans la description,
+        // remplacés par les <img> côté serveur (miroir création de ticket).
+        let description = form.description || '';
+        pastedImages.forEach((img, idx) => {
+          description += `${description ? '\n\n' : ''}<!--IMAGE_${idx}-->`;
+        });
+        const fd = new FormData();
+        Object.entries({ ...payload, description }).forEach(([key, value]) => {
+          if (value === '' || value === undefined || value === null) return;
+          fd.append(key, value);
+        });
+        pastedImages.forEach((img) => fd.append('images', img.file));
+        ({ data } = await api.post('/problems', fd, { headers: { 'Content-Type': 'multipart/form-data' } }));
+      } else {
+        ({ data } = await api.post('/problems', payload));
+      }
+
       toast.success('Problème créé');
+      revokeImageItems(pastedImages);
+      setPastedImages([]);
       onCreated(data.id);
     } catch (err) {
       toast.error(err.response?.data?.error || 'Erreur création');
@@ -467,7 +516,15 @@ function CreateProblemModal({ onClose, onCreated }) {
           <div>
             <label className="block text-xs font-medium text-on-surface-variant mb-1">Description *</label>
             <textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })}
-              rows={4} className={`${inputCls} w-full resize-none`} placeholder="Description détaillée du problème racine..." />
+              onPaste={handlePaste}
+              rows={4} className={`${inputCls} w-full resize-none`} placeholder="Description détaillée du problème racine... (Ctrl+V pour coller une capture)" />
+            <div className="mt-2">
+              <ImageAttachmentsEditor
+                items={pastedImages}
+                onChange={setPastedImages}
+                onFiles={addFormImages}
+              />
+            </div>
           </div>
           <div className="grid grid-cols-3 gap-3">
             <div>
