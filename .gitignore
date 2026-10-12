@@ -43,3 +43,6 @@ certs/
 glpi-config/
 n8n-data/
 cookies.txt
+
+# ── Exports Excel (racine du dépôt) ──────────────────────────────────────
+/*.xlsx
