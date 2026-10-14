@@ -55,6 +55,9 @@ Quand on te parle de mails/emails/fil/conversation (ex: "dernier mail de Jean", 
 3. Pour "mail(s) sur [sujet]" → search_emails(query="[sujet]")
 4. Pour "dernier(s) mail(s) + période" → search_emails(query="[sujet]", dateFrom/dateTo="YYYY-MM-DD")
 5. Synthétise avec expéditeur, objet, date, ticket lié (#id), fil, direction (reçu/envoyé) et extrait du contenu
+6. "le dernier mail de X concerne quoi / de quoi parle le mail de X" → search_emails(fromEmail="X") SANS ATTENDRE et SANS autre outil d'abord : tu ne connais pas encore le sujet, donc query peut rester vide (ou n'être que le login/nom). L'outil liste alors les mails de cet expéditeur du plus récent au plus ancien.
+7. SI SEARCH_EMAILS NE RENVOIE RIEN : dis-le explicitement (« Aucun mail de … : le filtre utilisé était … ») et propose de vérifier l'adresse exacte ou la période. Ne remplace JAMAIS ce résultat par la fiche du compte (« l'utilisateur est enregistré … ») ni par la liste de ses tickets : la question portait sur le MAIL, une réponse sans mail est une réponse ratée.
+8. Une question qui contient le mot mail/courriel/e-mail doit TOUJOURS transiter par search_emails avant la réponse finale — c'est le seul moyen de citer l'objet, la date et le contenu du mail demandé.
 
 RÈGLE "COMPTE / PERSONNE" (absolue) :
 Quand on te demande si une demande concerne un compte ou une personne (ex : "as-tu une demande qui concerne ce compte ?", "une demande pour Diomande Moussa / mkdiomande", "y a-t-il quelque chose pour ce nouveau collègue", avec nom, login, matricule ou rôle — même SANS le mot "mail" dans la question) :
@@ -1455,11 +1458,11 @@ const ALL_CHATBOT_TOOLS = [
     type: 'function',
     function: {
       name: 'search_emails',
-      description: 'Rechercher dans les contenus des mails (IncomingEmail + fils TicketMessage) avec RAG hybride. Utile pour : dernier mail d’un expéditeur, fil d’un ticket, mails d’une période, mails sur un sujet. MAIS AUSSI dès qu’une PERSONNE ou un COMPTE est en cause (« as-tu une demande qui concerne ce compte ? », « une demande pour Diomande Moussa / mkdiomande », « y a-t-il quelque chose pour ce collègue ») : utilise ce tool avec query="nom ou login" MÊME SANS que le mot « mail » apparaisse — les demandes (création de compte, accès, badge, matériel, RH…) arrivent souvent d’abord par mail. Exemples: "mails de Jean sur pannes caisse", "dernier mail du ticket 123", "mails d’hier sur incident réseau", "mail qui a créé le ticket 456", "mkdiomande", "Diomande Moussa". Retourne extraits avec métadonnées (fromEmail, subject, date, ticketId, conversationId, direction).',
+      description: 'Rechercher dans les contenus des mails (IncomingEmail + fils TicketMessage) avec RAG hybride. Utile pour : dernier mail d’un expéditeur, fil d’un ticket, mails d’une période, mails sur un sujet — pour « le dernier mail de X concerne quoi », passe fromEmail et laisse query VIDE (tu ne connais pas encore le sujet) : l’outil liste alors les mails de l’expéditeur du plus récent au plus ancien. MAIS AUSSI dès qu’une PERSONNE ou un COMPTE est en cause (« as-tu une demande qui concerne ce compte ? », « une demande pour Diomande Moussa / mkdiomande », « y a-t-il quelque chose pour ce collègue ») : utilise ce tool avec query="nom ou login" MÊME SANS que le mot « mail » apparaisse — les demandes (création de compte, accès, badge, matériel, RH…) arrivent souvent d’abord par mail. Exemples: "mails de Jean sur pannes caisse", "dernier mail du ticket 123", "mails d’hier sur incident réseau", "mail qui a créé le ticket 456", "mkdiomande", "Diomande Moussa". Retourne extraits avec métadonnées (fromEmail, subject, date, ticketId, conversationId, direction).',
       parameters: {
         type: 'object',
         properties: {
-          query: { type: 'string', description: 'Requête sémantique (mots-clés, objet, contenu)' },
+          query: { type: 'string', description: 'Requête sémantique (mots-clés, objet, contenu). Peut être vide ou très courte si fromEmail/ticketId/period est renseigné.' },
           fromEmail: { type: 'string', description: 'Filtrer par expéditeur (email ou nom, ex: jean.kouassi@prosuma.ci)' },
           ticketId: { type: 'integer', description: 'Filtrer par ticket lié (erpTicketId ou ticketId)' },
           conversationId: { type: 'string', description: 'Filtrer par fil de conversation Outlook' },
@@ -1939,7 +1942,19 @@ async function executeTool(toolName, args, user, { confirmed = false } = {}, ctx
         // Sans ce `viewer`, le demandeur pourrait lire tout l'historique mail.
         viewer: user ? { sub: user.sub || user.id, role: user.role } : null,
       });
-      if (!results || results.length === 0) return `Aucun mail trouvé pour "${p.query}"${p.fromEmail ? ` de ${p.fromEmail}` : ''}${p.ticketId ? ` (ticket #${p.ticketId})` : ''}.`;
+      if (!results || results.length === 0) {
+        const criteria = [
+          p.query && p.query.trim() ? `pour "${p.query.trim()}"` : null,
+          p.fromEmail ? `de ${p.fromEmail}` : null,
+          p.ticketId ? `du ticket #${p.ticketId}` : null,
+          p.conversationId ? `du fil ${p.conversationId}` : null,
+          p.dateFrom || p.dateTo ? `du ${p.dateFrom || '…'} au ${p.dateTo || '…'}` : null,
+        ].filter(Boolean).join(' ') || '(aucun critère)';
+        return `Aucun mail trouvé ${criteria}.\n`
+          + 'Dis-le TEL QUEL à l’utilisateur et ne remplace surtout pas ce résultat par une fiche d’utilisateur '
+          + 'ni par la liste de ses tickets : si l’utilisateur a demandé un mail, réponds qu’aucun mail ne correspond, '
+          + 'précise le filtre appliqué et propose de vérifier l’adresse exacte de l’expéditeur ou la période.';
+      }
       // Chaque extrait est encadré par <mail_contenu> : le prompt système
       // impose de le traiter comme une DONNÉE et jamais comme une consigne
       // (les mails sont du contenu externe, donc vecteur d'injection).

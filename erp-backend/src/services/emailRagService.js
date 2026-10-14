@@ -291,14 +291,24 @@ async function searchEmailRag(query, opts = {}) {
     viewer = null,
   } = typeof opts === 'number' ? { topK: opts } : opts;
 
-  if (!query || !query.trim()) return [];
+  // Le prompt système autorise query="[sujet ou vide]" : « le dernier mail de X »
+  // n'a AUCUN mot-clé de contenu, seulement un expéditeur. Retourner [] ici — ce
+  // que faisait la version d'origine — vidait la recherche au moment exact où le
+  // chatbot avait besoin du mail, et la réponse dérivait vers une simple fiche
+  // utilisateur/tickets. On n'abandonne donc que si la recherche est muette :
+  // ni mots-clés, ni filtre.
+  const rawQuery = typeof query === 'string' ? query.trim() : '';
+  const hasMetaFilter = !!(fromEmail || ticketId || conversationId || dateFrom || dateTo || direction);
+  if (!rawQuery && !hasMetaFilter) return [];
 
   let embedding = null;
-  try {
-    const vector = await generateEmbedding(query, 'RETRIEVAL_QUERY');
-    embedding = toVectorLiteral(vector);
-  } catch (e) {
-    console.warn('[emailRag] generateEmbedding échoué, fallback FTS seul:', e.message);
+  if (rawQuery) {
+    try {
+      const vector = await generateEmbedding(query, 'RETRIEVAL_QUERY');
+      embedding = toVectorLiteral(vector);
+    } catch (e) {
+      console.warn('[emailRag] generateEmbedding échoué, fallback FTS seul:', e.message);
+    }
   }
 
   const rerankCandidates = await listRerankCandidates();
@@ -360,6 +370,41 @@ async function searchEmailRag(query, opts = {}) {
     }
     return { where: conditions.length ? `WHERE ${conditions.join(' AND ')}` : '', values };
   };
+
+  // ── Requête vide + filtres posés : listing par métadonnées, du plus récent ──
+  // On ne peut ni vectoriser ni faire du plein texte sur une requête vide, donc
+  // on liste directement les sources correspondantes. Un SEUL chunk par source
+  // (le plus récent — le 1ᵉʳ contient objet, expéditeur et le début du corps) :
+  // sinon « dernier mail de X » renverrait les 4 morceaux du même mail.
+  // Même cloisonnement RBAC que les autres branches : les filtres de buildFilters
+  // sont repris tels quels (y compris le fail-closed des rôles restreints).
+  if (!rawQuery) {
+    const { where, values } = buildFilters(2); // $1 = LIMIT, filtres à partir de $2
+    try {
+      const rows = await prisma.$queryRawUnsafe(
+        `SELECT id, "sourceType", "sourceId", "chunkIndex", content, "metadata", "createdAt",
+                0 AS similarity, 0 AS text_rank, 0 AS combined_score
+         FROM (
+           SELECT id, "sourceType", "sourceId", "chunkIndex", content, "metadata", "createdAt",
+                  COALESCE(("metadata"->>'receivedAt')::timestamp, "createdAt") AS "sortDate",
+                  ROW_NUMBER() OVER (
+                    PARTITION BY "sourceType", "sourceId"
+                    ORDER BY COALESCE(("metadata"->>'receivedAt')::timestamp, "createdAt") DESC, "chunkIndex" ASC
+                  ) AS rn
+           FROM "EmailRagChunk"
+           ${where}
+         ) t
+         WHERE t.rn = 1
+         ORDER BY t."sortDate" DESC, t."createdAt" DESC
+         LIMIT $1`,
+        topK, ...values
+      );
+      return (rows || []).slice(0, topK);
+    } catch (e) {
+      console.warn('[emailRag] listing sans mots-clés échoué:', e.message);
+      return [];
+    }
+  }
 
   let results;
   if (embedding && useHybrid) {
@@ -447,21 +492,30 @@ async function searchEmailRag(query, opts = {}) {
   // requête pouvait ne rien renvoyer alors que l'expéditeur est bien présent.
   // On retombe alors sur une correspondance littérale sur l'expéditeur et l'objet,
   // TOUJOURS avec les mêmes filtres (dont le cloisonnement RBAC par ticket).
-  if (finalResults.length === 0 && query.trim().length >= 2) {
-    const { where, values } = buildFilters(3);
-    const metadataMatch = `(metadata->>'fromName' ILIKE $1 OR metadata->>'fromEmail' ILIKE $1 OR metadata->>'subject' ILIKE $1)`;
-    const innerWhere = where ? `WHERE ${where.slice(6)} AND ${metadataMatch}` : `WHERE ${metadataMatch}`;
+  // Un expéditeur renseigné suffit à identifier ce que l'on cherche : inutile
+  // d'exiger en PLUS une correspondance sur le query, qui pour « dernier mail de X »
+  // ne contient aucun mot-clé de contenu. On liste alors les mails de l'expéditeur,
+  // ordonnés par date de réception (et non par date d'indexation des chunks).
+  if (finalResults.length === 0 && (fromEmail || query.trim().length >= 2)) {
+    const bySender = !!fromEmail;
+    const { where, values } = buildFilters(bySender ? 2 : 3);
+    const metadataMatch = bySender
+      ? ''
+      : `(metadata->>'fromName' ILIKE $1 OR metadata->>'fromEmail' ILIKE $1 OR metadata->>'subject' ILIKE $1)`;
+    const innerWhere = where
+      ? (metadataMatch ? `WHERE ${where.slice(6)} AND ${metadataMatch}` : where)
+      : `WHERE ${metadataMatch}`;
     try {
       const byMetadata = await prisma.$queryRawUnsafe(
         `SELECT id, "sourceType", "sourceId", "chunkIndex", content, metadata, "createdAt",
                 0 AS similarity, 0 AS text_rank, 0 AS combined_score
          FROM "EmailRagChunk"
          ${innerWhere}
-         ORDER BY "createdAt" DESC
-         LIMIT $2`,
-        `%${query.trim()}%`, topK, ...values
+         ORDER BY COALESCE(("metadata"->>'receivedAt')::timestamp, "createdAt") DESC
+         LIMIT ${bySender ? '$1' : '$2'}`,
+        ...(bySender ? [topK, ...values] : [`%${query.trim()}%`, topK, ...values])
       );
-      finalResults = byMetadata.slice(0, topK);
+      finalResults = (byMetadata || []).slice(0, topK);
     } catch (e) {
       console.warn('[emailRag] repli métadonnées échoué:', e.message);
     }

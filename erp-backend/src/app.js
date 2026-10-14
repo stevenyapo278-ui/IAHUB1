@@ -216,7 +216,11 @@ app.use('/uploads', express.static(path.join(process.cwd(), 'uploads'), {
 
 app.get('/health', (req, res) => res.json({ status: 'ok' }));
 app.get('/api/system/circuit-breakers', (req, res) => res.json(allBreakerStatuses()));
-app.get('/api/system/ai-usage', require('./routes/aiUsage.routes'));
+// Monté avec app.use ET non app.get : le fichier exporte un express.Router()
+// dont la route est définie sur '/'. Passé en handler à app.get(), le router
+// reçoit l'URL complète ('/api/system/ai-usage') qui ne matche jamais '/', d'où
+// un 404 « Route introuvable » affiché par la vue /ai-monitor.
+app.use('/api/system/ai-usage', require('./routes/aiUsage.routes'));
 
 app.use('/api/auth', authRoutes);
 app.use('/api/tickets', ticketRoutes);

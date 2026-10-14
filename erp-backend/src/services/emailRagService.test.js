@@ -214,8 +214,72 @@ describe('searchEmailRag', () => {
     generateEmbedding.mockResolvedValue(new Array(768).fill(0.01));
   });
 
-  it('retourne un tableau vide si la requête est vide', async () => {
+  it('retourne un tableau vide si la requête est vide ET sans aucun filtre', async () => {
     await expect(searchEmailRag('   ')).resolves.toEqual([]);
+    expect(prisma.$queryRawUnsafe).not.toHaveBeenCalled();
+  });
+
+  // Réponse « le dernier mail de X concerne quoi ? » : le prompt système autorise
+  // query="[sujet ou vide]", et le seul critère utile est l'expéditeur.
+  it('requête vide + fromEmail : liste les mails du plus récent au plus ancien', async () => {
+    const rows = [
+      { id: 1, content: 'Objet: Nouvelle caisse', metadata: { receivedAt: '2026-10-01' } },
+      { id: 2, content: 'Objet: Badge cassé', metadata: { receivedAt: '2026-09-01' } },
+    ];
+    prisma.$queryRawUnsafe.mockResolvedValue(rows);
+
+    const res = await searchEmailRag('', { fromEmail: 'informatique_s2p', topK: 5 });
+
+    expect(res).toHaveLength(2);
+    // rien à vectoriser ni à classer : on ne déclenche aucun appel d'embedding
+    expect(generateEmbedding).not.toHaveBeenCalled();
+    const call = prisma.$queryRawUnsafe.mock.calls[0];
+    const sql = call[0];
+    // un seul chunk par source (le 1ᵉʳ morceau porte objet + expéditeur)
+    expect(sql).toContain('ROW_NUMBER() OVER');
+    expect(sql).toContain('t.rn = 1');
+    // tri par récence réelle du mail, pas par date d'indexation
+    expect(sql).toContain('t."sortDate" DESC');
+    expect(sql).toContain("'receivedAt'");
+    // $1 = limite, puis les filtres à partir de $2
+    expect(sql).toContain('LIMIT $1');
+    expect(sql).toContain('ILIKE $2');
+    expect(call.slice(1)[0]).toBe(5);
+    expect(call.slice(1)[1]).toBe('%informatique_s2p%');
+  });
+
+  it('requête vide + fromEmail : le cloisonnement RBAC reste appliqué', async () => {
+    prisma.$queryRawUnsafe.mockResolvedValue([]);
+    await searchEmailRag('', { fromEmail: 'x', viewer: { sub: 7, role: 'REQUESTER' } });
+    const sql = prisma.$queryRawUnsafe.mock.calls[0][0];
+    // le listing « dernier mail » ne doit jamais contourner le périmètre du rôle
+    expect(sql).toContain('_TicketObservers');
+    expect(sql).toContain('(metadata->>\'ticketId\')::int');
+    expect(sql).not.toMatch(/1\s*=\s*0/);
+  });
+
+  it('fail-closed : sans identifiant, le listing ne peut rien renvoyer', async () => {
+    prisma.$queryRawUnsafe.mockResolvedValue([]);
+    await searchEmailRag('', { fromEmail: 'x', viewer: { role: 'REQUESTER' } });
+    expect(prisma.$queryRawUnsafe.mock.calls[0][0]).toContain('1 = 0');
+  });
+
+  it('repli métadonnées : le filtre fromEmail suffit et le tri suit la date de réception', async () => {
+    prisma.$queryRawUnsafe
+      .mockResolvedValueOnce([]) // recherche hybride : aucun résultat sous le seuil
+      .mockResolvedValueOnce([{ id: 42, content: 'Objet: Dernier point' }]);
+
+    const res = await searchEmailRag('dernier mail', { fromEmail: 'informatique_s2p', topK: 5 });
+
+    expect(res).toHaveLength(1);
+    const call = prisma.$queryRawUnsafe.mock.calls[1];
+    const sql = call[0];
+    expect(sql).toContain('COALESCE(("metadata"->>\'receivedAt\')::timestamp');
+    expect(sql).toContain('ORDER BY COALESCE');
+    // L'expéditeur suffit : aucun motif de requête n'est exigé en plus (et chaque
+    // paramètre fourni doit être référencé, sinon Prisma/Postgres refuse de le lier)
+    expect(sql).toContain('LIMIT $1');
+    expect(call.slice(1)).toEqual([5, '%informatique_s2p%']);
   });
 
   it('mode hybride : les filtres démarrent à $5 (après embedding, query, limit, seuil)', async () => {
