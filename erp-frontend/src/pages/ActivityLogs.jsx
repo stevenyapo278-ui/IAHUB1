@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import api from '../api/client';
 import { useTheme } from '../context/ThemeContext';
+import { FIELD_LABELS, formatLogValue } from '../utils/logFields';
 import { useFilterParam, useFilterParams } from '../hooks/useFilterParam';
 import PageShell from '../components/PageShell';
 import Pagination from '../components/Pagination';
@@ -49,7 +50,24 @@ const EVENT_META = {
   NEW_TICKET_SUGGESTED:         { icon: Sparkles,         color: 'text-indigo-600 dark:text-indigo-400', bg: 'bg-indigo-500/10', border: 'border-indigo-500/20', label: 'Nouvelle demande détectée' },
   NEW_TICKET_SUGGESTED_CREATED: { icon: FileText,         color: 'text-indigo-600 dark:text-indigo-400', bg: 'bg-indigo-500/10', border: 'border-indigo-500/20', label: 'Ticket créé depuis la suggestion' },
   NEW_TICKET_SUGGESTED_DISMISSED: { icon: XCircle,        color: 'text-slate-600 dark:text-zinc-400',  bg: 'bg-slate-500/10',  border: 'border-slate-500/20', label: 'Suggestion de nouvelle demande ignorée' },
+  TICKET_UPDATED:                { icon: FileText,         color: 'text-blue-600 dark:text-blue-400',  bg: 'bg-blue-500/10',   border: 'border-blue-500/20',   label: 'Ticket modifié' },
+  TEAM_CHANGED:                  { icon: User,             color: 'text-indigo-600 dark:text-indigo-400', bg: 'bg-indigo-500/10', border: 'border-indigo-500/20', label: 'Équipe changée' },
+  FOLLOWUP_EDITED:               { icon: FileText,         color: 'text-teal-600 dark:text-teal-400',   bg: 'bg-teal-500/10',   border: 'border-teal-500/20',   label: 'Suivi modifié' },
+  FOLLOWUP_DELETED:              { icon: XCircle,          color: 'text-red-600 dark:text-red-400',    bg: 'bg-red-500/10',    border: 'border-red-500/20',    label: 'Suivi supprimé' },
+  FOLLOWUP_MADE_PRIVATE:         { icon: FileText,         color: 'text-violet-600 dark:text-violet-400', bg: 'bg-violet-500/10', border: 'border-violet-500/20', label: 'Suivi rendu privé' },
+  FOLLOWUP_MADE_PUBLIC:          { icon: FileText,         color: 'text-violet-600 dark:text-violet-400', bg: 'bg-violet-500/10', border: 'border-violet-500/20', label: 'Suivi rendu public' },
+  DUE_DATE_UPDATED:              { icon: Clock,            color: 'text-amber-600 dark:text-amber-400',  bg: 'bg-amber-500/10',  border: 'border-amber-500/20',  label: 'Échéance modifiée' },
+  DUE_DATE_BREACHED:             { icon: AlertTriangle,    color: 'text-red-600 dark:text-red-400',    bg: 'bg-red-500/10',    border: 'border-red-500/20',    label: 'Échéance dépassée' },
+  DELETED:                       { icon: XCircle,          color: 'text-red-600 dark:text-red-400',    bg: 'bg-red-500/10',    border: 'border-red-500/20',    label: 'Ticket supprimé' },
+  RESTORED:                      { icon: CheckCircle2,     color: 'text-emerald-600 dark:text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/20', label: 'Ticket restauré' },
+  MERGED_INTO:                   { icon: ArrowUpRight,     color: 'text-blue-600 dark:text-blue-400',  bg: 'bg-blue-500/10',   border: 'border-blue-500/20',   label: 'Ticket fusionné' },
+  MERGED_FROM:                   { icon: ArrowUpRight,     color: 'text-blue-600 dark:text-blue-400',  bg: 'bg-blue-500/10',   border: 'border-blue-500/20',   label: 'Fusionné vers' },
+  LINKED:                        { icon: ArrowUpRight,     color: 'text-blue-600 dark:text-blue-400',  bg: 'bg-blue-500/10',   border: 'border-blue-500/20',   label: 'Lié' },
+  UNLINKED:                      { icon: XCircle,          color: 'text-slate-600 dark:text-zinc-400',  bg: 'bg-slate-500/10',  border: 'border-slate-500/20',  label: 'Lien retiré' },
 };
+
+// Libellés des champs + formatage des valeurs : utils/logFields.js (partagé
+// avec ActivityStream et AuditLogs).
 
 const TYPE_OPTIONS = Object.keys(EVENT_META);
 
@@ -502,6 +520,30 @@ export default function ActivityLogs({ embedded = false } = {}) {
                               <div><strong className="text-on-surface">Date exacte :</strong> {formatDate(event.createdAt)}</div>
                               {event.glpiTicketId && <div><strong className="text-on-surface">Ticket Externe :</strong> #{event.glpiTicketId}</div>}
                             </div>
+
+                            {/* Changements détaillés (Ticket modifié) : champ, avant, après */}
+                            {Array.isArray(event.payload?.changes) && event.payload.changes.length > 0 && (
+                              <div>
+                                <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider block mb-1">
+                                  Changements ({event.payload.changes.length})
+                                  {event.payload.via === 'bulk' && (
+                                    <span className="ml-2 px-1.5 py-0.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 normal-case">
+                                      Action groupée
+                                    </span>
+                                  )}
+                                </span>
+                                <div className="rounded-xl border border-outline-variant/20 overflow-hidden">
+                                  {event.payload.changes.map((c, i) => (
+                                    <div key={`${event.id}-chg-${i}`} className="flex items-start gap-2 px-3 py-1.5 text-[11px] odd:bg-surface-container-low/40">
+                                      <span className="font-bold text-on-surface min-w-[130px]">{FIELD_LABELS[c.field] || c.field}</span>
+                                      <span className="text-red-600 dark:text-red-400 line-through break-all">{formatLogValue(c.fromLabel ?? c.from)}</span>
+                                      <span className="text-on-surface-variant shrink-0">→</span>
+                                      <span className="text-emerald-600 dark:text-emerald-400 font-semibold break-all">{formatLogValue(c.toLabel ?? c.to)}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
 
                             {event.payload && (
                               <div>

@@ -92,6 +92,9 @@ enum TicketEventType {
   NEW_TICKET_SUGGESTED
   NEW_TICKET_SUGGESTED_CREATED
   NEW_TICKET_SUGGESTED_DISMISSED
+  // Modification de champ(s) via l'UI/API (PATCH /tickets/:id) : payload.changes
+  // contient [{ field, from, to }] — qui a fait quoi, quand (actor + createdAt)
+  TICKET_UPDATED
 }
 
 enum TicketPriority {

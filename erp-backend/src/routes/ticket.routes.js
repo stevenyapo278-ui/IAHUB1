@@ -54,6 +54,55 @@ const STATUS_LABELS = {
   SOLVED: 'Résolu', CLOSED: 'Fermé',
 };
 
+// ── Journal « qui a fait quoi, quand » sur PATCH /:id ─────────────────────
+// Compare l'état AVANT (select avant update) et APRÈS (retour de update) et
+// retourne [{ field, from, to, fromLabel?, toLabel? }] pour chaque champ
+// réellement modifié. Les valeurs longues (HTML) sont tronquées à 300 car.
+// pour garder des payloads de journal lisibles ; la comparaison se fait sur
+// la valeur complète.
+const PATCH_TRACKED_FIELDS = [
+  'title', 'content', 'status', 'priority', 'category', 'teamId',
+  'assignedToId', 'type', 'urgency', 'impact', 'source', 'externalId',
+  'requesterId', 'secondaryRequesterId', 'sourceName', 'sourceEmail',
+  'approvalStatus', 'isMajorIncident', 'dueDate', 'locationId', 'locationName',
+  'outlookConversationId', 'requesterIds', 'impactedSites',
+];
+
+function comparableLogValue(value) {
+  if (value === undefined) return null;
+  if (value === null) return null;
+  if (value instanceof Date) return value.toISOString();
+  if (Array.isArray(value)) return value.map((v) => (v && typeof v === 'object' && v.id !== undefined ? v.id : v));
+  if (typeof value === 'object' && value.id !== undefined) return value.id;
+  return value;
+}
+
+function clipLogValue(value) {
+  return typeof value === 'string' && value.length > 300 ? `${value.slice(0, 300)}…` : value;
+}
+
+function collectTicketChanges(before, after, data = {}) {
+  const changes = [];
+  const push = (field, fromValue, toValue) => {
+    const from = comparableLogValue(fromValue);
+    const to = comparableLogValue(toValue);
+    if (JSON.stringify(from) === JSON.stringify(to)) return;
+    changes.push({ field, from: clipLogValue(from), to: clipLogValue(to) });
+  };
+
+  for (const field of PATCH_TRACKED_FIELDS) push(field, before?.[field], after?.[field]);
+
+  // Listes relationnelles : observateurs, techniciens assignés, équipements
+  // (data ne contient ces opérations que si le client les a envoyées).
+  push('observers', before?.observers || [], data.observers ? data.observers.set : (before?.observers || []));
+  push('assignees', before?.assignees || [], data.assignees ? data.assignees.set : (before?.assignees || []));
+  if (data.assets) {
+    push('assets', (before?.assets || []).map((a) => a.assetId), (data.assets.create || []).map((a) => a.assetId));
+  }
+
+  return changes;
+}
+
 // Un technicien ne voit que les tickets qui lui sont assignés ou qu'il a ouverts.
 function isTechnicianOnly(user) {
   return user.role === 'TECHNICIAN';
@@ -348,12 +397,15 @@ router.post(
 
     let updatedCount = 0;
     const failures = [];
+    // Traçabilité groupée : qui a fait quoi et quand (acteur + détail par ticket)
+    const bulkActor = req.user.email || String(req.user.sub);
+    const bulkChangesSummary = [];
 
     for (const id of ids) {
       try {
         const before = await prisma.ticket.findUnique({
           where: { id },
-          select: { status: true, priority: true },
+          select: { status: true, priority: true, assignedToId: true, teamId: true, title: true },
         });
         if (!before) { failures.push({ id, error: 'Ticket introuvable' }); continue; }
 
@@ -395,6 +447,45 @@ router.post(
         }
         if (data.status) notifyRequesterOnStatusChange(id, data.status);
 
+        // ── Journal « qui a fait quoi et quand » (action groupée) ─────────
+        try {
+          const bulkDiff = collectTicketChanges(before, ticket, {});
+          if (bulkDiff.length > 0) {
+            for (const c of bulkDiff) {
+              if (c.field === 'status') {
+                c.fromLabel = STATUS_LABELS[c.from] || c.from;
+                c.toLabel = STATUS_LABELS[c.to] || c.to;
+              }
+            }
+            const bulkByField = Object.fromEntries(bulkDiff.map((c) => [c.field, c]));
+            if (bulkByField.status) {
+              await logEvent(id, 'STATUS_CHANGED', bulkActor, {
+                from: bulkByField.status.from, to: bulkByField.status.to,
+                fromLabel: bulkByField.status.fromLabel, toLabel: bulkByField.status.toLabel,
+                via: 'bulk',
+              });
+            }
+            if (bulkByField.priority) {
+              await logEvent(id, 'PRIORITY_CHANGED', bulkActor, {
+                from: bulkByField.priority.from, to: bulkByField.priority.to, via: 'bulk',
+              });
+            }
+            if (bulkByField.assignedToId) {
+              await logEvent(id, 'ASSIGNED', bulkActor, {
+                from: bulkByField.assignedToId.from, to: bulkByField.assignedToId.to, via: 'bulk',
+              });
+            }
+            await logEvent(id, 'TICKET_UPDATED', bulkActor, {
+              fields: bulkDiff.map((c) => c.field),
+              changes: bulkDiff,
+              via: 'bulk',
+            });
+            bulkChangesSummary.push({ id, title: ticket.title, fields: bulkDiff.map((c) => c.field) });
+          }
+        } catch (err) {
+          console.error(`[tickets] Échec journalisation bulk ticket ${id}:`, err.message);
+        }
+
         // Auto-apprentissage pour les bulk-resolutions
         if (data.status === 'SOLVED' || data.status === 'CLOSED') {
           const { learnFromResolution } = require('../services/skillLearningService');
@@ -406,6 +497,25 @@ router.post(
         updatedCount += 1;
       } catch (err) {
         failures.push({ id, error: err.message });
+      }
+    }
+
+    // Une entrée d'audit unique récapitule l'opération groupée (auteur + IP)
+    if (bulkChangesSummary.length > 0) {
+      try {
+        await auditLog('TICKETS_BULK_UPDATED', {
+          actor: req.user,
+          targetType: 'Ticket',
+          metadata: {
+            updatedCount,
+            requested: ids.length,
+            changes: { status: status || null, priority: priority || null, assignedToId: assignedToId ?? null, teamId: teamId ?? null },
+            tickets: bulkChangesSummary,
+          },
+          ipAddress: req.ip || null,
+        });
+      } catch (err) {
+        console.error('[tickets] Échec journalisation audit bulk:', err.message);
       }
     }
 
@@ -1733,6 +1843,10 @@ router.patch('/:id', allowTechnicianStatusOnly, requireTicketAssignOrTechnicianS
         externalId: true, status: true, isMajorIncident: true, impactedSites: true,
         sourceEmail: true, requesterId: true, sourceName: true, approvalStatus: true,
         observers: { select: { id: true } },
+        assignees: { select: { id: true } },
+        assets: { select: { assetId: true } },
+        dueDate: true, locationId: true, locationName: true,
+        secondaryRequesterId: true, requesterIds: true,
       },
     });
 
@@ -1743,6 +1857,105 @@ router.patch('/:id', allowTechnicianStatusOnly, requireTicketAssignOrTechnicianS
     }
 
     const ticket = await prisma.ticket.update({ where: { id }, data });
+
+    // ── Journal « qui a fait quoi et quand » : diff AVANT → APRÈS ─────────
+    // Chaque champ réellement modifié est journalisé en clair :
+    //   • TicketEvent (Journal d'activité, filtrable par type) — événements
+    //     typés (STATUS_CHANGED, PRIORITY_CHANGED, ASSIGNED, DUE_DATE_UPDATED)
+    //     + TICKET_UPDATED portant le détail complet des changements ;
+    //   • AuditLog (Audit système, avec IP de l'auteur).
+    // Ne doit jamais faire échouer la mise à jour : tout est protégé.
+    try {
+      const changes = collectTicketChanges(before, ticket, data);
+      if (changes.length > 0) {
+        const actor = req.user.email || String(req.user.sub);
+
+        // Libellés lisibles (nom d'utilisateur / d'équipe) pour les refs numériques
+        const userIds = [...new Set(changes
+          .filter((c) => ['assignedToId', 'requesterId', 'secondaryRequesterId'].includes(c.field))
+          .flatMap((c) => [c.from, c.to])
+          .filter((v) => v !== null && v !== undefined && !Number.isNaN(Number(v)))
+          .map(Number))];
+        const teamIds = [...new Set(changes
+          .filter((c) => c.field === 'teamId')
+          .flatMap((c) => [c.from, c.to])
+          .filter((v) => v !== null && v !== undefined && !Number.isNaN(Number(v)))
+          .map(Number))];
+        const userLabel = new Map();
+        const teamLabel = new Map();
+        try {
+          if (userIds.length && typeof prisma.user.findMany === 'function') {
+            const users = await prisma.user.findMany({
+              where: { id: { in: userIds } },
+              select: { id: true, fullName: true, email: true },
+            });
+            for (const u of users || []) userLabel.set(u.id, u.fullName || u.email);
+          }
+          if (teamIds.length && typeof prisma.team.findMany === 'function') {
+            const teams = await prisma.team.findMany({
+              where: { id: { in: teamIds } },
+              select: { id: true, name: true },
+            });
+            for (const t of teams || []) teamLabel.set(t.id, t.name);
+          }
+        } catch { /* libellés optionnels */ }
+
+        for (const c of changes) {
+          if (c.field === 'status') {
+            c.fromLabel = STATUS_LABELS[c.from] || c.from;
+            c.toLabel = STATUS_LABELS[c.to] || c.to;
+          } else if (['assignedToId', 'requesterId', 'secondaryRequesterId'].includes(c.field)) {
+            if (c.from !== null && userLabel.has(Number(c.from))) c.fromLabel = userLabel.get(Number(c.from));
+            if (c.to !== null && userLabel.has(Number(c.to))) c.toLabel = userLabel.get(Number(c.to));
+          } else if (c.field === 'teamId') {
+            if (c.from !== null && teamLabel.has(Number(c.from))) c.fromLabel = teamLabel.get(Number(c.from));
+            if (c.to !== null && teamLabel.has(Number(c.to))) c.toLabel = teamLabel.get(Number(c.to));
+          }
+        }
+
+        const byField = Object.fromEntries(changes.map((c) => [c.field, c]));
+        if (byField.status) {
+          await logEvent(id, 'STATUS_CHANGED', actor, {
+            from: byField.status.from, to: byField.status.to,
+            fromLabel: byField.status.fromLabel, toLabel: byField.status.toLabel,
+            via: 'ui',
+          });
+        }
+        if (byField.priority) {
+          await logEvent(id, 'PRIORITY_CHANGED', actor, {
+            from: byField.priority.from, to: byField.priority.to, via: 'ui',
+          });
+        }
+        if (byField.assignedToId) {
+          await logEvent(id, 'ASSIGNED', actor, {
+            from: byField.assignedToId.from, to: byField.assignedToId.to,
+            fromName: byField.assignedToId.fromLabel || null,
+            toName: byField.assignedToId.toLabel || null,
+            via: 'ui',
+          });
+        }
+        if (byField.dueDate) {
+          await logEvent(id, 'DUE_DATE_UPDATED', actor, {
+            from: byField.dueDate.from, to: byField.dueDate.to, via: 'ui',
+          });
+        }
+        await logEvent(id, 'TICKET_UPDATED', actor, {
+          fields: changes.map((c) => c.field),
+          changes,
+          via: 'ui',
+        });
+        await auditLog('TICKET_UPDATED', {
+          actor: req.user,
+          targetType: 'Ticket',
+          targetId: id,
+          targetLabel: ticket.title,
+          metadata: { fields: changes.map((c) => c.field), changes },
+          ipAddress: req.ip || null,
+        });
+      }
+    } catch (err) {
+      console.error(`[tickets] Échec de journalisation des modifications du ticket ${id}:`, err.message);
+    }
 
     // Description modifiée : purge éventuelle des images de suivi devenues orphelines
     if (content !== undefined) {
@@ -1772,7 +1985,8 @@ router.patch('/:id', allowTechnicianStatusOnly, requireTicketAssignOrTechnicianS
     const trackFields = [
       'title', 'content', 'priority', 'category', 'teamId', 'assignedToId',
       'type', 'urgency', 'impact', 'source', 'externalId',
-      'requesterId', 'sourceName', 'sourceEmail'
+      'requesterId', 'sourceName', 'sourceEmail',
+      'status', 'dueDate', 'locationId', 'approvalStatus'
     ];
     for (const field of trackFields) {
       if (data[field] !== undefined && String(before[field] ?? '') !== String(data[field] ?? '')) {
@@ -2214,6 +2428,31 @@ router.patch('/:id/reassign', forbidTechnicianTicketEdits, requirePermission('ti
       },
     });
 
+    // Traçabilité « qui a fait quoi et quand » : événement typé + audit système
+    const reassignActor = req.user.email || String(req.user.sub);
+    try {
+      await logEvent(id, 'ASSIGNED', reassignActor, {
+        from: before.assignedToId || null,
+        to: Number(assignedToId),
+        reason: reason || (before.assignedToId ? 'reassignation_manuelle' : 'assignation_manuelle'),
+        via: 'ui',
+      });
+      await auditLog('TICKET_REASSIGNED', {
+        actor: req.user,
+        targetType: 'Ticket',
+        targetId: id,
+        targetLabel: ticket.title,
+        metadata: {
+          previousTechnicianId: before.assignedToId || null,
+          newTechnicianId: Number(assignedToId),
+          reason: reason || null,
+        },
+        ipAddress: req.ip || null,
+      });
+    } catch (err) {
+      console.error(`[tickets] Échec journalisation réassignation ticket ${id}:`, err.message);
+    }
+
     emitTicketAssigned(id, ticket.title, Number(assignedToId), 'manual');
 
     prisma.user.findUnique({ where: { id: Number(assignedToId) }, select: { email: true, fullName: true } })
@@ -2512,6 +2751,20 @@ router.post('/:id/content-images', followupUpload.array('images', 10), async (re
   res.json({ images: uploaded });
 });
 
+// Extrait texte brut d'un contenu HTML de suivi, tronqué — pour les journaux
+// (FOLLOWUP_ADDED/EDITED/DELETED) : trace « qui a écrit quoi » sans re-stocker le HTML.
+function followupExcerpt(content, max = 200) {
+  if (!content) return null;
+  const text = String(content)
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!text) return null;
+  return text.length > max ? `${text.slice(0, max)}…` : text;
+}
+
 // Add followup / comment (supporte le collage d'images via FormData)
 router.post('/:id/followups', followupUpload.array('images', 10), [body('content').notEmpty()], async (req, res) => {
   const errors = validationResult(req);
@@ -2593,6 +2846,24 @@ router.post('/:id/followups', followupUpload.array('images', 10), [body('content
   // Régénérer l'embedding avec le nouveau suivi (fire-and-forget)
   const { refreshTicketEmbedding } = require('../services/similarIncidentDetector');
   refreshTicketEmbedding(ticketId);
+
+  // ── Journal « qui a écrit quoi et quand » ──────────────────────────────
+  // Auteur réel du suivi (pas seulement l'acteur HTTP), visibilité et extrait
+  // du contenu — trace la réponse même si elle ne provient pas du fil email.
+  try {
+    await logEvent(ticketId, 'FOLLOWUP_ADDED', req.user.email || String(req.user.sub), {
+      followupId: followup.id,
+      authorId: followup.authorId,
+      authorName: followup.author?.fullName || req.user.fullName || null,
+      authorRole: req.user.role || null,
+      source: followup.source,
+      isPrivate: followup.isPrivate,
+      attachmentCount: imageAttachments.length,
+      contentExcerpt: followupExcerpt(followup.content),
+    });
+  } catch (err) {
+    console.error('[ticket.routes] Log création suivi échoué:', err.message);
+  }
 
   // ── Mentions @ : envoi d'email à chaque utilisateur mentionné ────────────
   // Le frontend envoie mentionedUserIds (JSON stringifié en FormData) et/ou
@@ -2695,7 +2966,14 @@ router.patch('/:id/followups/:followupId/visibility', forbidTechnicianTicketEdit
   });
 
   try {
-    await logEvent(ticketId, isPrivate ? 'FOLLOWUP_MADE_PRIVATE' : 'FOLLOWUP_MADE_PUBLIC', req.user.email || String(req.user.sub), { followupId });
+    await logEvent(ticketId, isPrivate ? 'FOLLOWUP_MADE_PRIVATE' : 'FOLLOWUP_MADE_PUBLIC', req.user.email || String(req.user.sub), {
+      followupId,
+      authorId: followup.authorId,
+      authorName: followup.author?.fullName || null,
+      wasPrivate: followup.isPrivate,
+      isPrivate,
+      contentExcerpt: followupExcerpt(followup.content),
+    });
   } catch (err) {
     console.error('[ticket.routes] Log visibilité commentaire échoué:', err.message);
   }
@@ -2763,8 +3041,19 @@ router.patch('/:id/followups/:followupId', requirePermission('tickets.assign', [
   const cleanup = await cleanupOrphanFollowupImages(ticketId);
 
   try {
+    // Qui a édité quoi : l'éditeur (acteur) peut être différent de l'auteur
+    // d'origine (ADMIN/SUPERADMIN corrigeant le commentaire d'un autre).
+    const contentChanged = sanitized !== followup.content;
     await logEvent(ticketId, 'FOLLOWUP_EDITED', req.user.email || String(req.user.sub), {
       followupId,
+      authorId: followup.authorId,
+      authorName: followup.author?.fullName || null,
+      editedByAnother: followup.authorId !== req.user.sub,
+      contentChanged,
+      ...(contentChanged ? {
+        contentBefore: followupExcerpt(followup.content),
+        contentAfter: followupExcerpt(sanitized),
+      } : {}),
       imagesAdded: imageAttachments.length,
       imagesRemoved: cleanup.removed,
     });
@@ -2782,6 +3071,7 @@ router.delete('/:id/followups/:followupId', requirePermission('tickets.assign', 
 
   const followup = await prisma.followup.findFirst({
     where: { id: followupId, ticketId },
+    include: { author: { select: { id: true, fullName: true } } },
   });
   if (!followup) return res.status(404).json({ error: 'Commentaire introuvable' });
 
@@ -2795,7 +3085,17 @@ router.delete('/:id/followups/:followupId', requirePermission('tickets.assign', 
   await cleanupOrphanFollowupImages(ticketId);
 
   try {
-    await logEvent(ticketId, 'FOLLOWUP_DELETED', req.user.email || String(req.user.sub), { followupId });
+    // Qui a supprimé quoi : l'auteur du suivi supprimé + extrait du contenu
+    // (la suppression est réelle — le contenu n'existe plus en base).
+    await logEvent(ticketId, 'FOLLOWUP_DELETED', req.user.email || String(req.user.sub), {
+      followupId,
+      authorId: followup.authorId,
+      authorName: followup.author?.fullName || null,
+      deletedByAnother: followup.authorId !== req.user.sub,
+      source: followup.source,
+      wasPrivate: followup.isPrivate,
+      contentExcerpt: followupExcerpt(followup.content),
+    });
   } catch (err) {
     console.error('[ticket.routes] Log suppression commentaire échoué:', err.message);
   }

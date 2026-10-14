@@ -66,6 +66,9 @@ jest.mock('../services/ticketQueryService', () => ({
 jest.mock('../services/auditLogService', () => ({ auditLog: jest.fn(async () => {}) }));
 jest.mock('../services/ticketEvent', () => ({ logEvent: jest.fn(async () => {}) }));
 
+const { auditLog } = require('../services/auditLogService');
+const { logEvent } = require('../services/ticketEvent');
+
 const express = require('express');
 const http = require('http');
 const prisma = require('../prismaClient');
@@ -226,5 +229,65 @@ describe("PATCH /tickets/:id — hors plafond (non-régression)", () => {
     const res = await patch(1, { glpiTicketId: 42 });
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/Champ non autorisé/);
+  });
+});
+
+describe("PATCH /tickets/:id — journal détaillé (qui a fait quoi, quand)", () => {
+  beforeEach(() => {
+    logEvent.mockClear();
+    auditLog.mockClear();
+  });
+
+  test('ADMIN : TICKET_PAYLOAD détaille chaque champ changé (avant → après)', async () => {
+    mockCurrentUser = { ...ADMIN };
+    const res = await patch(1, { priority: 'P1', status: 'OPEN' });
+    expect(res.status).toBe(200);
+
+    // Événement complet : la liste des champs modifiés + valeurs avant/après
+    const ticketUpdatedCall = logEvent.mock.calls.find(([, type]) => type === 'TICKET_UPDATED');
+    expect(ticketUpdatedCall).toBeDefined();
+    const [ticketId, , actor, payload] = ticketUpdatedCall;
+    expect(ticketId).toBe(1);
+    expect(actor).toBe('admin@prosuma.ci'); // QUI
+    expect(payload.via).toBe('ui');
+    const byField = Object.fromEntries(payload.changes.map((c) => [c.field, c]));
+    expect(byField.priority).toMatchObject({ field: 'priority', from: 'P3', to: 'P1' }); // QUOI
+    expect(byField.status).toMatchObject({ field: 'status', from: 'NEW', to: 'OPEN' });
+    expect(byField.status.fromLabel).toBe('Nouveau');
+    expect(byField.status.toLabel).toBe('Ouvert');
+    expect(payload.fields).toEqual(expect.arrayContaining(['priority', 'status']));
+
+    // Événements typés pour les filtres existants
+    expect(logEvent.mock.calls.some(([, type]) => type === 'STATUS_CHANGED')).toBe(true);
+    expect(logEvent.mock.calls.some(([, type]) => type === 'PRIORITY_CHANGED')).toBe(true);
+
+    // Audit système : même détail + acteur (IP portée par la requête)
+    const auditCall = auditLog.mock.calls.find(([action]) => action === 'TICKET_UPDATED');
+    expect(auditCall).toBeDefined();
+    expect(auditCall[1]).toMatchObject({
+      targetType: 'Ticket',
+      targetId: 1,
+      actor: expect.objectContaining({ email: 'admin@prosuma.ci' }),
+    });
+    expect(auditCall[1].metadata.changes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ field: 'priority', from: 'P3', to: 'P1' }),
+    ]));
+  });
+
+  test('ADMIN : aucune modification réelle → aucun événement TICKET_UPDATED', async () => {
+    mockCurrentUser = { ...ADMIN };
+    setTicket({ priority: 'P1' });
+    const res = await patch(1, { priority: 'P1' }); // identique à l'existant
+    expect(res.status).toBe(200);
+    expect(logEvent.mock.calls.some(([, type]) => type === 'TICKET_UPDATED')).toBe(false);
+    expect(auditLog.mock.calls.some(([action]) => action === 'TICKET_UPDATED')).toBe(false);
+  });
+
+  test('un échec du journal ne bloque pas la mise à jour (journalisation isolée)', async () => {
+    mockCurrentUser = { ...ADMIN };
+    logEvent.mockRejectedValueOnce(new Error('db down'));
+    const res = await patch(1, { priority: 'P2' });
+    expect(res.status).toBe(200);
+    expect(prisma.ticket.update).toHaveBeenCalled();
   });
 });

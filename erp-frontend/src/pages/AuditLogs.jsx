@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import api from '../api/client';
 import { useFilterParam, useFilterParams } from '../hooks/useFilterParam';
+import { FIELD_LABELS, formatLogValue } from '../utils/logFields';
 import PageShell from '../components/PageShell';
 import Pagination from '../components/Pagination';
 import DateRangePicker from '../components/ui/date-range-picker';
@@ -58,12 +59,30 @@ const ACTION_META = {
 
   PROMPT_TEMPLATE_UPDATED:{ icon: Edit3,        color: 'text-yellow-600',   label: 'Prompt modifié' },
   N8N_WORKFLOW_CREATED:   { icon: Bot,          color: 'text-blue-600',     label: 'Workflow n8n créé' },
+
+  TICKET_UPDATED:         { icon: Edit3,        color: 'text-blue-600',     label: 'Ticket modifié' },
+  TICKET_REASSIGNED:      { icon: Briefcase,    color: 'text-indigo-600',   label: 'Ticket réassigné' },
+  TICKETS_BULK_UPDATED:   { icon: Edit3,        color: 'text-amber-600',    label: 'Modification groupée de tickets' },
+  TICKET_SOFT_DELETED:    { icon: Trash2,       color: 'text-red-600',      label: 'Ticket mis à la corbeille' },
+  TICKET_RESTORED:        { icon: RefreshCw,    color: 'text-emerald-600',  label: 'Ticket restauré' },
+  TICKET_DELETED_PERMANENTLY: { icon: Trash2,   color: 'text-red-600',      label: 'Ticket supprimé définitivement' },
+  TICKETS_SOFT_DELETED:   { icon: Trash2,       color: 'text-red-600',      label: 'Tickets mis à la corbeille' },
+  TICKETS_RESTORED:       { icon: RefreshCw,    color: 'text-emerald-600',  label: 'Tickets restaurés' },
+  TICKETS_DELETED_PERMANENTLY: { icon: Trash2,  color: 'text-red-600',      label: 'Tickets supprimés définitivement' },
+  TICKETS_PURGED:         { icon: Trash2,       color: 'text-red-600',      label: 'Corbeille vidée' },
+  TICKET_REINSTATED:      { icon: RefreshCw,    color: 'text-emerald-600',  label: 'Ticket rétabli (réouvert)' },
+  TICKET_APPROVED:        { icon: Shield,       color: 'text-emerald-600',  label: 'Ticket approuvé' },
+  TICKET_REJECTED:        { icon: AlertTriangle, color: 'text-red-600',     label: 'Ticket rejeté' },
+  TICKET_CLOSURE_VALIDATED: { icon: Shield,     color: 'text-emerald-600',  label: 'Clôture validée' },
+  TICKET_CLOSURE_REJECTED: { icon: AlertTriangle, color: 'text-red-600',    label: 'Clôture rejetée' },
+  TICKET_CLOSURE_RECOVERED: { icon: RefreshCw,  color: 'text-amber-600',    label: 'Clôture annulée' },
 };
 
 const ACTION_OPTIONS = Object.keys(ACTION_META).sort();
 
 // Domaines métier pour le filtre par famille d'actions
 const DOMAIN_OPTIONS = [
+  { value: 'TICKETS', label: '🎫 Tickets' },
   { value: 'UTILISATEURS', label: '👤 Utilisateurs & connexions' },
   { value: 'EQUIPES', label: '👥 Équipes' },
   { value: 'LIEUX', label: '📍 Lieux' },
@@ -89,6 +108,9 @@ function rangeToStartDate(days) {
   d.setDate(d.getDate() - Number(days));
   return d.toISOString().slice(0, 10);
 }
+
+// Libellés des champs + formatage des valeurs : utils/logFields.js (partagé
+// avec ActivityStream et ActivityLogs).
 
 export default function AuditLogs({ embedded = false } = {}) {
   const [logs, setLogs] = useState([]);
@@ -448,6 +470,25 @@ export default function AuditLogs({ embedded = false } = {}) {
                               {entry.targetType && <div><strong className="text-on-surface">Type cible :</strong> {entry.targetType}#{entry.targetId}</div>}
                               {entry.ipAddress && <div><strong className="text-on-surface">IP :</strong> {entry.ipAddress}</div>}
                             </div>
+
+                            {/* Changements détaillés : champ, avant, après */}
+                            {Array.isArray(entry.metadata?.changes) && entry.metadata.changes.length > 0 && (
+                              <div>
+                                <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider block mb-1">
+                                  Changements ({entry.metadata.changes.length})
+                                </span>
+                                <div className="rounded-xl border border-outline-variant/20 overflow-hidden">
+                                  {entry.metadata.changes.map((c, i) => (
+                                    <div key={`${entry.id}-chg-${i}`} className="flex items-start gap-2 px-3 py-1.5 text-[11px] odd:bg-surface-container-low/40">
+                                      <span className="font-bold text-on-surface min-w-[130px]">{FIELD_LABELS[c.field] || c.field}</span>
+                                      <span className="text-red-600 line-through break-all">{formatLogValue(c.fromLabel ?? c.from)}</span>
+                                      <span className="text-on-surface-variant shrink-0">→</span>
+                                      <span className="text-emerald-600 font-semibold break-all">{formatLogValue(c.toLabel ?? c.to)}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
 
                             {entry.metadata && (
                               <div>

@@ -5,6 +5,7 @@ import {
   Clock, CheckCircle2, Shield, AlertTriangle, Layers, Link2, History,
 } from 'lucide-react';
 import { sanitizeHtml } from '../utils/sanitize';
+import { FIELD_LABELS, formatLogValue } from '../utils/logFields';
 
 /* ════════════════════════════════════════════════════════════════════════
    ActivityStream — historique en timeline « à gouttière »
@@ -35,11 +36,11 @@ const NODE = {
 };
 
 function toneOf(type) {
-  if (/SLA_BREACHED|GLPI_SYNC_FAILED|REJECTED|CLOSURE_REJECTED/.test(type)) return 'danger';
+  if (/SLA_BREACHED|GLPI_SYNC_FAILED|REJECTED|CLOSURE_REJECTED|FOLLOWUP_DELETED/.test(type)) return 'danger';
   if (/APPROVED|CLOSURE_VALIDATED|SOLVED|CLOSED/.test(type)) return 'success';
-  if (/PRIORITY|ESCALAT|REMINDER|SLA_UPDATED|CLOSURE_SUGGESTED|WAIT/.test(type)) return 'warn';
+  if (/PRIORITY|ESCALAT|REMINDER|SLA_UPDATED|CLOSURE_SUGGESTED|WAIT|DUE_DATE/.test(type)) return 'warn';
   if (/^AI_|SUGGEST/.test(type)) return 'ai';
-  if (/CREATED|ASSIGNED|LINKED|MERGED|REOPEN/.test(type)) return 'info';
+  if (/CREATED|ASSIGNED|LINKED|MERGED|REOPEN|UPDATED|TEAM_CHANGED/.test(type)) return 'info';
   return 'neutral';
 }
 
@@ -49,6 +50,8 @@ function eventIcon(type) {
     case 'STATUS_CHANGED': return <RefreshCw className="w-3 h-3" />;
     case 'PRIORITY_CHANGED': return <Flame className="w-3 h-3" />;
     case 'ASSIGNED': return <UserCheck className="w-3 h-3" />;
+    case 'TICKET_UPDATED': case 'TEAM_CHANGED': return <FileText className="w-3 h-3" />;
+    case 'DUE_DATE_UPDATED': case 'DUE_DATE_BREACHED': return <Clock className="w-3 h-3" />;
     case 'EMAIL_RECEIVED': case 'EMAIL_SENT': return <Inbox className="w-3 h-3" />;
     case 'FOLLOWUP_ADDED': return <MessageSquare className="w-3 h-3" />;
     case 'FOLLOWUP_DELETED': return <Trash2 className="w-3 h-3" />;
@@ -75,6 +78,10 @@ function eventLabel(type) {
     STATUS_CHANGED: 'Statut modifié',
     PRIORITY_CHANGED: 'Priorité modifiée',
     ASSIGNED: 'Ticket assigné',
+    TICKET_UPDATED: 'Ticket modifié',
+    TEAM_CHANGED: 'Équipe modifiée',
+    DUE_DATE_UPDATED: 'Échéance modifiée',
+    DUE_DATE_BREACHED: 'Échéance dépassée',
     EMAIL_RECEIVED: 'Email reçu',
     EMAIL_SENT: 'Email envoyé',
     FOLLOWUP_ADDED: 'Commentaire ajouté',
@@ -120,13 +127,25 @@ function eventDetail(event) {
   const p = event?.payload || {};
   const parts = [];
   if (p.oldStatus && p.newStatus) parts.push(`${p.oldStatus} → ${p.newStatus}`);
-  if (p.oldPriority && p.newPriority) parts.push(`${p.oldPriority} → ${p.newPriority}`);
+  else if (p.fromLabel || p.toLabel || p.from !== undefined || p.to !== undefined) {
+    // Événements typés enrichis (PATCH /:id) : avant → après avec libellés lisibles
+    if (event.type === 'STATUS_CHANGED' || event.type === 'PRIORITY_CHANGED' || event.type === 'DUE_DATE_UPDATED') {
+      parts.push(`${formatLogValue(p.fromLabel ?? p.from)} → ${formatLogValue(p.toLabel ?? p.to)}`);
+    } else if (event.type === 'ASSIGNED') {
+      parts.push(`${p.fromName || formatLogValue(p.from)} → ${p.toName || formatLogValue(p.to)}`);
+    }
+  }
   if (p.action) parts.push(p.action);
   if (p.reason) parts.push(p.reason);
   if (p.error) parts.push(p.error);
   if (p.dueAt) parts.push(`Échéance : ${new Date(p.dueAt).toLocaleString('fr-FR')}`);
   if (p.level) parts.push(`Niveau ${p.level}`);
   if (p.targetTicketId) parts.push(`Ticket #${p.targetTicketId}`);
+  // Commentaires : extrait du contenu + auteur d'origine (tracé « qui a écrit quoi »)
+  if (p.authorName && event.type !== 'CREATED') parts.push(`suivi de ${p.authorName}`);
+  if (p.editedByAnother) parts.push('édité par un autre utilisateur');
+  if (p.deletedByAnother) parts.push('supprimé par un autre utilisateur');
+  if (p.contentExcerpt) parts.push(`« ${p.contentExcerpt} »`);
   return parts.join(' · ');
 }
 
@@ -394,6 +413,11 @@ function SystemRow({ item, time, dayShort }) {
   const detail = eventDetail(item.data);
   const actor = item.data.actor && item.data.actor !== 'SYSTEM' ? item.data.actor : null;
   const absolute = new Date(item.date).toLocaleString('fr-FR');
+  // Changements détaillés (TICKET_UPDATED) : chaque champ, avant → après
+  const changes = Array.isArray(item.data.payload?.changes) ? item.data.payload.changes : null;
+  // Édition de commentaire : contenu avant → après (trace « qui a écrit quoi »)
+  const p = item.data.payload || {};
+  const showContentDiff = type === 'FOLLOWUP_EDITED' && p.contentChanged && (p.contentBefore || p.contentAfter);
 
   return (
     <RailRow
@@ -417,6 +441,38 @@ function SystemRow({ item, time, dayShort }) {
             {actor && detail && ' · '}
             {detail && <span>{detail}</span>}
           </p>
+        )}
+
+        {/* Tableau lisible des champs modifiés (avant → après) */}
+        {changes && changes.length > 0 && (
+          <div className="mt-1.5 rounded-lg border border-outline-variant/20 overflow-hidden max-w-xl">
+            {changes.map((c, i) => (
+              <div key={`${item.key}-chg-${i}`} className="flex items-start gap-2 px-2.5 py-1 text-[11px] odd:bg-surface-container-low/40">
+                <span className="font-bold text-on-surface min-w-[110px] shrink-0">{FIELD_LABELS[c.field] || c.field}</span>
+                <span className="text-red-600 dark:text-red-400 line-through break-all">{formatLogValue(c.fromLabel ?? c.from)}</span>
+                <span className="act-faint shrink-0">→</span>
+                <span className="text-emerald-600 dark:text-emerald-400 font-semibold break-all">{formatLogValue(c.toLabel ?? c.to)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Contenu d'un commentaire avant/après édition */}
+        {showContentDiff && (
+          <div className="mt-1.5 rounded-lg border border-outline-variant/20 overflow-hidden max-w-xl">
+            {p.contentBefore && (
+              <div className="px-2.5 py-1 text-[11px] bg-surface-container-low/40">
+                <span className="font-bold text-on-surface">Avant : </span>
+                <span className="text-red-600 dark:text-red-400 line-through break-all">{p.contentBefore}</span>
+              </div>
+            )}
+            {p.contentAfter && (
+              <div className="px-2.5 py-1 text-[11px]">
+                <span className="font-bold text-on-surface">Après : </span>
+                <span className="text-emerald-600 dark:text-emerald-400 font-semibold break-all">{p.contentAfter}</span>
+              </div>
+            )}
+          </div>
         )}
       </div>
     </RailRow>
