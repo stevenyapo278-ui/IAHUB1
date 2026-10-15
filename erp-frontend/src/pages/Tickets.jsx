@@ -830,6 +830,60 @@ function saveColumnLayout(userId, state) {
   } catch {} // quota dépassé / mode privé : on ignore, la disposition reste provisoire
 }
 
+/**
+ * Fusionne la disposition enregistrée (ordre + largeurs + épinglage) dans les
+ * colDefs AVANT le montage de la grille.
+ *
+ * AG Grid peint sa première image avec les largeurs des colDefs : si la
+ * restauration attend l'événement onGridReady / applyColumnState, la table
+ * s'affiche brièvement avec les largeurs par défaut (colonnes à dimension
+ * réduite) puis « saute » vers la disposition enregistrée — un flash visible
+ * à chaque affichage de la vue Tickets. En fusionnant dès les colDefs, la
+ * première image est déjà la bonne et applyColumnState devient inoffensif.
+ */
+function mergeSavedColumnLayout(colDefs, saved) {
+  if (!Array.isArray(saved) || saved.length === 0) return colDefs;
+  const byColId = new Map();
+  for (const s of saved) {
+    if (s && s.colId && !byColId.has(s.colId)) byColId.set(s.colId, s);
+  }
+
+  const merged = colDefs.map((col) => {
+    const s = byColId.get(col.colId || col.field);
+    if (!s) return col; // colonne apparue depuis la sauvegarde : largeurs par défaut
+    const next = { ...col };
+    if ('pinned' in s) next.pinned = s.pinned ?? undefined;
+    if ('flex' in s) {
+      if (s.flex == null) {
+        // flex:null = colonne redimensionnée à la main → largeur fixe enregistrée
+        delete next.flex;
+        if (s.width != null) next.width = s.width;
+      } else {
+        // Une colonne flex redistribue l'espace restant au premier layout :
+        // on ne garde que flex (width serait de toute façon recalculé).
+        next.flex = s.flex;
+        delete next.width;
+      }
+    } else if (s.width != null) {
+      next.width = s.width;
+    }
+    return next;
+  });
+
+  // Ordre enregistré, groupe par groupe (épinglé gauche / centre / épinglé droite).
+  // Les colonnes absentes de la sauvegarde gardent leur position par défaut (fin
+  // de leur groupe) — Array.sort est stable.
+  const orderIndex = new Map();
+  for (const s of saved) {
+    if (s && s.colId && !orderIndex.has(s.colId)) orderIndex.set(s.colId, orderIndex.size);
+  }
+  const bySavedOrder = (a, b) =>
+    (orderIndex.get(a.colId || a.field) ?? Number.MAX_SAFE_INTEGER) -
+    (orderIndex.get(b.colId || b.field) ?? Number.MAX_SAFE_INTEGER);
+  const group = (pinned) => merged.filter((c) => (c.pinned || null) === pinned).sort(bySavedOrder);
+  return [...group('left'), ...group(null), ...group('right')];
+}
+
 function isDueOverdue(t) {
   if (!t.dueDate) return false;
   if (['SOLVED', 'CLOSED'].includes(t.status)) return false;
@@ -1978,6 +2032,15 @@ export default function Tickets() {
   ].filter(Boolean).length;
 
   // ── AG Grid column definitions (Katalyst pinned style) ─────────────────────
+  // Disposition enregistrée (ordre + largeurs) — relue quand « Réinitialiser la
+  // disposition » vide le localStorage, pour que les colDefs repartent des
+  // largeurs d'origine définies dans le code.
+  const [columnLayoutRevision, setColumnLayoutRevision] = useState(0);
+  const savedColumnLayout = useMemo(
+    () => loadColumnLayout(user?.id),
+    [user?.id, columnLayoutRevision]
+  );
+
   // Query string des filtres actifs, partagé aux renderers AG Grid : tous les points
   // d'entrée vers la fiche doivent transmettre les filtres pour la navigation ‹ ›.
   const filterQs = useMemo(() => buildFilterQueryString(), [filters, debouncedSearch]);
@@ -2000,6 +2063,7 @@ export default function Tickets() {
 
     if (showSelectionColumn) {
       cols.push({
+        colId: 'selection',
         headerCheckboxSelection: true,
         checkboxSelection: true,
         width: 48,
@@ -2123,6 +2187,7 @@ export default function Tickets() {
 
     // Actions column — pinned right (always visible)
     cols.push({
+      colId: 'actions',
       headerName: '',
       width: 80,
       pinned: 'right',
@@ -2141,8 +2206,12 @@ export default function Tickets() {
       col.sort = (col.field === sortBy && serverSort) ? serverSort : undefined;
     }
 
-    return cols;
-  }, [visibleKeys, showSelectionColumn, setSortBy, setSortOrder, sortBy, sortOrder]);
+    // Disposition enregistrée fusionnée DANS les colDefs : AG Grid peint la
+    // première image avec ces largeurs — sans ça, la table apparaît brièvement
+    // avec les colonnes à dimension réduite (largeurs par défaut) puis « saute »
+    // vers la disposition enregistrée au moment où applyColumnState s'exécute.
+    return mergeSavedColumnLayout(cols, savedColumnLayout);
+  }, [visibleKeys, showSelectionColumn, setSortBy, setSortOrder, sortBy, sortOrder, savedColumnLayout]);
 
   // Tri par en-tête → tri SERVEUR (clé 'id' supportée par l'API, ex. colonne « N° »).
   // Sans ça, un clic d'en-tête ne trierait que la page courante et serait écrasé
@@ -2231,17 +2300,40 @@ export default function Tickets() {
     if (api) applyColumnLayout(api);
   }, [gridColumnDefs, applyColumnLayout]);
 
+  // Après « Réinitialiser la disposition », les colDefs repartent des largeurs
+  // du code. AG Grid ne relit PAS les largeurs des colDefs sur des colonnes déjà
+  // créées (ni via resetColumnState) : on réapplique explicitement l'état par
+  // défaut, une seule fois, dans le rendu qui suit le vidage du localStorage.
+  const lastResetRevisionRef = useRef(0);
+  useEffect(() => {
+    if (columnLayoutRevision === lastResetRevisionRef.current) return;
+    lastResetRevisionRef.current = columnLayoutRevision;
+    const api = gridApiRef.current;
+    if (!api) return;
+    applyingLayoutRef.current = true;
+    try {
+      api.applyColumnState({
+        state: gridColumnDefs.map((col) => ({
+          colId: col.colId || col.field,
+          width: col.width,
+          flex: col.flex ?? null,
+          pinned: col.pinned ?? null,
+        })),
+        applyOrder: true,
+      });
+    } finally {
+      setTimeout(() => { applyingLayoutRef.current = false; }, 0);
+    }
+  }, [columnLayoutRevision, gridColumnDefs]);
+
   // Une écriture programmée après démontage n'a plus rien à écrire
   useEffect(() => () => clearTimeout(columnLayoutTimer.current), []);
 
   function resetColumnLayout() {
-    applyingLayoutRef.current = true;
-    try {
-      gridApiRef.current?.resetColumnState?.();
-    } finally {
-      setTimeout(() => { applyingLayoutRef.current = false; }, 0);
-    }
     try { localStorage.removeItem(columnLayoutKey(user?.id)); } catch {}
+    // Les colDefs fusionnées repartent des largeurs du code, puis l'API de la
+    // grille est resynchronisée dans l'effet lié à columnLayoutRevision.
+    setColumnLayoutRevision((v) => v + 1);
     toast.success('Disposition des colonnes réinitialisée');
   }
 
