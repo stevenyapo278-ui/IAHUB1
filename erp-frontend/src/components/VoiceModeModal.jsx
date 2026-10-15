@@ -42,6 +42,7 @@ export default function VoiceModeModal() {
     messages,
     error,
     isSupported,
+    supportLabel,
     isMuted,
     noiseSuppressionEnabled,
     analyserNode,
@@ -568,8 +569,8 @@ export default function VoiceModeModal() {
         </div>
 
         {/* Footer hint */}
-        <p className="text-[11px] text-white/50 tracking-wider">
-          {isSupported ? 'Cliquez sur l\'orbite pour parler · ESC pour fermer' : 'Navigateur non compatible'}
+        <p className="text-[11px] text-white/50 tracking-wider text-center max-w-md mx-auto px-6 leading-relaxed">
+          {isSupported ? 'Cliquez sur l\'orbite pour parler · ESC pour fermer' : supportLabel}
         </p>
       </motion.div>
     </AnimatePresence>

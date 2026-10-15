@@ -1,5 +1,61 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 
+// ── Détection réelle de la chaîne vocale ──
+// `AudioWorklet` est une API [SecureContext] : sur une origine HTTP (hors localhost),
+// `audioCtx.audioWorklet` vaut `undefined` → TypeError
+// « Cannot read properties of undefined (reading 'addModule') ». La même origine HTTP
+// fait aussi disparaître `navigator.mediaDevices`. On vérifie TOUT avant de créer le
+// contexte audio pour afficher un message actionnable plutôt qu'une erreur JS brute.
+function detectVoiceSupport() {
+  if (typeof window === 'undefined' || typeof WebSocket === 'undefined') {
+    return { ok: false, reason: 'WebSocket indisponible dans ce navigateur', label: 'Navigateur non compatible' };
+  }
+  if (typeof AudioContext === 'undefined') {
+    return { ok: false, reason: 'Web Audio API indisponible dans ce navigateur', label: 'Navigateur non compatible' };
+  }
+  if (window.isSecureContext === false) {
+    return {
+      ok: false,
+      reason: "Connexion HTTPS requise : le micro n'est accessible que depuis un contexte sécurisé (HTTPS ou localhost).",
+      label: 'HTTPS requis',
+    };
+  }
+  if (typeof AudioWorkletNode === 'undefined' || !('audioWorklet' in AudioContext.prototype)) {
+    return {
+      ok: false,
+      reason: 'AudioWorklet non pris en charge : utilisez un navigateur récent (Chrome, Edge, Firefox ou Safari).',
+      label: 'Navigateur non compatible',
+    };
+  }
+  if (!navigator.mediaDevices?.getUserMedia) {
+    return {
+      ok: false,
+      reason: 'Accès au microphone indisponible : HTTPS requis et autorisation micro accordée.',
+      label: 'Micro indisponible',
+    };
+  }
+  return { ok: true, reason: null, label: null };
+}
+
+// Traduction des échecs d'amorçage en messages FR exploitables
+function describeStartError(err) {
+  const name = err?.name || '';
+  if (name === 'NotAllowedError' || name === 'PermissionDeniedError' || name === 'SecurityError') {
+    return "Accès au micro refusé : autorisez le microphone pour ce site puis relancez.";
+  }
+  if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
+    return 'Aucun microphone détecté sur cet appareil.';
+  }
+  if (name === 'NotReadableError' || name === 'TrackStartError') {
+    return 'Microphone déjà utilisé par une autre application.';
+  }
+  const msg = err?.message || '';
+  if (/audioWorklet|addModule/i.test(msg)) {
+    return "Chaîne audio indisponible : ouvrez l'application en HTTPS (ou sur localhost).";
+  }
+  return msg || 'Erreur lors du démarrage';
+}
+
 export function useVoiceLive() {
   const [state, setState] = useState('idle');
   const [transcript, setTranscript] = useState('');
@@ -7,6 +63,8 @@ export function useVoiceLive() {
   const [messages, setMessages] = useState([]);
   const [error, setError] = useState(null);
   const [isSupported, setIsSupported] = useState(false);
+  const [supportReason, setSupportReason] = useState(null); // message FR détaillé si non supporté
+  const [supportLabel, setSupportLabel] = useState('Navigateur non compatible'); // libellé court du footer
   const [isMuted, setIsMuted] = useState(false);
   const [noiseSuppressionEnabled, setNoiseSuppressionEnabled] = useState(() => {
     try { return localStorage.getItem('voiceNoiseSuppression') !== 'false'; } catch { return true; }
@@ -44,12 +102,10 @@ export function useVoiceLive() {
   const assistantTurnFinishedRef = useRef(true); // Verrou de tour de parole de l'assistante (half-duplex)
 
   useEffect(() => {
-    setIsSupported(
-      typeof WebSocket !== 'undefined' &&
-        typeof AudioContext !== 'undefined' &&
-        typeof navigator !== 'undefined' &&
-        navigator.mediaDevices?.getUserMedia !== undefined
-    );
+    const support = detectVoiceSupport();
+    setIsSupported(support.ok);
+    setSupportReason(support.reason);
+    setSupportLabel(support.label || 'Navigateur non compatible');
   }, []);
 
   useEffect(() => {
@@ -315,6 +371,19 @@ export function useVoiceLive() {
     readyRef.current = false;
     assistantTurnFinishedRef.current = true; // Réinitialiser le verrou de parole de l'assistante
 
+    // Garde de compatibilité : ne jamais créer le contexte audio sur une origine
+    // HTTP / un navigateur sans AudioWorklet (sinon addModule plante en TypeError)
+    const support = detectVoiceSupport();
+    setIsSupported(support.ok);
+    setSupportReason(support.reason);
+    setSupportLabel(support.label || 'Navigateur non compatible');
+    if (!support.ok) {
+      startingRef.current = false;
+      setError(support.reason);
+      setState('error');
+      return;
+    }
+
     const audioCtx = new AudioContext();
     audioCtxRef.current = audioCtx;
 
@@ -323,6 +392,9 @@ export function useVoiceLive() {
         await audioCtx.resume();
       }
 
+      if (!audioCtx.audioWorklet) {
+        throw new Error("AudioWorklet indisponible : ouvrez l'application en HTTPS (ou sur localhost).");
+      }
       await audioCtx.audioWorklet.addModule('/pcm-processor.js');
 
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -482,8 +554,10 @@ export function useVoiceLive() {
       source.connect(analyser); // Direct mic source to analyser for user voice visualization!
       // Ne pas connecter analyser -> destination (évite larsen/écho)
     })().catch((err) => {
+      // Libérer les ressources déjà acquises (micro, contexte audio, socket)
+      cleanupSession();
       startingRef.current = false; // Erreur : libérer le verrou
-      setError(err.message || 'Erreur lors du démarrage');
+      setError(describeStartError(err));
       setState('error');
     });
   }, [playVoiceChunk, stopPlayback, cleanupSession, handleTranscript]);
@@ -534,6 +608,8 @@ export function useVoiceLive() {
     messages,
     error,
     isSupported,
+    supportReason,
+    supportLabel,
     isMuted,
     noiseSuppressionEnabled,
     analyserNode: analyserRef.current,
