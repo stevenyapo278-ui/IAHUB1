@@ -31,7 +31,7 @@ jest.mock('./emailSender', () => ({
   sendEmail: (...args) => mockSendEmail(...args),
 }));
 
-const { trackAiUsage, getTodayTokenUsage, checkTokenBudget } = require('./aiUsageTracker');
+const { trackAiUsage, getTodayTokenUsage, checkTokenBudget, getAiUsageStats } = require('./aiUsageTracker');
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -86,6 +86,36 @@ describe('trackAiUsage', () => {
     await trackAiUsage({ promptTokens: 1, completionTokens: 1, totalTokens: 2 }, 'gemini', 'email');
     // checkTokenBudget appelle getTodayTokenUsage → aggregate
     expect(mockAiUsageLogAggregate).toHaveBeenCalled();
+  });
+});
+
+describe('getAiUsageStats', () => {
+  it('convertit les BigInt des requêtes SQL en Number (la réponse JSON ne doit pas planter)', async () => {
+    // SUM()/COUNT() en SQL brut renvoient des bigint que Prisma livre en BigInt :
+    // sans conversion, res.json() lève « Do not know how to serialize a BigInt »
+    // et toute la vue suivi de consommation tombe en 500.
+    mockQueryRaw
+      .mockResolvedValueOnce([
+        { userId: 1, fullName: 'Alice', email: 'a@x.ci', totalTokens: 5000n, calls: 12n },
+      ])
+      .mockResolvedValueOnce([
+        { date: new Date('2026-10-14'), totalTokens: 5000n, calls: 12n },
+      ]);
+
+    const stats = await getAiUsageStats(7);
+
+    expect(() => JSON.stringify(stats)).not.toThrow();
+    expect(stats.byUser[0]).toMatchObject({ totalTokens: 5000, calls: 12 });
+    expect(stats.byDay[0]).toMatchObject({ totalTokens: 5000, calls: 12 });
+    expect(typeof stats.byDay[0].totalTokens).toBe('number');
+    expect(typeof stats.byDay[0].calls).toBe('number');
+  });
+
+  it('gère un byDay vide sans planter', async () => {
+    mockQueryRaw.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+    const stats = await getAiUsageStats(7);
+    expect(stats.byUser).toEqual([]);
+    expect(stats.byDay).toEqual([]);
   });
 });
 

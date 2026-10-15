@@ -204,7 +204,14 @@ async function getAiUsageStats(days = 7) {
       totalTokens: Number(r.totalTokens || 0),
       calls: Number(r.calls || 0),
     })),
-    byDay,
+    // SUM/COUNT en SQL brut sont des bigint (BigInt côté Node) : comme byUser,
+    // on convertit en Number sinon res.json() échoue (« Do not know how to
+    // serialize a BigInt ») et toute la vue suivi de consommation tombe en 500.
+    byDay: (byDay || []).map((r) => ({
+      date: r.date,
+      totalTokens: Number(r.totalTokens || 0),
+      calls: Number(r.calls || 0),
+    })),
   };
 }
 
