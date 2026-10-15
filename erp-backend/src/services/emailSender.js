@@ -784,6 +784,53 @@ async function sendSlaBreachEmail({ ticketId, glpiTicketId, ticketTitle, priorit
   return sendEmail({ ticketId, to: technicianEmail, subject, bodyHtml, saveAsMessage: false });
 }
 
+// ── Template : Rappel technicien (ticket ouvert sans prise en charge) ────────
+// Utilisé par technicianReminderScheduler (Paramètres > Automatisation > Rappels
+// techniciens) : email DIRECT au technicien assigné — ou aux membres de l'équipe
+// si le ticket n'est pas assigné — dès qu'un ticket ouvert dépasse le délai
+// configuré (ex. 24 h). Contrairement aux relances destinées au demandeur, il n'y
+// a ici ni brouillon ni validation : le réglage posé dans les Paramètres EST la
+// décision de l'admin, d'où l'envoi immédiat (saveAsMessage: false, comme les
+// notifications SLA/échéance voisines).
+function buildTechnicianReminderHtml({ technicianName, ticketId, ticketTitle, priority, category, teamName, hoursWaiting, criteriaLabels, signature, ticketLink }) {
+  const priorityLabel = buildPriorityLabel(priority);
+  const priorityColor = buildPriorityColor(priority);
+  return buildEmailLayout({
+    headerTitle: 'Rappel — ticket ouvert sans prise en charge',
+    headerSubtitle: `Ticket #${ticketId}`,
+    signature,
+    children: `
+<p style="margin:0 0 12px">Bonjour ${technicianName || ''},</p>
+<p style="margin:0 0 12px">Le ticket suivant est resté ouvert <strong>plus de ${hoursWaiting} h</strong> sans prise en charge :</p>
+${buildStyledTable([
+  { label: 'Numéro de ticket', value: `<strong>#${ticketId}</strong>` },
+  { label: 'Sujet', value: `<strong>${ticketTitle}</strong>` },
+  category ? { label: 'Catégorie', value: category } : null,
+  priority ? { label: 'Priorité', value: `<strong style="color:${priorityColor}">${priorityLabel}</strong>`, bold: true, color: priorityColor } : null,
+  teamName ? { label: 'Équipe', value: teamName } : null,
+  (criteriaLabels && criteriaLabels.length) ? { label: 'Motif du rappel', value: criteriaLabels.join(', ') } : null,
+].filter(Boolean))}
+${buildActionLink(ticketLink, 'Traiter le ticket')}
+<p style="margin:0 0 12px;color:#6b7280;font-size:12px">Dès que le ticket avance (prise en charge, suivi, réponse sortante), ce rappel cesse automatiquement.</p>`,
+  });
+}
+
+// Envoie le rappel technicien pour un ticket. `to` est une adresse unique : pour un
+// ticket non assigné, le scheduler envoie un email par membre de l'équipe concerné.
+async function sendTechnicianReminderEmail({ ticketId, ticketTitle, priority, category, teamName, to, technicianName, hoursWaiting, criteriaLabels }) {
+  const settings = await getSystemSettings();
+  // Double garde avec le scheduler : si l'admin coupe le réglage entre deux passes,
+  // le dernier envoi ne part pas.
+  if (!settings.techReminderEnabled) return null;
+  const subject = `[Rappel #${ticketId}] Ticket ouvert depuis ${hoursWaiting} h — ${ticketTitle}`;
+  const signature = await getEmailSignature();
+  const frontendUrl = resolveFrontendUrl(settings);
+  const ticketLink = `${frontendUrl}/tickets/${ticketId}`;
+  const bodyHtml = buildTechnicianReminderHtml({ technicianName, ticketId, ticketTitle, priority, category, teamName, hoursWaiting, criteriaLabels: criteriaLabels || [], signature, ticketLink });
+
+  return sendEmail({ ticketId, to, subject, bodyHtml, saveAsMessage: false });
+}
+
 // ── Template : Dépassement d'échéance manuelle ───────────────────────────────
 function buildDueDateHtml({ technicianName, glpiTicketId, ticketId, ticketTitle, priority, dueDate, signature, ticketLink, customMessage }) {
   const priorityLabel = buildPriorityLabel(priority);
@@ -1552,6 +1599,7 @@ module.exports = {
   sendAssignmentNotificationEmail,
   sendHotlineApprovalReminderEmail,
   sendSlaBreachEmail,
+  sendTechnicianReminderEmail,
   sendDueDateEmail,
   sendEscalationEmail,
   sendRequesterEscalationEmail,
@@ -1568,6 +1616,7 @@ module.exports = {
   buildMajorIncidentResolvedHtml,
   buildAssignmentNotificationHtml,
   buildSlaBreachHtml,
+  buildTechnicianReminderHtml,
   buildDueDateHtml,
   buildStatusChangeHtml,
   buildEscalationEmailHtml,

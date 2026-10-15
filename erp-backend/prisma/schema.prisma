@@ -699,6 +699,16 @@ model SystemSettings {
   draftReminderDelayMinutes     Int      @default(30) // délai après lequel une relance est envoyée si le brouillon est toujours PENDING
   draftReminderExcludeEmails    String[] @default([]) // adresses email exclues des relances (ex: superadmin)
 
+  // ── Rappels techniciens (Paramètres > Automatisation > Rappels techniciens) ─
+  // Email direct (pas de brouillon) au technicien assigné — ou aux membres de
+  // l'équipe si le ticket n'est pas assigné — dès qu'un ticket ouvert dépasse le
+  // délai configuré (ex. 24 h) sans prise en charge. Vérifié toutes les 30 min.
+  techReminderEnabled       Boolean @default(false) // master switch, désactivé par défaut
+  techReminderDelayHours    Int     @default(24) // délai avant le 1er rappel (heures)
+  techReminderRepeatHours   Int     @default(0) // 0 = un seul rappel par ticket, sinon renvoi toutes les X h tant que le critère persiste
+  techReminderOnNoActivity  Boolean @default(true) // critère : ticket assigné sans activité (suivi/réponse sortante) depuis le délai
+  techReminderOnUnassigned  Boolean @default(true) // critère : ticket ouvert sans technicien assigné depuis le délai
+
   // Moteur SLA (outil de ticketing) — seuils par priorité en heures :
   //   { P1: { response: 1, resolution: 4 }, P2: { response: 2, resolution: 8 },
   //     P3: { response: 4, resolution: 24 }, P4: { response: 8, resolution: 72 } }

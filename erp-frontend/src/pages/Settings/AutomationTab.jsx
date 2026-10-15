@@ -13,6 +13,9 @@ export default function AutomationTab() {
   const [saving, setSaving] = useState(false);
   const [reminderConfig, setReminderConfig] = useState(null);
   const [reminderSaving, setReminderSaving] = useState(false);
+  const [techReminder, setTechReminder] = useState(null);
+  const [techSaving, setTechSaving] = useState(false);
+  const [techRunning, setTechRunning] = useState(false);
   const [autoClosing, setAutoClosing] = useState(false);
 
   function load() {
@@ -20,6 +23,7 @@ export default function AutomationTab() {
       setSettings(data);
     }).catch((err) => setError(err.response?.data?.error || 'Erreur de chargement'));
     api.get('/reminders/config').then(({ data }) => setReminderConfig(data)).catch(() => {});
+    api.get('/reminders/technician-config').then(({ data }) => setTechReminder(data)).catch(() => {});
   }
 
   useEffect(load, []);
@@ -34,6 +38,37 @@ export default function AutomationTab() {
       setError(err.response?.data?.error || 'Erreur lors de la mise à jour');
     } finally {
       setReminderSaving(false);
+    }
+  }
+
+  // Rappels techniciens : config dédiée (GET/PUT /reminders/technician-config) —
+  // le scheduler la relit à chaque passe, le changement s'applique sans redémarrage.
+  async function updateTechReminder(patch) {
+    setTechSaving(true);
+    setError('');
+    try {
+      const { data } = await api.put('/reminders/technician-config', { ...techReminder, ...patch });
+      setTechReminder(data);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Erreur lors de la mise à jour');
+    } finally {
+      setTechSaving(false);
+    }
+  }
+
+  async function handleRunTechReminder() {
+    setTechRunning(true);
+    try {
+      const { data } = await api.post('/reminders/run-technician');
+      if (data.processed === 0) {
+        toast.info('Aucun rappel à envoyer');
+      } else {
+        toast.success(`${data.processed} rappel(s) technicien(s) envoyé(s)`);
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Erreur lors de l\'exécution');
+    } finally {
+      setTechRunning(false);
     }
   }
 
@@ -294,6 +329,75 @@ export default function AutomationTab() {
             </motion.div>
           </div>
         </div>
+      </div>
+
+      {/* ═══════════════════════════════════════════════════════════════════════ */}
+      {/* SECTION 4 : RAPPELS TECHICIENS */}
+      {/* ═══════════════════════════════════════════════════════════════════════ */}
+      <div className="space-y-md">
+        <div className="flex items-center gap-2 border-b border-outline-variant/40 pb-sm">
+          <span className="material-symbols-outlined text-primary text-2xl">engineering</span>
+          <h4 className="font-headline-md text-headline-md text-on-surface font-bold">Rappels Techniciens</h4>
+        </div>
+
+        {techReminder && (
+          <div className="space-y-md">
+            <SettingRow
+              title="Rappel email des tickets ouverts"
+              description="Préviens directement le technicien assigné (ou les membres de l'équipe si le ticket n'est pas assigné) dès qu'un ticket ouvert dépasse le délai ci-dessous sans prise en charge. Contrairement aux relances destinées au demandeur, l'email part immédiatement, sans validation."
+              checked={techReminder.techReminderEnabled}
+              onChange={(v) => updateTechReminder({ techReminderEnabled: v })}
+              disabled={techSaving}
+            />
+
+            <IntervalRow
+              title="Délai avant rappel"
+              description="Temps après lequel un ticket ouvert sans prise en charge déclenche le rappel (ex. 24 h)."
+              value={techReminder.techReminderDelayHours}
+              onChange={(v) => updateTechReminder({ techReminderDelayHours: Math.max(1, v) })}
+              disabled={techSaving || !techReminder.techReminderEnabled}
+              max={720}
+              unit="heures"
+            />
+
+            <IntervalRow
+              title="Rappel répété"
+              description="Renvoyer le rappel toutes les X heures tant que le ticket reste sans prise en charge. 0 = un seul rappel par ticket."
+              value={techReminder.techReminderRepeatHours}
+              onChange={(v) => updateTechReminder({ techReminderRepeatHours: v })}
+              disabled={techSaving || !techReminder.techReminderEnabled}
+              max={720}
+              unit="heures"
+            />
+
+            <SettingRow
+              title="Critère : ticket assigné sans activité"
+              description="Rappelle au technicien assigné ses tickets sans suivi ni réponse sortante depuis le délai configuré. Les réponses du demandeur ne réinitialisent pas le compteur."
+              checked={techReminder.techReminderOnNoActivity}
+              onChange={(v) => updateTechReminder({ techReminderOnNoActivity: v })}
+              disabled={techSaving || !techReminder.techReminderEnabled}
+            />
+
+            <SettingRow
+              title="Critère : ticket ouvert sans technicien"
+              description="Prévient les membres de l'équipe (et son adresse de groupe) des tickets non assignés depuis le délai configuré."
+              checked={techReminder.techReminderOnUnassigned}
+              onChange={(v) => updateTechReminder({ techReminderOnUnassigned: v })}
+              disabled={techSaving || !techReminder.techReminderEnabled}
+            />
+
+            <button
+              onClick={handleRunTechReminder}
+              disabled={techRunning || !techReminder.techReminderEnabled}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl border border-outline-variant bg-surface text-on-surface font-body-sm text-body-sm hover:bg-surface-container-low transition-colors disabled:opacity-50 cursor-pointer"
+            >
+              <span className={`material-symbols-outlined text-[16px] ${techRunning ? 'animate-spin' : ''}`}>
+                {techRunning ? 'progress_activity' : 'play_arrow'}
+              </span>
+              {techRunning ? 'Exécution en cours...' : 'Lancer maintenant'}
+            </button>
+          </div>
+        )}
       </div>
     </motion.div>
   );

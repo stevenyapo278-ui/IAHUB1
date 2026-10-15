@@ -7,6 +7,8 @@ const { summarizeTicketThread } = require('../services/ticketThreadSummarizer');
 const { runReminderScheduler } = require('../services/reminderScheduler');
 const { logEvent } = require('../services/ticketEvent');
 const { searchKnowledge } = require('../services/knowledgeSearch');
+const { getSystemSettings } = require('../services/systemSettings');
+const { runTechnicianReminderScheduler } = require('../services/technicianReminderScheduler');
 
 const router = express.Router();
 router.use(authenticate);
@@ -136,6 +138,65 @@ router.put('/reminders/config', requirePermission('automation.manage', ['ADMIN']
     ? await prisma.reminderConfig.update({ where: { id: existing.id }, data })
     : await prisma.reminderConfig.create({ data: { ...data, isActive: isActive !== undefined ? isActive : true } });
   res.json(config);
+});
+
+// ── Rappels techniciens (Paramètres > Automatisation) ──────────────────────
+// Lecture/écriture de l'envoi d'email aux techniciens (ou à leur équipe) quand un
+// ticket ouvert dépasse le délai configuré (ex. 24 h) sans prise en charge. Les
+// valeurs vivent dans SystemSettings : le scheduler les relit à chaque passe, un
+// changement s'applique donc sans redémarrage.
+const TECH_REMINDER_FIELDS = {
+  techReminderEnabled: { type: 'boolean' },
+  techReminderDelayHours: { type: 'int', min: 1, max: 720 },
+  techReminderRepeatHours: { type: 'int', min: 0, max: 720 },
+  techReminderOnNoActivity: { type: 'boolean' },
+  techReminderOnUnassigned: { type: 'boolean' },
+};
+
+function pickTechReminderConfig(settings) {
+  const out = {};
+  for (const [key, def] of Object.entries(TECH_REMINDER_FIELDS)) {
+    out[key] = settings?.[key] ?? (def.type === 'boolean' ? false : def.min);
+  }
+  return out;
+}
+
+router.get('/reminders/technician-config', requirePermission('automation.manage', ['ADMIN']), async (req, res) => {
+  res.json(pickTechReminderConfig(await getSystemSettings()));
+});
+
+router.put('/reminders/technician-config', requirePermission('automation.manage', ['ADMIN']), async (req, res) => {
+  const data = {};
+  for (const [key, def] of Object.entries(TECH_REMINDER_FIELDS)) {
+    const value = req.body?.[key];
+    if (value === undefined) continue;
+    if (def.type === 'boolean') {
+      data[key] = !!value;
+    } else {
+      // Hors bornes ou NaN : on refuse plutôt que d'enregistrer une valeur que le
+      // scheduler interpréterait autrement que ce que l'admin a vu à l'écran.
+      const parsed = Number.parseInt(value, 10);
+      if (!Number.isFinite(parsed) || parsed < def.min || parsed > def.max) {
+        return res.status(400).json({ error: `${key} doit être compris entre ${def.min} et ${def.max}` });
+      }
+      data[key] = parsed;
+    }
+  }
+  if (Object.keys(data).length === 0) {
+    return res.status(400).json({ error: 'Aucun réglage de rappel technicien à sauvegarder' });
+  }
+  const settings = await prisma.systemSettings.upsert({ where: { id: 1 }, update: data, create: { id: 1, ...data } });
+  res.json(pickTechReminderConfig(settings));
+});
+
+// Exécution manuelle (bouton « Lancer maintenant » des Paramètres) — même moteur que le cron.
+router.post('/reminders/run-technician', requirePermission('automation.manage', ['ADMIN']), async (req, res) => {
+  try {
+    const results = await runTechnicianReminderScheduler();
+    res.json({ processed: results.length, results });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
 });
 
 module.exports = router;

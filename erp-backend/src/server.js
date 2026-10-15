@@ -10,6 +10,7 @@ const { runEmailPipeline } = require('./services/emailPipeline');
 const { getSystemSettings } = require('./services/systemSettings');
 const { runDraftReminderScheduler } = require('./services/draftReminderScheduler');
 const { runReminderScheduler } = require('./services/reminderScheduler');
+const { runTechnicianReminderScheduler } = require('./services/technicianReminderScheduler');
 const { processApprovalReminders } = require('./services/approvalReminderScheduler');
 const { checkAndSendDailySummary } = require('./services/dailySummary');
 const { runSolvedAutoCloseScheduler } = require('./services/solvedAutoCloseScheduler');
@@ -43,6 +44,7 @@ const FALLBACK_CHECK_DELAY_MS = 60 * 1000; // si l'intervalle configuré est 0 (
 const DRAFT_REMINDER_CHECK_INTERVAL_MS = 5 * 60 * 1000; // vérifie toutes les 5 min quels brouillons dépassent le délai configuré (draftReminderDelayMinutes)
 const TICKET_REMINDER_CHECK_INTERVAL_MS = 60 * 60 * 1000; // vérifie toutes les heures quels tickets WAITING_FOR_USER dépassent les délais de ReminderConfig (en jours, donc pas besoin d'une fréquence plus fine)
 const APPROVAL_REMINDER_CHECK_INTERVAL_MS = 5 * 60 * 1000; // vérifie toutes les 5 min quels tickets PENDING dépassent le délai d'approbation (approvalReminderMinutes, défaut 30 min)
+const TECH_REMINDER_CHECK_INTERVAL_MS = 30 * 60 * 1000; // rappels techniciens : les délais configurés sont en heures (ex. 24 h), une vérification toutes les 30 min suffit
 const DAILY_SUMMARY_CHECK_INTERVAL_MS = 60 * 1000; // vérifie chaque minute si l'heure configurée (dailySummaryTime, ex "18:00") est atteinte
 const SOLVED_AUTO_CLOSE_CHECK_INTERVAL_MS = 60 * 60 * 1000; // vérifie chaque heure quels tickets SOLVED dépassent le délai de 3 jours
 
@@ -257,6 +259,16 @@ trackedTicketReminder().catch((err) => logger.error('Erreur relance tickets en a
 setInterval(() => {
   trackedTicketReminder().catch((err) => logger.error('Erreur relance tickets en attente:', { error: err.message, stack: err.stack }));
 }, TICKET_REMINDER_CHECK_INTERVAL_MS);
+
+// Rappels techniciens (Paramètres > Automatisation > Rappels techniciens) — email direct
+// au technicien assigné (ou à son équipe si le ticket est non assigné) quand un ticket
+// ouvert dépasse le délai configuré (ex. 24 h) sans prise en charge. Désactivé par défaut :
+// le scheduler se coupe tout seul tant que l'admin n'a pas coché « activé ».
+const trackedTechReminder = withHealthTracking('rappel techniciens', runTechnicianReminderScheduler);
+trackedTechReminder().catch((err) => logger.error('Erreur rappel techniciens:', { error: err.message, stack: err.stack }));
+setInterval(() => {
+  trackedTechReminder().catch((err) => logger.error('Erreur rappel techniciens:', { error: err.message, stack: err.stack }));
+}, TECH_REMINDER_CHECK_INTERVAL_MS);
 
 // Relance Hotline pour tickets en attente d'approbation (PENDING). La 1re notification part
 // IMMÉDIATEMENT à la création du ticket (emailPipeline → notifyNewPendingTicket) ; ce scheduler
