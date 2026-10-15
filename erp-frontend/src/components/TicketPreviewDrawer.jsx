@@ -4,8 +4,8 @@
  * Volet de droite (même mécanisme que le filtre avancé via FormDrawer) qui
  * montre l'essentiel d'un ticket sans quitter la liste : badges (statut,
  * priorité, SLA, escalade, approbation), infos clés, résumé IA, description et
- * les 3 derniers suivis (GET /tickets/:id/preview, caché en mémoire).
- * Le bouton du pied de volet renvoie vers la fiche complète.
+ * l'activité récente = mails + commentaires fusionnés (GET /tickets/:id/preview,
+ * caché en mémoire). Le bouton du pied de volet renvoie vers la fiche complète.
  *
  * Props :
  *   open     : bool
@@ -17,7 +17,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Ticket, ExternalLink, User, Users, MapPin, Tag, Clock, Calendar,
-  Sparkles, MessageSquare, Building2, ArrowUpCircle, ShieldCheck,
+  Sparkles, MessageSquare, Building2, ArrowUpCircle, ShieldCheck, Mail,
 } from 'lucide-react';
 import api from '../api/client';
 import FormDrawer from './FormDrawer';
@@ -98,6 +98,14 @@ export default function TicketPreviewDrawer({ open, ticket, filterQs = '', onClo
   const description = String(ticket.content || '').trim();
   const looksHtml = /<\/?[a-z][\s\S]*>/i.test(description);
   const followups = preview?.followups || [];
+  const messages = preview?.messages || [];
+  // Activité récente = mails + commentaires fusionnés, du plus récent au plus ancien (5 max)
+  const activity = [
+    ...followups.map((f) => ({ key: `f-${f.id}`, kind: 'comment', date: f.createdAt, data: f })),
+    ...messages.map((m) => ({ key: `m-${m.id}`, kind: 'email', date: m.timestamp || m.createdAt, data: m })),
+  ]
+    .sort((a, b) => new Date(b.date) - new Date(a.date))
+    .slice(0, 5);
 
   return (
     <FormDrawer
@@ -191,7 +199,7 @@ export default function TicketPreviewDrawer({ open, ticket, filterQs = '', onClo
           )}
         </section>
 
-        {/* ── Activité récente (3 derniers suivis) ── */}
+        {/* ── Activité récente (mails + commentaires fusionnés) ── */}
         <section className="space-y-2">
           <h3 className="text-[11px] font-bold uppercase tracking-wider text-on-surface-variant flex items-center gap-1.5">
             <Clock className="w-3.5 h-3.5" /> Activité récente
@@ -205,32 +213,58 @@ export default function TicketPreviewDrawer({ open, ticket, filterQs = '', onClo
           {previewError && (
             <p className="text-[12px] text-on-surface-variant italic">Activité indisponible pour le moment.</p>
           )}
-          {preview && followups.length === 0 && (
-            <p className="text-[12px] text-on-surface-variant italic">Aucun suivi pour l'instant.</p>
+          {preview && activity.length === 0 && (
+            <p className="text-[12px] text-on-surface-variant italic">Aucun mail ni commentaire pour l'instant.</p>
           )}
-          {preview && followups.length > 0 && (
+          {preview && activity.length > 0 && (
             <ul className="space-y-2">
-              {followups.map((f) => (
-                <li key={f.id} className="rounded-xl border border-outline-variant/40 bg-surface-container-low/50 px-3 py-2">
+              {activity.map((item) => (item.kind === 'email' ? (
+                <li key={item.key} className="rounded-xl border border-outline-variant/40 bg-surface-container-low/50 px-3 py-2">
                   <div className="flex items-center justify-between gap-2 mb-0.5">
-                    <span className="text-[12px] font-bold text-on-surface truncate">{f.author?.fullName || 'Anonyme'}</span>
-                    <span className="text-[10px] text-on-surface-variant shrink-0">{fmtDateTime(f.createdAt)}</span>
+                    <span className="text-[12px] font-bold text-on-surface truncate flex items-center gap-1.5 min-w-0">
+                      <Mail className="w-3 h-3 text-primary shrink-0" />
+                      {item.data.sender || 'Expéditeur inconnu'}
+                    </span>
+                    <span className="text-[10px] text-on-surface-variant shrink-0">{fmtDateTime(item.date)}</span>
+                  </div>
+                  <p className="text-[12px] font-semibold text-on-surface truncate" title={item.data.subject || ''}>
+                    {item.data.subject || '(sans objet)'}
+                  </p>
+                  <p className="text-[12px] text-on-surface-variant leading-relaxed line-clamp-3">
+                    {stripHtml(item.data.summary || item.data.body || '')}
+                  </p>
+                  <span className={`mt-1 inline-block text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${
+                    item.data.direction === 'OUTBOUND'
+                      ? 'bg-primary/10 text-primary'
+                      : 'bg-sky-500/15 text-sky-600 dark:text-sky-400'
+                  }`}>
+                    {item.data.direction === 'OUTBOUND' ? 'Envoyé' : 'Reçu'}
+                  </span>
+                </li>
+              ) : (
+                <li key={item.key} className="rounded-xl border border-outline-variant/40 bg-surface-container-low/50 px-3 py-2">
+                  <div className="flex items-center justify-between gap-2 mb-0.5">
+                    <span className="text-[12px] font-bold text-on-surface truncate flex items-center gap-1.5 min-w-0">
+                      <MessageSquare className="w-3 h-3 text-on-surface-variant shrink-0" />
+                      {item.data.author?.fullName || 'Anonyme'}
+                    </span>
+                    <span className="text-[10px] text-on-surface-variant shrink-0">{fmtDateTime(item.date)}</span>
                   </div>
                   <p className="text-[12px] text-on-surface-variant leading-relaxed whitespace-pre-wrap break-words line-clamp-4">
-                    {stripHtml(f.content)}
+                    {stripHtml(item.data.content)}
                   </p>
-                  {f.isPrivate && (
+                  {item.data.isPrivate && (
                     <span className="mt-1 inline-block text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-600">
                       Privé
                     </span>
                   )}
                 </li>
-              ))}
+              )))}
             </ul>
           )}
-          {preview && followups.length > 0 && (
+          {preview && activity.length > 0 && (
             <p className="text-[11px] text-on-surface-variant">
-              3 derniers suivis uniquement — l'historique complet est dans la fiche.
+              5 dernières activités (mails + commentaires) — l'historique complet est dans la fiche.
             </p>
           )}
         </section>

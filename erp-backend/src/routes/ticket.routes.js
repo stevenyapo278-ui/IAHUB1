@@ -696,6 +696,16 @@ router.get('/:id/preview', async (req, res) => {
             author: { select: { id: true, fullName: true, avatarUrl: true } },
           },
         },
+        // Mails du fil de conversation (3 plus récents) — fusionnés côté front avec
+        // les suivis pour l'onglet « Activité récente » du volet d'aperçu.
+        messages: {
+          take: 3,
+          orderBy: { timestamp: 'desc' },
+          select: {
+            id: true, direction: true, sender: true, recipients: true,
+            subject: true, body: true, summary: true, timestamp: true,
+          },
+        },
       },
     });
 

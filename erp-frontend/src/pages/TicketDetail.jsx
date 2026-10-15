@@ -34,6 +34,7 @@ import {
   URGENCY_IMPACT_OPTIONS, PRIORITY_CONFIG, STATUS_CONFIG, ORIGIN_CONFIG, initials
 } from '../constants/tickets';
 import { REPORT_FIELDS } from '../constants/followup';
+import { FIELD_LABELS, formatLogValue } from '../utils/logFields';
 
 import { sanitizeHtml, richTextIsEmpty } from '../utils/sanitize';
 import { readFollowupDraft, writeFollowupDraft } from '../utils/followupDraft';
@@ -239,6 +240,8 @@ export default function TicketDetail() {
   // Tickets liés + fusion + modale « Relations » (tickets liés, problèmes racines, sous-tickets)
   const [relationsModalOpen, setRelationsModalOpen] = useState(false);
   const [relationsTab, setRelationsTab] = useState('tickets');
+  // Modale « Historique des Corrections » (journal des champs modifiés, TICKET_UPDATED)
+  const [correctionsModalOpen, setCorrectionsModalOpen] = useState(false);
   const [linkModalOpen, setLinkModalOpen] = useState(false);
   const [childModalOpen, setChildModalOpen] = useState(false);
   const [childForm, setChildForm] = useState({ title: '', content: '', priority: 'P3' });
@@ -328,7 +331,6 @@ export default function TicketDetail() {
       setConversationLocked(!!ticket.outlookConversationId);
     }
   }, [ticket?.outlookConversationId]);
-  const [corrections, setCorrections] = useState([]);
   const [showRejectModal, setShowRejectModal] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
   const [rejecting, setRejecting] = useState(false);
@@ -370,12 +372,19 @@ export default function TicketDetail() {
   const [editingContentImages, setEditingContentImages] = useState([]);
   const [savingContent, setSavingContent] = useState(false);
 
+  // Journal des champs modifiés (TICKET_UPDATED) : retiré du fil « Suivi & Échanges »
+  // pour être affiché dans le volet « Historique des Corrections » (cliquable → modale).
+  const correctionEvents = useMemo(
+    () => events.filter((e) => e.type === 'TICKET_UPDATED'),
+    [events]
+  );
+
   // Historique fusionné (commentaires + emails + événements système), trié une seule fois.
   const timelineItems = useMemo(
     () => buildTimeline({
       followups: ticket?.followups,
       messages: ticket?.messages,
-      events,
+      events: events.filter((e) => e.type !== 'TICKET_UPDATED'),
     }),
     [ticket, events]
   );
@@ -505,10 +514,6 @@ export default function TicketDetail() {
         setEvents(data);
         setSyncFailures(data.filter((e) => e.type === 'GLPI_SYNC_FAILED'));
       })
-      .catch(() => {});
-    api
-      .get(`/tickets/${id}/corrections`)
-      .then(({ data }) => setCorrections(data))
       .catch(() => {});
     api
       .get(`/problems/by-ticket/${id}`)
@@ -3610,29 +3615,49 @@ export default function TicketDetail() {
             </div>
           )}
 
-          {/* Audit Trail / Corrections History Card */}
-          {corrections.length > 0 && (
-            <div className="rounded-3xl border border-outline-variant/30 bg-surface-container-lowest p-6 shadow-sm space-y-4">
-              <h3 className="text-xs font-extrabold uppercase tracking-wider text-on-surface flex items-center gap-2 border-b border-outline-variant/20 pb-3">
-                <History className="w-4 h-4 text-primary" />
-                Historique des Corrections ({corrections.length})
+          {/* Historique des Corrections — journal des champs modifiés (TICKET_UPDATED),
+              sorti du fil « Suivi & Échanges ». Carte cliquable → modale avec le détail. */}
+          {correctionEvents.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setCorrectionsModalOpen(true)}
+              className="w-full rounded-3xl border border-outline-variant/30 bg-surface-container-lowest p-6 shadow-sm space-y-4 text-left hover-interactive transition-all group cursor-pointer"
+            >
+              <h3 className="text-xs font-extrabold uppercase tracking-wider text-on-surface flex items-center justify-between gap-2 border-b border-outline-variant/20 pb-3">
+                <span className="flex items-center gap-2 min-w-0">
+                  <History className="w-4 h-4 text-primary shrink-0" />
+                  <span className="truncate">Historique des Corrections ({correctionEvents.length})</span>
+                </span>
+                <ChevronRight className="w-4 h-4 text-on-surface-variant group-hover:text-primary transition-colors shrink-0" />
               </h3>
               <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
-                {corrections.map((c) => (
-                  <div key={c.id} className="p-3 rounded-2xl border border-outline-variant/20 bg-surface-container-low/30 text-xs space-y-1">
-                    <div className="flex items-center justify-between text-on-surface-variant text-[10px]">
-                      <span className="font-bold text-on-surface">{c.correctedBy?.fullName || 'Hotline / Système'}</span>
-                      <span className="font-mono">{new Date(c.createdAt).toLocaleString('fr-FR')}</span>
+                {correctionEvents.map((e) => {
+                  const changes = Array.isArray(e.payload?.changes) ? e.payload.changes : [];
+                  return (
+                    <div key={e.id} className="p-3 rounded-2xl border border-outline-variant/20 bg-surface-container-low/30 text-xs space-y-1.5">
+                      <div className="flex items-center justify-between gap-2 text-on-surface-variant text-[10px]">
+                        <span className="font-bold text-on-surface truncate">
+                          {e.actor && e.actor !== 'SYSTEM' ? e.actor : 'Système'}
+                        </span>
+                        <span className="font-mono shrink-0">{new Date(e.createdAt).toLocaleString('fr-FR')}</span>
+                      </div>
+                      {changes.slice(0, 2).map((c, i) => (
+                        <p key={i} className="text-xs text-on-surface font-medium truncate">
+                          {FIELD_LABELS[c.field] || c.field} :
+                          <span className="line-through text-red-500 mx-1.5">{formatLogValue(c.fromLabel ?? c.from)}</span>→
+                          <span className="font-bold text-emerald-600 dark:text-emerald-400 ml-1.5">{formatLogValue(c.toLabel ?? c.to)}</span>
+                        </p>
+                      ))}
+                      {changes.length > 2 && (
+                        <p className="text-[10px] text-on-surface-variant italic">
+                          + {changes.length - 2} autre(s) champ(s) — cliquez pour tout afficher
+                        </p>
+                      )}
                     </div>
-                    <p className="text-xs text-on-surface font-medium">
-                      Modification de <span className="font-bold text-primary">{c.fieldName}</span> :
-                      <span className="line-through text-red-500 mx-1.5">{c.oldValue || 'vide'}</span> →
-                      <span className="font-bold text-emerald-600 dark:text-emerald-400 ml-1.5">{c.newValue || 'vide'}</span>
-                    </p>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
-            </div>
+            </button>
           )}
         </div>
       </div>
@@ -4341,6 +4366,74 @@ export default function TicketDetail() {
       )}
 
       {/* ═══ MODALE RELATIONS : tickets liés · problèmes racines · sous-tickets ═══ */}
+      {/* Modale « Historique des Corrections » — détail de chaque modification de champs */}
+      {correctionsModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md animate-fadeIn" onClick={() => setCorrectionsModalOpen(false)}>
+          <div className="w-full max-w-2xl max-h-[85vh] flex flex-col rounded-2xl border border-outline-variant/40 bg-surface-container-lowest shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            {/* Header */}
+            <div className="shrink-0 px-5 pt-4 pb-3 border-b border-outline-variant/20 bg-surface-container-low/40">
+              <div className="flex items-center justify-between gap-3">
+                <h3 className="text-sm font-extrabold text-on-surface flex items-center gap-2">
+                  <History className="w-4 h-4 text-primary" />
+                  Historique des Corrections — #{id}
+                </h3>
+                <button
+                  onClick={() => setCorrectionsModalOpen(false)}
+                  className="p-1.5 rounded-lg text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all cursor-pointer"
+                  title="Fermer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <p className="text-[11px] text-on-surface-variant mt-1.5">
+                {correctionEvents.length} modification{correctionEvents.length > 1 ? 's' : ''} de champs du ticket
+              </p>
+            </div>
+
+            {/* Corps — chaque modification, champ par champ */}
+            <div className="flex-1 min-h-0 overflow-y-auto p-5 space-y-3">
+              {correctionEvents.map((e) => {
+                const changes = Array.isArray(e.payload?.changes) ? e.payload.changes : [];
+                return (
+                  <div key={e.id} className="p-4 rounded-2xl border border-outline-variant/30 bg-surface-container-low/40 space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="flex items-center gap-2 text-xs font-bold text-on-surface min-w-0">
+                        <FileText className="w-3.5 h-3.5 text-primary shrink-0" />
+                        <span className="truncate">
+                          {e.actor && e.actor !== 'SYSTEM' ? e.actor : 'Système'}
+                        </span>
+                        {e.payload?.via === 'bulk' && (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 shrink-0">
+                            mise à jour groupée
+                          </span>
+                        )}
+                      </span>
+                      <span className="font-mono text-[11px] text-on-surface-variant shrink-0">
+                        {new Date(e.createdAt).toLocaleString('fr-FR')}
+                      </span>
+                    </div>
+                    {changes.length > 0 ? (
+                      <div className="rounded-lg border border-outline-variant/20 overflow-hidden">
+                        {changes.map((c, i) => (
+                          <div key={`${e.id}-chg-${i}`} className="flex items-start gap-2 px-3 py-1.5 text-xs odd:bg-surface-container-low/60">
+                            <span className="font-bold text-on-surface min-w-[120px] shrink-0">{FIELD_LABELS[c.field] || c.field}</span>
+                            <span className="text-red-600 dark:text-red-400 line-through break-all">{formatLogValue(c.fromLabel ?? c.from)}</span>
+                            <span className="text-on-surface-variant shrink-0">→</span>
+                            <span className="text-emerald-600 dark:text-emerald-400 font-semibold break-all">{formatLogValue(c.toLabel ?? c.to)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-[11px] text-on-surface-variant italic">Aucun détail de champ disponible.</p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
       {relationsModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md animate-fadeIn" onClick={() => setRelationsModalOpen(false)}>
           <div className="w-full max-w-2xl max-h-[85vh] flex flex-col rounded-2xl border border-outline-variant/40 bg-surface-container-lowest shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
