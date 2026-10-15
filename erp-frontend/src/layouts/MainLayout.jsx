@@ -47,6 +47,7 @@ import { useTheme } from '../context/ThemeContext';
 import { hasPermission } from '../utils/permissions';
 import ForcePasswordChange from '../components/ForcePasswordChange';
 import AccountModal from '../components/AccountModal';
+import { resolveAvatarUrl } from '../components/UserAvatar';
 import ConfirmDialog from '../components/ConfirmDialog';
 import GlobalSearch from '../components/GlobalSearch';
 import NotificationPanel from '../components/NotificationPanel';
@@ -121,6 +122,9 @@ export default function MainLayout() {
   const navigate = useNavigate();
   const location = useLocation();
   const { settings: systemSettings, loading: settingsLoading } = useSystemSettings();
+
+  // Photo de profil : chemin relatif /uploads/… résolu contre l'origine de l'API
+  const sidebarAvatarSrc = resolveAvatarUrl(user?.avatarUrl);
 
   const { unreadCount } = useNotifications();
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
@@ -497,11 +501,17 @@ export default function MainLayout() {
           onClick={() => setShowUserMenu(!showUserMenu)}
           ref={userMenuRef}
         >
-          <div className="sidebar-user-avatar overflow-hidden">
-            {user?.avatarUrl ? (
-              <img src={user.avatarUrl} alt={user.fullName} className="w-full h-full object-cover" />
-            ) : (
-              user?.fullName?.charAt(0)?.toUpperCase() || '?'
+          {/* L'initiale reste dessous : si la photo est absente/cassée (404), on la voit
+              au lieu d'une icône d'image brisée. */}
+          <div className="sidebar-user-avatar overflow-hidden relative">
+            {user?.fullName?.charAt(0)?.toUpperCase() || '?'}
+            {sidebarAvatarSrc && (
+              <img
+                src={sidebarAvatarSrc}
+                alt={user.fullName}
+                className="absolute inset-0 w-full h-full object-cover"
+                onError={(e) => { e.currentTarget.style.display = 'none'; }}
+              />
             )}
           </div>
           <div className="sidebar-user-info min-w-0 flex-1">

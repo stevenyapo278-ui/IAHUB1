@@ -13,7 +13,6 @@ const { sendPasswordResetLinkEmail } = require('../services/emailSender');
 const { auditLog } = require('../services/auditLogService');
 const { isLdapEnabled, isLdapAdminUsername, ldapEmailFor, authenticateLdap } = require('../services/ldapAuth');
 const { recordFailedLogin, clearFailedLogins, isAccountLocked, validateUpload } = require('../utils/security');
-const { resolveBackendUrl } = require('../services/systemSettings');
 
 const router = express.Router();
 
@@ -25,6 +24,12 @@ const AUTH_EMAIL_DOMAIN = process.env.AUTH_EMAIL_DOMAIN?.trim() || '';
 
 // ── Photo de profil (self-service, tous les utilisateurs) ────────────────
 // On écrit dans <WORKDIR>/uploads/avatar — le volume Docker y est monté.
+// IMPORTANT : avatarUrl est renvoyée en chemin RELATIF (/uploads/avatar/x.jpg), jamais en
+// URL absolue. Une absolue reconstruite depuis SystemSettings.backendUrl casse dès que l'app
+// est servie via un autre hôte/port/protocole (reverse proxy HTTPS, IP, domaine…) : le
+// navigateur demande une image introuvable → icône cassée. Le front résout le chemin relatif
+// contre l'origine de l'API (voir resolveAvatarUrl), ce qui marche en dev (proxy Vite),
+// en prod (même origine) et derrière un proxy TLS.
 const AVATAR_UPLOAD_DIR = path.join(process.cwd(), 'uploads', 'avatar');
 fs.mkdirSync(AVATAR_UPLOAD_DIR, { recursive: true });
 
@@ -42,10 +47,13 @@ const avatarUpload = multer({
   },
 });
 
-// Renvoie l'utilisateur avec avatarUrl résolue en URL absolue (servable depuis le navigateur)
-async function userWithAvatarUrl(user, settings) {
-  const backendUrl = resolveBackendUrl(settings || (await prisma.systemSettings.findUnique({ where: { id: 1 } })));
-  return { ...user, avatarUrl: user.avatarUrl ? `${backendUrl}${user.avatarUrl}` : null };
+// Normalise avatarUrl : null si vide. Une éventuelle URL absolue héritée (ancien modèle,
+// construite depuis SystemSettings.backendUrl) est ramenée au chemin relatif /uploads/…
+// pour rester portable quel que soit l'hôte/port/protocole réellement utilisé par le client.
+function normalizeAvatarUrl(avatarUrl) {
+  if (!avatarUrl) return null;
+  const match = String(avatarUrl).match(/(\/uploads\/.+)$/);
+  return match ? match[1] : avatarUrl;
 }
 
 function resolveLoginIdentifier(input) {
@@ -163,7 +171,7 @@ router.post(
             teamId: user.teamId,
             permissions,
             mustChangePassword: user.mustChangePassword,
-            avatarUrl: user.avatarUrl || null,
+            avatarUrl: normalizeAvatarUrl(user.avatarUrl),
           },
         });
       } else {
@@ -399,11 +407,11 @@ router.get('/me', authenticate, async (req, res) => {
       { expiresIn: process.env.JWT_EXPIRES_IN || '30d' }
     );
 
-    const { avatarUrl, ...rest } = await userWithAvatarUrl(user);
+    const { avatarUrl, ...rest } = user;
     // Le rôle exposé au front est le rôle ACTIF (celui du token), pas le rôle principal en base —
     // sinon le refresh /auth/me réécrivait user.role avec le rôle principal et re-basculait
     // l'interface sur l'ancien rôle juste après un /auth/switch-role.
-    return res.json({ ...rest, role: activeRole, roles, avatarUrl, permissions, token: freshToken });
+    return res.json({ ...rest, role: activeRole, roles, avatarUrl: normalizeAvatarUrl(avatarUrl), permissions, token: freshToken });
   } catch (err) {
     console.error('[auth.me] Erreur lors de la lecture utilisateur:', err.message);
     return res.status(500).json({ error: 'Erreur serveur lors du chargement du profil' });
@@ -432,7 +440,6 @@ router.post('/avatar', authenticate, avatarUpload.single('avatar'), async (req, 
     fs.unlink(path.join(AVATAR_UPLOAD_DIR, path.basename(previous.avatarUrl)), () => {});
   }
 
-  const settings = await prisma.systemSettings.findUnique({ where: { id: 1 } });
   auditLog('USER_AVATAR_UPDATED', {
     actor: req.user,
     targetType: 'User',
@@ -441,7 +448,7 @@ router.post('/avatar', authenticate, avatarUpload.single('avatar'), async (req, 
     metadata: { filename: req.file.filename },
   }).catch(() => {});
 
-  return res.json({ avatarUrl: `${resolveBackendUrl(settings)}${relativePath}` });
+  return res.json({ avatarUrl: relativePath });
 });
 
 // Switch de rôle actif — l'utilisateur doit posséder le rôle demandé
@@ -491,7 +498,7 @@ router.post('/switch-role', authenticate, async (req, res) => {
     } catch {}
   }
 
-  return res.json({ token, user: { id: user.id, email: user.email, fullName: user.fullName, role, roles: ownedRoles, teamId: user.teamId, avatarUrl: user.avatarUrl || null, mustChangePassword: user.mustChangePassword, permissions } });
+  return res.json({ token, user: { id: user.id, email: user.email, fullName: user.fullName, role, roles: ownedRoles, teamId: user.teamId, avatarUrl: normalizeAvatarUrl(user.avatarUrl), mustChangePassword: user.mustChangePassword, permissions } });
 });
 
 // ── Thème de la page de connexion — public (sans auth) ──────────────────────────

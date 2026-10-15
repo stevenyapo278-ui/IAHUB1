@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Camera, Trash2, Mail, ShieldCheck, X, Loader2 } from 'lucide-react';
 import api from '../api/client';
+import { resolveAvatarUrl } from './UserAvatar';
 
 // Modale « Mon compte » — accessible à TOUS les utilisateurs (aucun droit requis).
 // Permet de changer sa photo de profil ; les infos (email, rôle) sont en lecture seule.
@@ -12,6 +13,10 @@ export default function AccountModal({ open, onClose, user, onUserUpdated }) {
   const [success, setSuccess] = useState('');
 
   if (!user) return null;
+
+  // L'API renvoie un chemin relatif (/uploads/avatar/x.jpg) → résolu contre l'origine
+  // de l'API (évite les URLs absolues figées qui cassent derrière un proxy/autre port).
+  const avatarSrc = resolveAvatarUrl(user.avatarUrl);
 
   async function handleFileChange(e) {
     const file = e.target.files?.[0];
@@ -90,19 +95,21 @@ export default function AccountModal({ open, onClose, user, onUserUpdated }) {
               {/* Photo de profil */}
               <div className="flex items-center gap-5">
                 <div className="relative shrink-0">
-                  {user.avatarUrl ? (
-                    <img
-                      src={user.avatarUrl}
-                      alt={user.fullName}
-                      className="w-20 h-20 rounded-2xl object-cover border border-outline-variant/40"
-                    />
-                  ) : (
-                    <div className="w-20 h-20 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center">
-                      <span className="text-2xl font-bold text-primary">
-                        {user.fullName?.charAt(0)?.toUpperCase() || '?'}
-                      </span>
-                    </div>
-                  )}
+                  {/* L'initiale est toujours dessinée dessous : si la photo est absente
+                      ou cassée (404), on la révèle au lieu d'une icône d'image brisée. */}
+                  <div className="w-20 h-20 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center overflow-hidden">
+                    <span className="text-2xl font-bold text-primary">
+                      {user.fullName?.charAt(0)?.toUpperCase() || '?'}
+                    </span>
+                    {avatarSrc && (
+                      <img
+                        src={avatarSrc}
+                        alt={user.fullName}
+                        className="absolute inset-0 w-full h-full object-cover"
+                        onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                      />
+                    )}
+                  </div>
                   {uploading && (
                     <div className="absolute inset-0 rounded-2xl bg-black/40 flex items-center justify-center">
                       <Loader2 className="w-5 h-5 text-white animate-spin" />
