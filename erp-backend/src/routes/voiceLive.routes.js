@@ -1176,7 +1176,23 @@ function setupVoiceLive() {
   } else {
     server = http.createServer();
   }
-  const wss = new WebSocketServer({ server, maxPayload: 1024 * 1024 });
+  // Nagle OFF : PCM batchés et transcripts partent immédiatement — sur site distant
+  // (RTT élevé), l'attente de Nagle ajoute jusqu'à ~40ms par envoi.
+  server.on('connection', (socket) => { try { socket.setNoDelay(true); } catch {} });
+  const wss = new WebSocketServer({
+    server,
+    maxPayload: 1024 * 1024,
+    // Compression WebSocket : gros gain sur lien distant congestionnable —
+    // PCM de silence (zéros) ≈ quasi incompressible → énorme gain, parole ~1.3x,
+    // JSON (transcripts, cartes d'outils) ~5x. Niveau 3 : compacité suffisante,
+  // CPU négligeable (les messages sont batchés côté client).
+    // NB : clé `perMessageDeflate` (M majuscule) — le constructeur ws ne normalise
+    // PAS `permessageDeflate` (variante côté client) : elle serait silencieusement ignorée.
+    perMessageDeflate: {
+      threshold: 256, // < 256 octets : non compressés (micro-messages conservent leur latence)
+      zlibDeflateOptions: { level: 3 },
+    },
+  });
   const keepAliveInterval = setInterval(() => {
     wss.clients.forEach((c) => {
       if (c.readyState === 1) { try { c.ping(); } catch {} }
@@ -1276,6 +1292,12 @@ function setupVoiceLive() {
 
     let inputTranscriptBuf = '';
     let outputTranscriptBuf = '';
+    // Limitation du débit des transcriptions PARTIELLES relayées au front : Gemini
+    // les émet très fragmentées (souvent mot à mot) — sur site distant, un envoi par
+    // fragment = dizaines de petits messages WS/s. On relaie au plus toutes les 150ms
+    // (les finals restent toujours relayés immédiatement).
+    const PARTIAL_THROTTLE_MS = 150;
+    let lastPartialRelayAt = { user: 0, assistant: 0 };
 
     // ── Résumé de session (message client {type:'get_summary'}) ──
     // Synthétise les transcripts finaux accumulés via le chatbot texte (même
@@ -1470,13 +1492,21 @@ function setupVoiceLive() {
                   if (inputTranscriptBuf.length > 10000) inputTranscriptBuf = inputTranscriptBuf.slice(-10000);
                   // partial = phrase accumulée depuis le début du tour (le front l'affiche
                   // dans UNE bulle qui grossit, au lieu d'une bulle par fragment)
-                  ws.send(JSON.stringify({ type: 'transcript', role: 'user', text: inputTranscriptBuf, partial: true }));
+                  const nowIn = Date.now();
+                  if (nowIn - lastPartialRelayAt.user >= PARTIAL_THROTTLE_MS) {
+                    lastPartialRelayAt.user = nowIn;
+                    ws.send(JSON.stringify({ type: 'transcript', role: 'user', text: inputTranscriptBuf, partial: true }));
+                  }
                 }
                 if (sc.outputTranscription?.text) {
                   outputTranscriptBuf += sc.outputTranscription.text;
                   if (outputTranscriptBuf.length > 10000) outputTranscriptBuf = outputTranscriptBuf.slice(-10000);
                   const formattedOutput = formatSpokenTextFrench(outputTranscriptBuf);
-                  ws.send(JSON.stringify({ type: 'transcript', role: 'assistant', text: formattedOutput, partial: true }));
+                  const nowOut = Date.now();
+                  if (nowOut - lastPartialRelayAt.assistant >= PARTIAL_THROTTLE_MS) {
+                    lastPartialRelayAt.assistant = nowOut;
+                    ws.send(JSON.stringify({ type: 'transcript', role: 'assistant', text: formattedOutput, partial: true }));
+                  }
                 }
                 if (sc.turnComplete || sc.interrupted) {
                   if (audioOutChunks > 0) {

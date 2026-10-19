@@ -84,6 +84,10 @@ export function useVoiceLive() {
   const analyserRef = useRef(null);
   const playbackAnalyserRef = useRef(null); // analyser de la chaîne de sortie (parole de Marie)
   const nextStartRef = useRef(0);
+  // Jitter buffer adaptatif de lecture (poste distant) : coussin initial 40ms,
+  // élargi à chaque trou réseau (underrun), resserre progressivement sans trou.
+  const jitterBufRef = useRef(0.04);
+  const jitterAdaptAtRef = useRef(Date.now());
   const activeSourcesRef = useRef([]);
   const speakingRef = useRef(false);
   const readyRef = useRef(false);
@@ -268,11 +272,24 @@ export function useVoiceLive() {
     }
 
     const now = audioCtx.currentTime;
-    // Jitter buffer 10ms, séquentiel strict — pas de chevauchement
-    // L'ancien plafonnement `if (startAt-now>0.35) startAt=now` causait deux voix superposées
-    // (même phrase jouée en même temps, décalée de ~0.35s)
-    const jitterDelay = 0.01;
-    const startAt = Math.max(nextStartRef.current, now + jitterDelay);
+    // ── Jitter buffer ADAPTATIF (40 → 250ms) — anti-crachements sur site distant ──
+    // L'ancien coussin fixe de 10ms ne couvrait AUCUNE gigue réseau : sur un lien
+    // distant, tout chunk en retard créait un trou auditif (« crachement »).
+    // Le 1er chunk d'un tour établit le coussin `jitterBuf`, la chaîne séquentielle
+    // le préserve ensuite (pas de chevauchement possible — l'ancien plafonnement
+    // `startAt=now` causait deux voix superposées).
+    // • underrun (chunk arrivé APRÈS son heure de lecture) → +40ms (plafond 250ms)
+    // • 30s sans trou → −20ms (plancher 40ms) pour ne pas traîner de latence inutile
+    const adaptNow = Date.now();
+    if (nextStartRef.current > 0 && now > nextStartRef.current) {
+      jitterBufRef.current = Math.min(0.25, jitterBufRef.current + 0.04);
+      jitterAdaptAtRef.current = adaptNow;
+      console.warn(`[voice] Underrun réseau — jitter buffer → ${(jitterBufRef.current * 1000).toFixed(0)}ms`);
+    } else if (jitterBufRef.current > 0.04 && adaptNow - jitterAdaptAtRef.current > 30000) {
+      jitterBufRef.current = Math.max(0.04, jitterBufRef.current - 0.02);
+      jitterAdaptAtRef.current = adaptNow;
+    }
+    const startAt = Math.max(nextStartRef.current, now + jitterBufRef.current);
     // Si dérive > 0.8s (réseau très lent), on log mais on garde la séquence pour éviter le chevauchement
     if (startAt - now > 0.8) {
       console.warn(`[voice] Drift ${((startAt-now)*1000).toFixed(0)}ms — maintien séquentiel`);
@@ -449,6 +466,31 @@ export function useVoiceLive() {
         setState('connecting');
         // Configurer le worklet selon le toggle
         try { workletNode.port.postMessage({ type: 'config', noiseGate: { enabled: noiseSuppressionRef.current } }); } catch {}
+
+        // ── Regroupement de l'envoi PCM (poste distant) ──
+        // Le worklet émet un paquet toutes les ~2,7ms (~375 msg/s de ~86 octets).
+        // Sur un lien distant, ces micro-messages saturent le CPU et les micro-segments
+        // TCP (surcharge d'en-têtes ~70%) → congestion, retransmissions, audio qui
+        // « crache ». On accumulate ~60ms (≈1,9 Ko) puis on envoie d'un bloc.
+        const PCM_BATCH_MS = 60;
+        let pending = [];
+        let pendingBytes = 0;
+        const dropPending = () => { pending = []; pendingBytes = 0; };
+        const flushPcm = () => {
+          if (pendingBytes === 0) return;
+          if (mutedRef.current || pauseAudioRef.current || !readyRef.current || ws.readyState !== WebSocket.OPEN) {
+            dropPending();
+            return;
+          }
+          const out = new Uint8Array(pendingBytes);
+          let off = 0;
+          for (const buf of pending) { out.set(new Uint8Array(buf), off); off += buf.byteLength; }
+          dropPending();
+          ws.send(out);
+        };
+        const batchInterval = setInterval(flushPcm, PCM_BATCH_MS);
+        ws.addEventListener('close', () => { clearInterval(batchInterval); dropPending(); });
+
         workletNode.port.onmessage = (e) => {
           if (mutedRef.current) return;
 
@@ -458,11 +500,14 @@ export function useVoiceLive() {
           }
 
           // Bloquer l'envoi du micro pendant que Marie parle pour éviter l'auto-interruption par écho sur les serveurs Google
-          if (pauseAudioRef.current) return;
+          if (pauseAudioRef.current) { dropPending(); return; }
 
-          // Ne pas envoyer de PCM si le WS n'est pas ouvert ou si on n'est pas prêt
+          // Ne pas accumuler de PCM si le WS n'est pas ouvert ou si on n'est pas prêt
           if (readyRef.current && ws.readyState === WebSocket.OPEN && e.data.pcm) {
-            ws.send(e.data.pcm);
+            pending.push(e.data.pcm);
+            pendingBytes += e.data.pcm.byteLength;
+            // Filet anti-latence si le timer du navigateur est throttlé (onglet en arrière-plan)
+            if (pendingBytes >= 8192) flushPcm();
           }
         };
       };
@@ -522,10 +567,12 @@ export function useVoiceLive() {
         ws.onclose = null;
         if (wsRef.current === ws) wsRef.current = null;
         startingRef.current = false;
-        // Reconnexion automatique (max 3 tentatives, backoff exponentiel)
+        // Reconnexion automatique (max 6 tentatives, backoff exponentiel plafonné à 8s)
+        // — tolérance aux liaisons distantes instables (clip 4G/VPN), où 3 tentatives
+        // à 1/2/4s tombaient en « idle » pendant un simple trou réseau.
         // Ne pas reconnecte si l'utilisateur a manuellement arrêté
-        if (!stoppedRef.current && reconnectCountRef.current < 3) {
-          const delay = Math.pow(2, reconnectCountRef.current) * 1000; // 1s, 2s, 4s
+        if (!stoppedRef.current && reconnectCountRef.current < 6) {
+          const delay = Math.min(8000, Math.pow(2, reconnectCountRef.current) * 1000); // 1s, 2s, 4s, 8s, 8s, 8s
           reconnectCountRef.current++;
           setState('reconnecting');
           reconnectTimerRef.current = setTimeout(() => {
