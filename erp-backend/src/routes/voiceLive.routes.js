@@ -85,44 +85,23 @@ function formatTicket(t) {
 function formatSpokenTextFrench(text) {
   if (!text || typeof text !== 'string') return '';
 
-  // ── Langue détectée du texte (FR par défaut, sinon EN) ──
-  // Règle FR/EN uniquement : les statuts bruts (NEW, OPEN…) sont lus dans la
-  // langue DU TEXTE — jamais de mot français injecté dans une réponse anglaise
-  // (ni l'inverse). Neutres en langue : markdown + acronymes (SSL, VPN…).
-  const enHits = (text.match(/\b(the|is|are|was|were|you|your|has|have|will|would|there|this|that|and|with|for|not|please|thanks|hello|hi|how|what|when|does|did)\b/gi) || []).length;
-  const frHits = (text.match(/\b(le|la|les|des|une|est|sont|vous|votre|nous|merci|bonjour|comment|cela|cette|pour|avec|dans|réponse|demande|terminé|envoyé)\b/gi) || []).length;
-  const isEnglish = enHits >= 2 && enHits > frHits;
-  const S = isEnglish
-    ? {
-      nouveau: 'new', enCours: 'open', attente: 'pending', attenteRep: 'waiting for user',
-      resolu: 'solved', ferme: 'closed', planifie: 'planned',
-      p1: 'priority 1 critical', p2: 'priority 2 high', p3: 'priority 3 medium', p4: 'priority 4 low',
-      num: 'ticket number',
-    }
-    : {
-      nouveau: 'nouveau', enCours: 'en cours', attente: 'en attente', attenteRep: 'en attente de réponse',
-      resolu: 'résolu', ferme: 'fermé', planifie: 'planifié',
-      p1: 'priorité 1 critique', p2: 'priorité 2 haute', p3: 'priorité 3 moyenne', p4: 'priorité 4 basse',
-      num: 'ticket numéro',
-    };
-
   return text
     .replace(/[*_~`#]/g, '')
     .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
     .replace(/^[-+*]\s+/gm, '')
-    .replace(/\bNEW\b/g, S.nouveau)
-    .replace(/\bOPEN\b/g, S.enCours)
-    .replace(/\bPENDING\b/g, S.attente)
-    .replace(/\bWAITING_FOR_USER\b/g, S.attenteRep)
-    .replace(/\bSOLVED\b/g, S.resolu)
-    .replace(/\bCLOSED\b/g, S.ferme)
-    .replace(/\bPLANNED\b/g, S.planifie)
-    .replace(/\bP1\b/gi, S.p1)
-    .replace(/\bP2\b/gi, S.p2)
-    .replace(/\bP3\b/gi, S.p3)
-    .replace(/\bP4\b/gi, S.p4)
-    .replace(/#(\d+)/g, `${S.num} $1`)
-    .replace(/\bticket\s*n°?\s*(\d+)/gi, `${S.num} $1`)
+    .replace(/\bNEW\b/g, 'nouveau')
+    .replace(/\bOPEN\b/g, 'en cours')
+    .replace(/\bPENDING\b/g, 'en attente')
+    .replace(/\bWAITING_FOR_USER\b/g, 'en attente de réponse')
+    .replace(/\bSOLVED\b/g, 'résolu')
+    .replace(/\bCLOSED\b/g, 'fermé')
+    .replace(/\bPLANNED\b/g, 'planifié')
+    .replace(/\bP1\b/gi, 'priorité 1 critique')
+    .replace(/\bP2\b/gi, 'priorité 2 haute')
+    .replace(/\bP3\b/gi, 'priorité 3 moyenne')
+    .replace(/\bP4\b/gi, 'priorité 4 basse')
+    .replace(/#(\d+)/g, 'ticket numéro $1')
+    .replace(/\bticket\s*n°?\s*(\d+)/gi, 'ticket numéro $1')
     .replace(/\bAD\b/g, 'Active Directory')
     .replace(/\bSSL\b/g, 'S S L')
     .replace(/\bVPN\b/g, 'V P N')
@@ -1332,19 +1311,11 @@ function setupVoiceLive() {
       const transcript = sessionLog
         .map((m) => `${m.role === 'user' ? 'Utilisateur' : 'MARIE'} : ${m.text}`)
         .join('\n');
-      // Langue du résumé = langue de l'échange (FR/EN uniquement, fallback FR)
-      const sumEn = (transcript.match(/\b(the|is|are|was|were|you|your|has|have|will|would|there|this|that|and|with|for|please|thanks|hello)\b/gi) || []).length;
-      const sumFr = (transcript.match(/\b(le|la|les|des|une|est|sont|vous|votre|nous|merci|bonjour|comment|pour|avec|dans|réponse|demande)\b/gi) || []).length;
-      const summaryInEnglish = sumEn >= 3 && sumEn > sumFr;
       try {
         const result = await handleMessage(
-          summaryInEnglish
-            ? 'Summarize in 4 to 6 sentences this exchange between a user and the MARIE voice assistant: '
-              + 'context, requests made, answers given, next steps. '
-              + 'Simple English sentences, no markdown, no bullet points. Reply ONLY in English.'
-            : "Résume en 4 à 6 phrases cet échange entre un utilisateur et l'assistance vocale MARIE : "
-              + 'contexte, demandes exprimées, réponses apportées, suites à donner. '
-              + 'Phrases simples en français, pas de markdown, pas de liste à puces. Réponds UNIQUEMENT en français.',
+          "Résume en 4 à 6 phrases cet échange entre un utilisateur et l'assistance vocale MARIE : "
+          + 'contexte, demandes exprimées, réponses apportées, suites à donner. '
+          + 'Phrases simples en français, pas de markdown, pas de liste à puces. Réponds UNIQUEMENT en français.',
           [{ role: 'user', content: transcript }],
           currentUser, null, null, { voiceMode: false },
         );
@@ -1427,9 +1398,8 @@ function setupVoiceLive() {
           systemInstruction: [
             'Tu es MARIE, assistante vocale amicale et professionnelle du helpdesk IT Prosuma.',
             '══ RÈGLE ABSOLUE — LANGUE ══',
-            'Seules DEUX langues sont autorisées dans tes réponses : le FRANÇAIS et l\'ANGLAIS.',
-            'Si l\'utilisateur parle français → réponds en français. S\'il parle anglais → réponds en anglais.',
-            'Pour toute autre langue entendue → réponds en français. Ne réponds JAMAIS dans une autre langue et ne mélange jamais les deux dans une même réponse.',
+            'Tu réponds TOUJOURS et EXCLUSIVEMENT en français, quelle que soit la langue de l\'utilisateur.',
+            'Ne réponds JAMAIS dans une autre langue et ne mélange jamais les langues dans une même réponse.',
             'Tu parles de manière claire, concise et naturelle à l\'oral.',
             '',
             '══ RÈGLE ABSOLUE — DONNÉES EN TEMPS RÉEL ══',
