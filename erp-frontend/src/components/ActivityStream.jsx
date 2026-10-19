@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import {
   Inbox, ChevronDown, Sparkles, Plus, RefreshCw, Flame,
   UserCheck, MessageSquare, Trash2, FileText, HelpCircle, TrendingUp,
@@ -173,12 +173,48 @@ function dayLabel(input, now = Date.now()) {
   return d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
 }
 
+/* ── Événements masqués du fil : doublons + bruit interne ───────────────
+   • FOLLOWUP_ADDED / EMAIL_* : le commentaire et l'email sont déjà affichés
+     par eux-mêmes dans le fil — leur événement système fait doublon.
+   • FOLLOWUP_MADE_PRIVATE/PUBLIC : le badge PRIVÉ est déjà sur le commentaire.
+   • Automatisations internes (IA, SLA, relances, boucles mail) : sans action
+     utile pour l'utilisateur, elles saturent la timeline.
+   Restent les événements de cycle de vie utiles : création, assignation,
+   statut, priorité, équipe, échéance, clôture, réouverture, escalade, liens,
+   fusion, suppression, échec GLPI. */
+const NOISE_EVENTS = new Set([
+  // Doublons (le contenu est déjà dans le fil)
+  'FOLLOWUP_ADDED',
+  'FOLLOWUP_MADE_PRIVATE',
+  'FOLLOWUP_MADE_PUBLIC',
+  'EMAIL_RECEIVED',
+  'EMAIL_SENT',
+  // Automatisations internes
+  'AI_ANALYZED',
+  'AI_DRAFT_GENERATED',
+  'AI_FOLLOWUP_DRAFT_GENERATED',
+  'AI_AUTO_REPLY_IGNORED',
+  'AI_CONVERSATION_ESCALATED',
+  'NEEDS_HUMAN_REVIEW',
+  'KNOWLEDGE_CREATED',
+  'SLA_RECOMPUTED',
+  'SLA_UPDATED',
+  'REMINDER_SENT',
+  'EMAIL_LOOP_SKIPPED',
+  'REPLY_ON_CLOSED_SUGGESTED',
+  'REPLY_ON_CLOSED_DISMISSED',
+  'NEW_TICKET_SUGGESTED',
+  'NEW_TICKET_SUGGESTED_DISMISSED',
+]);
+
 /* ── Fusion des 3 sources ─────────────────────────────────────────────── */
 export function buildTimeline({ followups = [], messages = [], events = [], messageKind = 'email' } = {}) {
   return [
     ...followups.map((f) => ({ key: `f-${f.id}`, kind: 'comment', date: f.createdAt, data: f })),
     ...messages.map((m) => ({ key: `m-${m.id}`, kind: messageKind, date: m.timestamp || m.createdAt, data: m })),
-    ...events.map((e) => ({ key: `e-${e.id}`, kind: 'system', date: e.createdAt, data: e })),
+    ...events
+      .filter((e) => !NOISE_EVENTS.has(e.type))
+      .map((e) => ({ key: `e-${e.id}`, kind: 'system', date: e.createdAt, data: e })),
   ].sort((a, b) => new Date(a.date) - new Date(b.date));
 }
 
@@ -214,6 +250,8 @@ export default function ActivityStream({
   scrollToEnd = false,
 }) {
   const [filter, setFilter] = useState(defaultFilter);
+  // Blocs « événements système » dépliés (par clé de jour)
+  const [expandedSystem, setExpandedSystem] = useState(() => new Set());
   // Horloge de référence pour le calcul des regroupements/jours.
   const [now, setNow] = useState(() => Date.now());
 
@@ -241,16 +279,39 @@ export default function ActivityStream({
 
   const decorated = useMemo(() => visible.map((i) => ({ ...i, now })), [visible, now]);
 
+  const toggleSystemGroup = (key) => setExpandedSystem((prev) => {
+    const next = new Set(prev);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    return next;
+  });
+
+  // Découpage d'affichage par jour : commentaires et emails restent en ordre
+  // chronologique ; les événements système de la journée sont regroupés en UN
+  // seul bloc dépliable, placé à la position du premier événement système du jour.
+  // (En vue filtrée « Système », les lignes sont rendues directement : le bloc
+  // les cacherait derrière leur propre filtre.)
   const days = useMemo(() => {
     const out = [];
     decorated.forEach((item) => {
       const k = dayKey(item.date);
-      const last = out[out.length - 1];
-      if (last && last.key === k) last.items.push(item);
-      else out.push({ key: k, label: dayLabel(item.date, item.now), items: [item], date: item.date });
+      let last = out[out.length - 1];
+      if (!last || last.key !== k) {
+        last = { key: k, label: dayLabel(item.date, item.now), items: [], segments: [], sysGroup: null, date: item.date };
+        out.push(last);
+      }
+      last.items.push(item);
+      if (item.kind === 'system' && filter === 'all') {
+        if (!last.sysGroup) {
+          last.sysGroup = { type: 'system-group', key: `${k}-sys`, items: [] };
+          last.segments.push(last.sysGroup);
+        }
+        last.sysGroup.items.push(item);
+      } else {
+        last.segments.push({ type: 'row', item });
+      }
     });
     return out;
-  }, [decorated]);
+  }, [decorated, filter]);
 
   const hasItems = decorated.length > 0;
 
@@ -325,7 +386,18 @@ export default function ActivityStream({
                 <div className="flex-1" />
               </div>
 
-              {day.items.map((item) => {
+              {day.segments.map((seg) => {
+                if (seg.type === 'system-group') {
+                  return (
+                    <SystemGroup
+                      key={seg.key}
+                      items={seg.items}
+                      expanded={expandedSystem.has(seg.key)}
+                      onToggle={() => toggleSystemGroup(seg.key)}
+                    />
+                  );
+                }
+                const item = seg.item;
                 const [time, dayShort] = gutterDate(item.date);
                 const common = { item, time, dayShort };
                 if (item.kind === 'system') return <SystemRow key={item.key} {...common} />;
@@ -402,6 +474,50 @@ function RailRow({ time, dayShort, nodeClass, children, right }) {
       {/* Slot droite (pilule / actions) */}
       {right && <div className="shrink-0 pt-2.5 pl-2">{right}</div>}
     </article>
+  );
+}
+
+/* ── Bloc « événements système » d'une journée, replié par défaut ──────── */
+function SystemGroup({ items, expanded, onToggle }) {
+  const [time, dayShort] = gutterDate(items[0].date);
+  const absolute = new Date(items[0].date).toLocaleString('fr-FR');
+  // Résumé en un coup d'œil : types uniques, 3 max, puis +N
+  const labels = [...new Set(items.map((i) => eventLabel(i.data.type)))];
+  const summary = labels.slice(0, 3).join(' · ') + (labels.length > 3 ? ` · +${labels.length - 3}` : '');
+
+  return (
+    <Fragment>
+      <RailRow
+        time={time}
+        dayShort={dayShort}
+        nodeClass="text-slate-400 dark:text-slate-500"
+        right={(
+          <button
+            type="button"
+            onClick={onToggle}
+            aria-expanded={expanded}
+            title={absolute}
+            className={`act-pill inline-flex h-7 items-center gap-1.5 rounded-full border px-3 text-[11px] font-semibold
+              text-primary transition-colors duration-150 cursor-pointer
+              ${expanded ? 'is-open' : ''}`}
+          >
+            {expanded ? 'Replier' : 'Voir'}
+            <ChevronDown className={`h-3.5 w-3.5 transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`} />
+          </button>
+        )}
+      >
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <h4 className="text-[13px] font-semibold leading-tight text-on-surface-variant">Événements système</h4>
+          <span className="text-[10px] font-mono tabular-nums act-faint">{items.length}</span>
+        </div>
+        <p className="act-muted mt-1 text-[11px] leading-snug">{summary}</p>
+      </RailRow>
+
+      {expanded && items.map((item) => {
+        const [t, d] = gutterDate(item.date);
+        return <SystemRow key={item.key} item={item} time={t} dayShort={d} />;
+      })}
+    </Fragment>
   );
 }
 
