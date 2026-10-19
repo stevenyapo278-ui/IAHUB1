@@ -139,6 +139,16 @@ CONSIGNES DE SÉANCE :
 
 RECOURS AUX OUTILS : Tu as accès à tous tes outils habituels. Utilise-les dès que nécessaire pour valider une hypothèse ou analyser une tendance.`;
 
+// ── Règle linguistique du mode vocal ────────────────────────────────────
+// Le chatbot vocal (MARIE) répond EXCLUSIVEMENT en français, quelle que soit
+// la langue de l'utilisateur. Prime sur "Réponds dans la langue de l'utilisateur"
+// du SYSTEM_PROMPT. Injecté uniquement quand options.voiceMode est actif.
+const VOICE_FRENCH_RULE = `\n\nRÈGLE ABSOLUE — LANGUE (MODE VOCAL) :
+- Tu réponds TOUJOURS et EXCLUSIVEMENT en français, même si l'utilisateur te parle dans une autre langue (anglais, etc.).
+- Comprends la demande quelle que soit sa langue, mais restitue ta réponse, tes questions et tes confirmations uniquement en français.
+- Cette règle prime sur toute autre instruction de style ou de langue (y compris « Réponds dans la langue de l'utilisateur »).
+- Ne mélange jamais les langues dans une même réponse : pas de traduction, pas de phrase anglaise, même pour aider.`;
+
 // ── Nettoyage minimal des réponses IA ──────────────────────────────────
 
 function cleanAiReply(text) {
@@ -3807,6 +3817,8 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
   // ── Construire le prompt système avec contexte utilisateur ──
   const userContextLine = userContext ? `\n\n**Profil de l\'utilisateur :** ${userContext}` : '';
   let forcedSystem = (isBrainstormMode ? BRAINSTORM_PROMPT : SYSTEM_PROMPT) + buildCapabilityLine() + userContextLine;
+  // ── Mode vocal : réponse strictement en français (règle absolue) ──
+  if (options.voiceMode) forcedSystem += VOICE_FRENCH_RULE;
 
   // ── Injecter le contexte de la recherche précédente pour les follow-ups ──
   if (previousState?.lastToolData || previousState?.lastMessage || previousState?.lastTicketIds?.length) {
@@ -3932,6 +3944,7 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
         console.warn('[chatbot] Chiffres suspects dans la réponse:', issues.join(' | '), '— relance corrective');
 
         const retrySystem = SYSTEM_PROMPT + buildCapabilityLine() + userContextLine +
+          (options.voiceMode ? VOICE_FRENCH_RULE : '') +
           (toolData ? `\n\nDONNÉES RÉCUPÉRÉES PAR LES OUTILS :\n${toolData}` : '');
         let retryInstruction = '\n\n⚠️ RÈGLE ABSOLUE — VÉRACITÉ DES CHIFFRES :\n';
         retryInstruction += 'Les numéros suivants n\'existent pas dans les données fournies et ne doivent PAS apparaître dans ta réponse :\n';
