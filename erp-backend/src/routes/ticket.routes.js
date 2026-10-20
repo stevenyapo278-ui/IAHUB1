@@ -219,11 +219,14 @@ router.get('/facets', async (req, res) => {
 
 // ── Suggestions de recherche (autocomplétion de la barre de recherche) ───────
 // Léger : champs minimaux, limite 8, même périmètre RBAC que la liste.
+// Paramètre `field` optionnel pour cibler un champ (title, requester, …) —
+// sans `field` → recherche globale.
 router.get('/search-suggestions', async (req, res) => {
   const q = String(req.query.q || '').trim();
   if (q.length < 2) return res.json({ items: [] });
 
-  const where = buildTicketWhereClause(req.user, { search: q });
+  const field = req.query.field ? String(req.query.field) : undefined;
+  const where = buildTicketWhereClause(req.user, { search: q, field });
   const items = await prisma.ticket.findMany({
     where,
     take: 8,

@@ -33,6 +33,19 @@ const STATUS_LABELS = {
   'CLOSED':          'Fermé',
 };
 
+// Champs ciblables pour la recherche (paramètre `field` côté backend).
+const SEARCH_FIELDS = [
+  { val: '',         label: 'Tout' },
+  { val: 'title',    label: 'Titre' },
+  { val: 'id',       label: '#ID' },
+  { val: 'requester',label: 'Demandeur' },
+  { val: 'assignedTo', label: 'Assigné' },
+  { val: 'team',     label: 'Équipe' },
+  { val: 'category', label: 'Catégorie' },
+  { val: 'location', label: 'Lieu' },
+  { val: 'priority', label: 'Priorité' },
+];
+
 export default function TicketFilterBar({
   filters,
   onUpdate,
@@ -44,6 +57,8 @@ export default function TicketFilterBar({
   searchQuery,
   onSearchChange,
   onClearSearch,
+  searchField,
+  onSearchFieldChange,
   searchInputRef,
   // Contexte utilisateur pour les filtres personnalisés
   currentUser,
@@ -60,7 +75,7 @@ export default function TicketFilterBar({
   const suggestionsTimerRef = useRef(null);
   const skipNextFetchRef = useRef(false);
 
-  // Fetch suggestions avec debounce (300 ms)
+  // Fetch suggestions avec debounce (300 ms) — re-fetch si le champ change
   useEffect(() => {
     if (skipNextFetchRef.current) { skipNextFetchRef.current = false; return; }
     if (suggestionsTimerRef.current) clearTimeout(suggestionsTimerRef.current);
@@ -68,14 +83,16 @@ export default function TicketFilterBar({
     if (q.length < 2) { setSuggestions([]); setSuggestionsOpen(false); return; }
     suggestionsTimerRef.current = setTimeout(async () => {
       try {
-        const { data } = await api.get('/tickets/search-suggestions', { params: { q } });
+        const params = { q };
+        if (searchField) params.field = searchField;
+        const { data } = await api.get('/tickets/search-suggestions', { params });
         setSuggestions(data.items || []);
         setSuggestionsOpen(true);
         setActiveSuggestion(-1);
       } catch { setSuggestions([]); }
     }, 300);
     return () => clearTimeout(suggestionsTimerRef.current);
-  }, [searchQuery]);
+  }, [searchQuery, searchField]);
 
   // Fermer au clic extérieur
   useEffect(() => {
@@ -134,6 +151,18 @@ export default function TicketFilterBar({
       <div className="p-4 rounded-2xl border border-outline-variant/30 bg-surface-container-lowest">
       {/* ── Row 1 : Search + Quick toggle chips + Advanced filters ── */}
       <div className="flex items-center gap-2 flex-wrap">
+        {/* Sélecteur de champ de recherche */}
+        <select
+          value={searchField || ''}
+          onChange={(e) => onSearchFieldChange?.(e.target.value)}
+          className="shrink-0 px-2 py-1.5 text-xs bg-surface border border-outline-variant/60 rounded-xl text-on-surface-variant focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all cursor-pointer"
+          title="Champ de recherche — « Tout » = recherche globale"
+        >
+          {SEARCH_FIELDS.map((f) => (
+            <option key={f.val} value={f.val}>{f.label}</option>
+          ))}
+        </select>
+
         {/* Live Search Input + Suggestions */}
         <div className="relative shrink-0 mr-1 flex-1 sm:flex-initial" ref={suggestionsRef}>
           <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant/50 z-10" />
@@ -363,7 +392,7 @@ export default function TicketFilterBar({
           )}
           {searchQuery && (
             <ActiveChip
-              label={`"${searchQuery}"`}
+              label={`${searchField ? `${SEARCH_FIELDS.find(f => f.val === searchField)?.label || searchField} : ` : ''}"${searchQuery}"`}
               onRemove={onClearSearch}
             />
           )}

@@ -11,10 +11,49 @@ function isRequesterOnly(user) {
   return user.role === 'REQUESTER';
 }
 
-function buildTicketSearchCondition(rawTerm) {
+// Champs ciblés pour la recherche filtrée (paramètre `field` de l'UI).
+// Sans `field` → recherche globale sur tous les champs (comportement historique).
+const SEARCH_FIELD_CONDITIONS = {
+  id: (term) => {
+    const numericId = parseInt(String(term).replace(/^#/, '').trim(), 10);
+    return Number.isInteger(numericId) && numericId > 0 ? { id: numericId } : null;
+  },
+  title: (term) => ({ title: { contains: term, mode: 'insensitive' } }),
+  content: (term) => ({ content: { contains: term, mode: 'insensitive' } }),
+  category: (term) => ({ category: { contains: term, mode: 'insensitive' } }),
+  location: (term) => ({ locationName: { contains: term, mode: 'insensitive' } }),
+  requester: (term) => ({
+    OR: [
+      { requester: { fullName: { contains: term, mode: 'insensitive' } } },
+      { requester: { email: { contains: term, mode: 'insensitive' } } },
+      { secondaryRequester: { fullName: { contains: term, mode: 'insensitive' } } },
+      { secondaryRequester: { email: { contains: term, mode: 'insensitive' } } },
+    ],
+  }),
+  assignedTo: (term) => ({
+    OR: [
+      { assignedTo: { fullName: { contains: term, mode: 'insensitive' } } },
+      { assignedTo: { email: { contains: term, mode: 'insensitive' } } },
+      { assignees: { some: { fullName: { contains: term, mode: 'insensitive' } } } },
+      { assignees: { some: { email: { contains: term, mode: 'insensitive' } } } },
+    ],
+  }),
+  team: (term) => ({ team: { name: { contains: term, mode: 'insensitive' } } }),
+  priority: (term) => {
+    const upper = term.toUpperCase();
+    return ['P1', 'P2', 'P3', 'P4'].includes(upper) ? { priority: upper } : null;
+  },
+};
+
+function buildTicketSearchCondition(rawTerm, field) {
   if (!rawTerm || typeof rawTerm !== 'string') return null;
   const term = rawTerm.trim();
   if (!term) return null;
+
+  // Recherche ciblée sur un seul champ
+  if (field && SEARCH_FIELD_CONDITIONS[field]) {
+    return SEARCH_FIELD_CONDITIONS[field](term);
+  }
 
   const conditions = [
     { title: { contains: term, mode: 'insensitive' } },
@@ -69,7 +108,7 @@ function statusToCondition(status) {
 
 function buildTicketWhereClause(user, queryParams = {}) {
   const {
-    status, priority, teamId, assignedToId, mine, title, search, query,
+    status, priority, teamId, assignedToId, mine, title, search, query, field,
     category, locationId, aiProcessed, due, closeSuggested, approvalStatus,
     dateFrom, dateTo, source, origin, replyOnClosedSuggested,
     resolutionFrom, resolutionTo, slaBreached,
@@ -189,7 +228,7 @@ function buildTicketWhereClause(user, queryParams = {}) {
   }
 
   const searchQuery = title || search || query;
-  const searchCond = buildTicketSearchCondition(searchQuery);
+  const searchCond = buildTicketSearchCondition(searchQuery, field);
   if (searchCond) {
     andConditions.push(searchCond);
   }

@@ -989,7 +989,7 @@ function FlipCounter({ value }) {
 // ── Helpers liste ─────────────────────────────────────────────────────────────
 
 // Params communs à la liste, au refresh silencieux et à la sélection groupée
-function buildListParams({ filters, debouncedSearch, sortBy, sortOrder, page, pageSize, viewMode }) {
+function buildListParams({ filters, debouncedSearch, searchField, sortBy, sortOrder, page, pageSize, viewMode }) {
   const loadAll = viewMode === 'kanban' || viewMode === 'folders';
   const params = { page: loadAll ? 1 : page, limit: loadAll ? 500 : pageSize, sortBy, sortOrder };
   if (filters.status) params.status = filters.status;
@@ -1007,6 +1007,7 @@ function buildListParams({ filters, debouncedSearch, sortBy, sortOrder, page, pa
   if (filters.dateTo) params.dateTo = filters.dateTo;
   if (filters.slaBreached) params.slaBreached = filters.slaBreached;
   if (debouncedSearch) params.search = debouncedSearch;
+  if (searchField) params.field = searchField;
   return params;
 }
 
@@ -1300,6 +1301,7 @@ export default function Tickets() {
   });
   const [searchQuery, setSearchQuery] = useState(() => searchParams.get('search') || '');
   const [debouncedSearch, setDebouncedSearch] = useState(() => searchParams.get('search') || '');
+  const [searchField, setSearchField] = useState(() => searchParams.get('field') || '');
   const debounceRef = useRef(null);
   const [columns, setColumns] = useState(loadColumnConfig);
 
@@ -1314,6 +1316,7 @@ export default function Tickets() {
   function buildUrlFromState() {
     const params = new URLSearchParams();
     if (debouncedSearch) params.set('search', debouncedSearch);
+    if (searchField) params.set('field', searchField);
     if (sortBy && sortBy !== 'createdAt') params.set('sortBy', sortBy);
     if (sortOrder && sortOrder !== 'desc') params.set('sortOrder', sortOrder);
     if (page && page !== 1) params.set('page', String(page));
@@ -1330,7 +1333,7 @@ export default function Tickets() {
   // État → URL : miroir en place (replace) pour ne pas polluer l'historique.
   useEffect(() => {
     setSearchParams(buildUrlFromState(), { replace: true });
-  }, [debouncedSearch, sortBy, sortOrder, filters, page]);
+  }, [debouncedSearch, searchField, sortBy, sortOrder, filters, page]);
 
   // URL → ÉTAT : les liens externes vers /tickets (?assignedToId=none depuis le Pouls
   // système, ?priority=P1 depuis un widget du tableau de bord…) ne faisaient RIEN quand
@@ -1356,6 +1359,7 @@ export default function Tickets() {
       slaBreached: searchParams.get('slaBreached') || '',
     };
     const nextSearch = searchParams.get('search') || '';
+    const nextField = searchParams.get('field') || '';
     const nextSortBy = searchParams.get('sortBy') || 'createdAt';
     const nextSortOrder = searchParams.get('sortOrder') || 'desc';
     const nextPage = parseInt(searchParams.get('page'), 10) || 1;
@@ -1368,6 +1372,7 @@ export default function Tickets() {
         setSearchQuery(nextSearch);
         setDebouncedSearch(nextSearch);
       }
+      if (nextField !== searchField) setSearchField(nextField);
       if (nextSortBy !== sortBy) setSortBy(nextSortBy);
       if (nextSortOrder !== sortOrder) setSortOrder(nextSortOrder);
       // filtre externe sans ?page → retour page 1
@@ -1540,7 +1545,7 @@ export default function Tickets() {
     } else {
       setRefreshing(true);
     }
-    const params = buildListParams({ filters, debouncedSearch, sortBy, sortOrder, page, pageSize, viewMode });
+    const params = buildListParams({ filters, debouncedSearch, searchField, sortBy, sortOrder, page, pageSize, viewMode });
     api.get('/tickets', { params, signal: controller.signal })
       .then(({ data }) => {
         setTickets(data.items);
@@ -1562,14 +1567,14 @@ export default function Tickets() {
         setLoading(false);
         setRefreshing(false);
       });
-  }, [page, pageSize, sortBy, sortOrder, filters, debouncedSearch, viewMode]);
+  }, [page, pageSize, sortBy, sortOrder, filters, debouncedSearch, searchField, viewMode]);
 
   // Réf de la liste affichée : compare avant de setState pendant le polling
   const ticketsRef = useRef(tickets);
   useEffect(() => { ticketsRef.current = tickets; }, [tickets]);
 
   const refreshTicketsSilently = useCallback(function refreshTicketsSilently() {
-    const params = buildListParams({ filters, debouncedSearch, sortBy, sortOrder, page, pageSize, viewMode });
+    const params = buildListParams({ filters, debouncedSearch, searchField, sortBy, sortOrder, page, pageSize, viewMode });
     api.get('/tickets', { params }).then(({ data }) => {
       // Rien n'a bougé depuis le dernier fetch → pas de re-render
       if (sameTicketList(ticketsRef.current, data.items)) return;
@@ -1578,9 +1583,9 @@ export default function Tickets() {
       setTotalCount(data.total);
       if (data.stats) setServerStats(data.stats);
     }).catch(() => {});
-  }, [page, pageSize, sortBy, sortOrder, filters, debouncedSearch, viewMode]);
+  }, [page, pageSize, sortBy, sortOrder, filters, debouncedSearch, searchField, viewMode]);
 
-  useEffect(() => { loadTickets(); }, [filters, page, pageSize, debouncedSearch, sortBy, sortOrder, showTrash, viewMode]);
+  useEffect(() => { loadTickets(); }, [filters, page, pageSize, debouncedSearch, searchField, sortBy, sortOrder, showTrash, viewMode]);
 
   // ── Stats globales (sans filtres) : toujours fixes ──
   const loadGlobalStats = useCallback(function loadGlobalStats() {
@@ -1631,12 +1636,12 @@ export default function Tickets() {
   useEffect(() => {
     if (showTrash) return undefined;
     let cancelled = false;
-    const params = buildListParams({ filters, debouncedSearch, sortBy, sortOrder, page: 1, pageSize: 1, viewMode });
+    const params = buildListParams({ filters, debouncedSearch, searchField, sortBy, sortOrder, page: 1, pageSize: 1, viewMode });
     api.get('/tickets/facets', { params })
       .then(({ data }) => { if (!cancelled) setFacetsData(data); })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [filters, debouncedSearch, sortBy, sortOrder, viewMode, showTrash]);
+  }, [filters, debouncedSearch, searchField, sortBy, sortOrder, viewMode, showTrash]);
 
   const tableContainerRef = useRef(null);
   const abortRef = useRef(null);
@@ -1699,7 +1704,7 @@ export default function Tickets() {
       let pageNum = 1;
       let pages = 1;
       do {
-        const params = buildListParams({ filters, debouncedSearch, sortBy, sortOrder, page: pageNum, pageSize: 500, viewMode });
+        const params = buildListParams({ filters, debouncedSearch, searchField, sortBy, sortOrder, page: pageNum, pageSize: 500, viewMode });
         const { data } = await api.get('/tickets', { params });
         for (const t of data.items || []) ids.push(t.id);
         pages = data.pages || 1;
@@ -2482,7 +2487,9 @@ export default function Tickets() {
         users={users}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
-        onClearSearch={() => { setSearchQuery(''); setDebouncedSearch(''); setPage(1); }}
+        onClearSearch={() => { setSearchQuery(''); setDebouncedSearch(''); setSearchField(''); setPage(1); }}
+        searchField={searchField}
+        onSearchFieldChange={(f) => { setSearchField(f); setPage(1); }}
         searchInputRef={searchInputRef}
         currentUser={user ? { id: user.id, role: user.role, teamId: user.teamId } : null}
         facets={facets}

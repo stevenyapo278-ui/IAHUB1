@@ -130,11 +130,13 @@ function eventTitle(event) {
   const p = event?.payload || {};
   const type = event?.type;
   if (type === 'STATUS_CHANGED') {
-    if (p.to === 'CLOSED' || p.toLabel === 'Fermé') return 'Ticket fermé';
-    if (p.to === 'SOLVED' || p.toLabel === 'Résolu') return 'Ticket marqué résolu';
-    if ((p.from === 'CLOSED' || p.from === 'SOLVED') && p.to === 'OPEN') return 'Ticket rouvert';
-    return 'Statut modifié';
+    const auto = p.via === 'ai' ? ' automatiquement' : '';
+    if (p.to === 'CLOSED' || p.toLabel === 'Fermé') return `Ticket fermé${auto}`;
+    if (p.to === 'SOLVED' || p.toLabel === 'Résolu') return `Ticket marqué résolu${auto}`;
+    if ((p.from === 'CLOSED' || p.from === 'SOLVED') && p.to === 'OPEN') return `Ticket rouvert${auto}`;
+    return `Statut modifié${auto}`;
   }
+  if (type === 'REOPENED' && p.via === 'ai') return 'Ticket rouvert automatiquement';
   if (type === 'CLOSED_AUTO') {
     if (p.reason === 'solved_auto_close') return 'Ticket fermé automatiquement (résolu)';
     return 'Ticket fermé automatiquement (sans réponse)';
@@ -488,6 +490,7 @@ function SystemRow({ item, time, dayShort }) {
   const changes = Array.isArray(item.data.payload?.changes) ? item.data.payload.changes : null;
   // Édition de commentaire : contenu avant → après (trace « qui a écrit quoi »)
   const p = item.data.payload || {};
+  const isAiTriggered = p.via === 'ai';
   const showContentDiff = type === 'FOLLOWUP_EDITED' && p.contentChanged && (p.contentBefore || p.contentAfter);
 
   return (
@@ -508,7 +511,11 @@ function SystemRow({ item, time, dayShort }) {
         <h4 className="text-[13px] font-semibold leading-tight text-on-surface">{label}</h4>
         {(actor || detail) && (
           <p className="act-muted mt-1 text-[11px] leading-snug">
-            {actor && <span className="font-semibold text-on-surface-variant">par {actor}</span>}
+            {actor && (
+              isAiTriggered
+                ? <span className="font-semibold text-on-surface-variant">suite à la réponse de {actor}</span>
+                : <span className="font-semibold text-on-surface-variant">par {actor}</span>
+            )}
             {actor && detail && ' · '}
             {detail && <span>{detail}</span>}
           </p>

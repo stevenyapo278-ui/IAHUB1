@@ -207,7 +207,7 @@ async function applyIntentActions(ticketId, { intent, confidence, newIssueSummar
       updates.closedAt = null;
       updates.lastUserReplyAt = new Date();
       updates.reminderCount = 0;
-      await logEvent(ticketId, 'REOPENED', actor, { intent, confidence });
+      await logEvent(ticketId, 'REOPENED', actor, { intent, confidence, via: 'ai' });
     } else {
       // Confiance insuffisante pour rouvrir automatiquement un ticket déjà clos : revue humaine requise.
       updates.status = 'WAITING_FOR_USER';
@@ -268,7 +268,9 @@ async function applyIntentActions(ticketId, { intent, confidence, newIssueSummar
     // Certains effets (suggestions reply-on-closed / nouvelle demande) n'ont PAS de changement
     // de statut : ne pas journaliser un « statut modifié » fantôme avec newStatus undefined.
     if (updates.status) {
-      await logEvent(ticketId, 'STATUS_CHANGED', actor, { intent, confidence, newStatus: updates.status });
+      // via: 'ai' — le changement est déclenché par l'analyse IA de l'email du demandeur,
+      // PAS par une action manuelle de l'utilisateur. L'UI affiche « automatiquement ».
+      await logEvent(ticketId, 'STATUS_CHANGED', actor, { intent, confidence, newStatus: updates.status, via: 'ai' });
     }
 
     if (updates.status === 'WAITING_FOR_USER') {
