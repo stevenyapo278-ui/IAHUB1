@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import {
   CheckCircle2, Radio, User, UserX, Flag, Sparkles, Flame, SlidersHorizontal,
-  X, Search, Users, CornerDownLeft, Hash,
+  X, Search, Users, CornerDownLeft, Hash, Tag, MapPin,
 } from 'lucide-react';
 import DateRangePicker from './ui/date-range-picker';
 import api from '../api/client';
@@ -107,6 +107,12 @@ export default function TicketFilterBar({
   function selectSuggestion(t) {
     skipNextFetchRef.current = true;
     setSuggestionsOpen(false);
+    // Valeur (personne / équipe / catégorie / lieu) → on remplit la barre de
+    // recherche avec la valeur ; la liste se refiltre automatiquement via le debounce.
+    if (t.type === 'user') { onSearchChange?.(t.fullName || t.email); return; }
+    if (t.type === 'team') { onSearchChange?.(t.name); return; }
+    if (t.type === 'value') { onSearchChange?.(t.value); return; }
+    // Ticket → navigation directe vers la fiche
     if (onSelectTicket) onSelectTicket(t.id);
   }
 
@@ -141,6 +147,17 @@ export default function TicketFilterBar({
     ? teams?.find((t) => t.id === currentUser.teamId)
     : null;
 
+  const searchPlaceholder = (() => {
+    const f = SEARCH_FIELDS.find((x) => x.val === (searchField || ''));
+    if (!searchField) return 'Rechercher (#ID, titre, demandeur, assigné, lieu, équipe...) ⌘K';
+    const hints = {
+      title: 'Titre du ticket…', id: 'N° de ticket (ex: 1234)…',
+      requester: 'Nom ou email du demandeur…', assignedTo: 'Nom ou email du technicien…',
+      team: 'Nom de l équipe…', category: 'Catégorie…', location: 'Lieu…', priority: 'P1, P2, P3 ou P4…',
+    };
+    return `${f?.label || 'Rechercher'} : ${hints[searchField] || '…'}`;
+  })();
+
   // Le filtre "Mon équipe" est actif quand teamId = mon équipe
   const myTeamActive = myTeam && String(filters.teamId) === String(myTeam.id);
   // Le filtre "Mes tickets" est actif
@@ -173,7 +190,7 @@ export default function TicketFilterBar({
             onChange={(e) => onSearchChange?.(e.target.value)}
             onFocus={() => { if (suggestions.length > 0) setSuggestionsOpen(true); }}
             onKeyDown={handleSuggestionKeyDown}
-            placeholder="Rechercher (#ID, titre, demandeur, assigné, lieu, équipe...) ⌘K"
+            placeholder={searchPlaceholder}
             className="w-full sm:w-80 md:w-96 pl-8 pr-7 py-1.5 text-xs bg-surface border border-outline-variant/60 rounded-xl text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
           />
           {searchQuery && (
@@ -188,32 +205,65 @@ export default function TicketFilterBar({
           {/* Dropdown suggestions */}
           {suggestionsOpen && suggestions.length > 0 && (
             <div className="absolute top-full left-0 mt-1 w-full sm:w-80 md:w-96 max-h-80 overflow-y-auto bg-surface border border-outline-variant/50 rounded-xl shadow-lg z-50 py-1">
-              {suggestions.map((t, i) => (
-                <button
-                  key={t.id}
-                  type="button"
-                  onClick={() => selectSuggestion(t)}
-                  onMouseEnter={() => setActiveSuggestion(i)}
-                  className={`w-full text-left px-3 py-2 flex items-start gap-2.5 transition-colors cursor-pointer ${
-                    i === activeSuggestion ? 'bg-primary/10' : 'hover:bg-surface-container-high'
-                  }`}
-                >
-                  <Hash className="w-3.5 h-3.5 mt-0.5 shrink-0 text-on-surface-variant/50" />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-semibold text-on-surface truncate">
-                      <span className="text-primary">#{t.id}</span> {t.title}
-                    </p>
-                    <p className="text-[10px] text-on-surface-variant truncate mt-0.5">
-                      {[t.requester?.fullName, t.assignedTo?.fullName, t.team?.name, t.category].filter(Boolean).join(' · ')}
-                    </p>
-                  </div>
-                  <span className={`shrink-0 mt-0.5 w-2 h-2 rounded-full ${
-                    t.priority === 'P1' ? 'bg-red-500' : t.priority === 'P2' ? 'bg-orange-400' : t.priority === 'P3' ? 'bg-blue-400' : 'bg-gray-300'
-                  }`} title={t.priority} />
-                </button>
-              ))}
+              {suggestions.map((t, i) => {
+                const isActive = i === activeSuggestion;
+                const rowCls = `w-full text-left px-3 py-2 flex items-start gap-2.5 transition-colors cursor-pointer ${
+                  isActive ? 'bg-primary/10' : 'hover:bg-surface-container-high'
+                }`;
+
+                // Personne (demandeur / assigné)
+                if (t.type === 'user') {
+                  return (
+                    <button key={`u-${t.id}`} type="button" onClick={() => selectSuggestion(t)} onMouseEnter={() => setActiveSuggestion(i)} className={rowCls}>
+                      <User className="w-3.5 h-3.5 mt-0.5 shrink-0 text-on-surface-variant/50" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-semibold text-on-surface truncate">{t.fullName}</p>
+                        {t.email && <p className="text-[10px] text-on-surface-variant truncate mt-0.5">{t.email}</p>}
+                      </div>
+                    </button>
+                  );
+                }
+                // Équipe
+                if (t.type === 'team') {
+                  return (
+                    <button key={`t-${t.id}`} type="button" onClick={() => selectSuggestion(t)} onMouseEnter={() => setActiveSuggestion(i)} className={rowCls}>
+                      <Users className="w-3.5 h-3.5 mt-0.5 shrink-0 text-on-surface-variant/50" />
+                      <p className="flex-1 min-w-0 text-xs font-semibold text-on-surface truncate">{t.name}</p>
+                    </button>
+                  );
+                }
+                // Valeur distincte (catégorie / lieu)
+                if (t.type === 'value') {
+                  const Icon = searchField === 'location' ? MapPin : Tag;
+                  return (
+                    <button key={`v-${t.value}`} type="button" onClick={() => selectSuggestion(t)} onMouseEnter={() => setActiveSuggestion(i)} className={rowCls}>
+                      <Icon className="w-3.5 h-3.5 mt-0.5 shrink-0 text-on-surface-variant/50" />
+                      <p className="flex-1 min-w-0 text-xs font-semibold text-on-surface truncate">{t.value}</p>
+                    </button>
+                  );
+                }
+                // Ticket (défaut)
+                return (
+                  <button key={t.id} type="button" onClick={() => selectSuggestion(t)} onMouseEnter={() => setActiveSuggestion(i)} className={rowCls}>
+                    <Hash className="w-3.5 h-3.5 mt-0.5 shrink-0 text-on-surface-variant/50" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-semibold text-on-surface truncate">
+                        <span className="text-primary">#{t.id}</span> {t.title}
+                      </p>
+                      <p className="text-[10px] text-on-surface-variant truncate mt-0.5">
+                        {[t.requester?.fullName, t.assignedTo?.fullName, t.team?.name, t.category].filter(Boolean).join(' · ')}
+                      </p>
+                    </div>
+                    <span className={`shrink-0 mt-0.5 w-2 h-2 rounded-full ${
+                      t.priority === 'P1' ? 'bg-red-500' : t.priority === 'P2' ? 'bg-orange-400' : t.priority === 'P3' ? 'bg-blue-400' : 'bg-gray-300'
+                    }`} title={t.priority} />
+                  </button>
+                );
+              })}
               <div className="border-t border-outline-variant/30 mt-1 pt-1.5 px-3 flex items-center gap-1.5 text-[10px] text-on-surface-variant/60">
-                <CornerDownLeft className="w-3 h-3" /> ouvrir · <span className="font-mono">↑↓</span> naviguer · <span className="font-mono">Entrée</span> ouvrir
+                <CornerDownLeft className="w-3 h-3" />
+                {suggestions[0]?.type === 'ticket' ? 'ouvrir le ticket' : 'utiliser la valeur'}
+                {' · '}<span className="font-mono">↑↓</span> naviguer
               </div>
             </div>
           )}

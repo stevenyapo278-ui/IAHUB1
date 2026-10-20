@@ -219,17 +219,74 @@ router.get('/facets', async (req, res) => {
 
 // ── Suggestions de recherche (autocomplétion de la barre de recherche) ───────
 // Léger : champs minimaux, limite 8, même périmètre RBAC que la liste.
-// Paramètre `field` optionnel pour cibler un champ (title, requester, …) —
-// sans `field` → recherche globale.
+// Deux modes selon le champ sélectionné dans l'UI :
+//   • field vide / title / id / priority → suggestions de TICKETS qui matchent ;
+//   • field = requester / assignedTo     → liste des PERSONNES (users) ;
+//     field = team                       → liste des ÉQUIPES ;
+//     field = category / location        → valeurs distinctes présentes en base.
+// Chaque item porte un `type` ('ticket' | 'user' | 'team' | 'value') que le
+// frontend utilise pour savoir s'il faut naviguer vers le ticket ou remplir
+// la barre de recherche avec la valeur.
 router.get('/search-suggestions', async (req, res) => {
   const q = String(req.query.q || '').trim();
   if (q.length < 2) return res.json({ items: [] });
 
   const field = req.query.field ? String(req.query.field) : undefined;
+  const take = 8;
+
+  // ── Personnes (demandeur / assigné) ──
+  if (field === 'requester' || field === 'assignedTo') {
+    const users = await prisma.user.findMany({
+      where: {
+        isActive: true,
+        OR: [
+          { fullName: { contains: q, mode: 'insensitive' } },
+          { email: { contains: q, mode: 'insensitive' } },
+        ],
+      },
+      take,
+      orderBy: { fullName: 'asc' },
+      select: { id: true, fullName: true, email: true },
+    });
+    return res.json({ items: users.map((u) => ({ type: 'user', ...u })) });
+  }
+
+  // ── Équipes ──
+  if (field === 'team') {
+    const teams = await prisma.team.findMany({
+      where: { name: { contains: q, mode: 'insensitive' } },
+      take,
+      orderBy: { name: 'asc' },
+      select: { id: true, name: true },
+    });
+    return res.json({ items: teams.map((t) => ({ type: 'team', ...t })) });
+  }
+
+  // ── Catégorie / Lieu : valeurs distinctes des tickets ──
+  if (field === 'category' || field === 'location') {
+    const column = field === 'category' ? 'category' : 'locationName';
+    const rows = await prisma.ticket.findMany({
+      where: {
+        deletedAt: null,
+        [column]: { contains: q, mode: 'insensitive' },
+      },
+      distinct: [column],
+      take,
+      select: { [column]: true },
+      orderBy: { updatedAt: 'desc' },
+    });
+    const items = rows
+      .map((r) => r[column])
+      .filter(Boolean)
+      .map((v) => ({ type: 'value', value: v }));
+    return res.json({ items });
+  }
+
+  // ── Titre / #ID / Priorité / défaut (Tout) → tickets ──
   const where = buildTicketWhereClause(req.user, { search: q, field });
-  const items = await prisma.ticket.findMany({
+  const rows = await prisma.ticket.findMany({
     where,
-    take: 8,
+    take,
     orderBy: { updatedAt: 'desc' },
     select: {
       id: true,
@@ -244,8 +301,7 @@ router.get('/search-suggestions', async (req, res) => {
       team: { select: { name: true } },
     },
   });
-
-  return res.json({ items });
+  return res.json({ items: rows.map((r) => ({ type: 'ticket', ...r })) });
 });
 
 // List tickets (with optional filters + pagination + sorting)
