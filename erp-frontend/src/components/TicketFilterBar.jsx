@@ -1,9 +1,11 @@
+import { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import {
   CheckCircle2, Radio, User, UserX, Flag, Sparkles, Flame, SlidersHorizontal,
-  X, Search, Users,
+  X, Search, Users, CornerDownLeft, Hash,
 } from 'lucide-react';
 import DateRangePicker from './ui/date-range-picker';
+import api from '../api/client';
 
 // ── TicketFilterBar ──────────────────────────────────────────────────────────
 // Barre de filtres rapide toujours visible au-dessus du tableau.
@@ -47,7 +49,66 @@ export default function TicketFilterBar({
   currentUser,
   // Compteurs de facettes (/tickets/facets) — ignorés si absents
   facets,
+  // Navigation vers le détail d'un ticket (suggestions)
+  onSelectTicket,
 }) {
+  // ── Suggestions de recherche (autocomplétion) ──
+  const [suggestions, setSuggestions] = useState([]);
+  const [suggestionsOpen, setSuggestionsOpen] = useState(false);
+  const [activeSuggestion, setActiveSuggestion] = useState(-1);
+  const suggestionsRef = useRef(null);
+  const suggestionsTimerRef = useRef(null);
+  const skipNextFetchRef = useRef(false);
+
+  // Fetch suggestions avec debounce (300 ms)
+  useEffect(() => {
+    if (skipNextFetchRef.current) { skipNextFetchRef.current = false; return; }
+    if (suggestionsTimerRef.current) clearTimeout(suggestionsTimerRef.current);
+    const q = (searchQuery || '').trim();
+    if (q.length < 2) { setSuggestions([]); setSuggestionsOpen(false); return; }
+    suggestionsTimerRef.current = setTimeout(async () => {
+      try {
+        const { data } = await api.get('/tickets/search-suggestions', { params: { q } });
+        setSuggestions(data.items || []);
+        setSuggestionsOpen(true);
+        setActiveSuggestion(-1);
+      } catch { setSuggestions([]); }
+    }, 300);
+    return () => clearTimeout(suggestionsTimerRef.current);
+  }, [searchQuery]);
+
+  // Fermer au clic extérieur
+  useEffect(() => {
+    if (!suggestionsOpen) return;
+    function onClick(e) {
+      if (suggestionsRef.current && !suggestionsRef.current.contains(e.target)) setSuggestionsOpen(false);
+    }
+    document.addEventListener('mousedown', onClick);
+    return () => document.removeEventListener('mousedown', onClick);
+  }, [suggestionsOpen]);
+
+  function selectSuggestion(t) {
+    skipNextFetchRef.current = true;
+    setSuggestionsOpen(false);
+    if (onSelectTicket) onSelectTicket(t.id);
+  }
+
+  function handleSuggestionKeyDown(e) {
+    if (!suggestionsOpen || suggestions.length === 0) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setActiveSuggestion((prev) => (prev + 1) % suggestions.length);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setActiveSuggestion((prev) => (prev <= 0 ? suggestions.length - 1 : prev - 1));
+    } else if (e.key === 'Enter' && activeSuggestion >= 0) {
+      e.preventDefault();
+      selectSuggestion(suggestions[activeSuggestion]);
+    } else if (e.key === 'Escape') {
+      setSuggestionsOpen(false);
+    }
+  }
+
   // Compteur d'un quick toggle : ignore le filtre de sa propre dimension (côté serveur)
   const quickCount = (key, val) => {
     if (!facets) return undefined;
@@ -73,24 +134,59 @@ export default function TicketFilterBar({
       <div className="p-4 rounded-2xl border border-outline-variant/30 bg-surface-container-lowest">
       {/* ── Row 1 : Search + Quick toggle chips + Advanced filters ── */}
       <div className="flex items-center gap-2 flex-wrap">
-        {/* Live Search Input */}
-        <div className="relative shrink-0 mr-1 flex-1 sm:flex-initial">
-          <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant/50" />
+        {/* Live Search Input + Suggestions */}
+        <div className="relative shrink-0 mr-1 flex-1 sm:flex-initial" ref={suggestionsRef}>
+          <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant/50 z-10" />
           <input
             ref={searchInputRef}
             type="text"
             value={searchQuery || ''}
             onChange={(e) => onSearchChange?.(e.target.value)}
+            onFocus={() => { if (suggestions.length > 0) setSuggestionsOpen(true); }}
+            onKeyDown={handleSuggestionKeyDown}
             placeholder="Rechercher (#ID, titre, demandeur, assigné, lieu, équipe...) ⌘K"
             className="w-full sm:w-80 md:w-96 pl-8 pr-7 py-1.5 text-xs bg-surface border border-outline-variant/60 rounded-xl text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
           />
           {searchQuery && (
             <button
               onClick={onClearSearch}
-              className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-on-surface-variant/60 hover:text-on-surface"
+              className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-on-surface-variant/60 hover:text-on-surface z-10"
             >
               <X className="w-3 h-3" />
             </button>
+          )}
+
+          {/* Dropdown suggestions */}
+          {suggestionsOpen && suggestions.length > 0 && (
+            <div className="absolute top-full left-0 mt-1 w-full sm:w-80 md:w-96 max-h-80 overflow-y-auto bg-surface border border-outline-variant/50 rounded-xl shadow-lg z-50 py-1">
+              {suggestions.map((t, i) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => selectSuggestion(t)}
+                  onMouseEnter={() => setActiveSuggestion(i)}
+                  className={`w-full text-left px-3 py-2 flex items-start gap-2.5 transition-colors cursor-pointer ${
+                    i === activeSuggestion ? 'bg-primary/10' : 'hover:bg-surface-container-high'
+                  }`}
+                >
+                  <Hash className="w-3.5 h-3.5 mt-0.5 shrink-0 text-on-surface-variant/50" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-semibold text-on-surface truncate">
+                      <span className="text-primary">#{t.id}</span> {t.title}
+                    </p>
+                    <p className="text-[10px] text-on-surface-variant truncate mt-0.5">
+                      {[t.requester?.fullName, t.assignedTo?.fullName, t.team?.name, t.category].filter(Boolean).join(' · ')}
+                    </p>
+                  </div>
+                  <span className={`shrink-0 mt-0.5 w-2 h-2 rounded-full ${
+                    t.priority === 'P1' ? 'bg-red-500' : t.priority === 'P2' ? 'bg-orange-400' : t.priority === 'P3' ? 'bg-blue-400' : 'bg-gray-300'
+                  }`} title={t.priority} />
+                </button>
+              ))}
+              <div className="border-t border-outline-variant/30 mt-1 pt-1.5 px-3 flex items-center gap-1.5 text-[10px] text-on-surface-variant/60">
+                <CornerDownLeft className="w-3 h-3" /> ouvrir · <span className="font-mono">↑↓</span> naviguer · <span className="font-mono">Entrée</span> ouvrir
+              </div>
+            </div>
           )}
         </div>
 

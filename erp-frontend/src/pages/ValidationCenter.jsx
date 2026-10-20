@@ -3239,7 +3239,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
             </div>
             <p className="text-xs text-on-surface-variant">
               {rejectDraftIsReminder
-                ? 'Le motif est enregistré avec la relance. Ce n\'est que ce brouillon qui est écarté : les prochaines étapes (relance suivante, pré-clôture, clôture automatique) restent programmées.'
+                ? 'Le motif est enregistré avec la relance. Ce n\'est que ce brouillon qui est écarté : les prochaines relances restent programmées.'
                 : 'Le motif est enregistré avec le brouillon : c\'est ce qui permet d\'expliquer un rejet et de repérer les réponses qui reviennent trop souvent.'}
             </p>
             <textarea

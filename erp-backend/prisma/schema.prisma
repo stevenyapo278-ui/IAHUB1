@@ -460,6 +460,9 @@ model Ticket {
   closeSuggested            Boolean   @default(false)
   closeSuggestedAt          DateTime?
   closeSuggestionConfidence Float?
+  // Opt-out par ticket des copies (CC) configurées pour les réponses IA : sur les fils
+  // sensibles, on ne prévient que le demandeur, quel que soit le réglage global.
+  skipAiReplyCc             Boolean   @default(false)
   // Nombre de suggestions de clôture déjà émises sur ce ticket : plafonné (2) pour empêcher
   // les boucles de re-suggestion après rejet de la Hotline ; remis à 0 à la validation.
   closeSuggestionCount      Int       @default(0)
@@ -708,6 +711,22 @@ model SystemSettings {
   techReminderRepeatHours   Int     @default(0) // 0 = un seul rappel par ticket, sinon renvoi toutes les X h tant que le critère persiste
   techReminderOnNoActivity  Boolean @default(true) // critère : ticket assigné sans activité (suivi/réponse sortante) depuis le délai
   techReminderOnUnassigned  Boolean @default(true) // critère : ticket ouvert sans technicien assigné depuis le délai
+  // Mode d'envoi : 'UNITARY' = un email par ticket ; 'DIGEST' = un seul email récapitulatif
+  // par destinataire, avec un tableau de tous ses tickets concernés (évite d'inonder les
+  // boîtes quand beaucoup de tickets dépassent le délai en même temps).
+  techReminderMode          String  @default("DIGEST")
+
+  // ── Copies (CC) des réponses IA (Paramètres > Avancé) ────────────────────
+  // Quand un demandeur écrit uniquement à la boîte IA (sans copier les humains/les
+  // listes de diffusion), la réponse de l'IA part vers lui seul. Ces réglages
+  // ajoutent des destinataires en copie sur les emails sortants générés par l'IA
+  // (réponses de conversation ET accusé de réception, selon le toggle dédié).
+  aiReplyCcEnabled            Boolean @default(false) // master switch, désactivé par défaut
+  aiReplyCcEmails             String  @default("") // CSV d'adresses ajoutées en CC de toutes les réponses IA
+  aiReplyCcMode               String  @default("ALWAYS") // ALWAYS | IF_NO_CC | EXTERNAL_REQUESTER
+  aiReplyCcInternalDomains    String  @default("") // CSV de domaines internes — ignorés en mode EXTERNAL_REQUESTER
+  aiReplyCcIncludeTeamGroup   Boolean @default(false) // ajoute Team.groupEmail de l'équipe du ticket en CC
+  aiReplyCcOnAcknowledgement  Boolean @default(true) // appliqué aussi à l'accusé de réception automatique
 
   // Moteur SLA (outil de ticketing) — seuils par priorité en heures :
   //   { P1: { response: 1, resolution: 4 }, P2: { response: 2, resolution: 8 },

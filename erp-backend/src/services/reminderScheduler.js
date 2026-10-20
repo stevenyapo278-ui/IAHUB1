@@ -1,6 +1,5 @@
 const prisma = require('../prismaClient');
 const { getIO } = require('../utils/socket');
-const { logEvent } = require('./ticketEvent');
 
 const { processApprovalReminders } = require('./approvalReminderScheduler');
 
@@ -11,17 +10,16 @@ function daysSince(date) {
 // Corps du brouillon de relance (stocké tel quel dans AiEmailDraft.proposedContent, éditable
 // dans le Centre de Validation avant envoi). La mise en forme complète (gabarit + signature)
 // est appliquée à l'envoi par sendAiDraftEmail — ici on ne stocke que le contenu utile.
-function buildReminderDraftBody({ toName, ticketId, subject, isPreClose }) {
-  if (isPreClose) {
-    return `<p>Bonjour ${toName || ''},</p>\n<p>Sans réponse de votre part dans les 5 prochains jours, votre ticket <strong>#${ticketId}</strong> (${subject}) sera automatiquement clôturé.</p>\n<p>Si le problème est résolu, vous n'avez rien à faire. Sinon, répondez à cet email.</p>`;
-  }
+// Note : aucune clôture automatique n'est promise au demandeur — la seule fermeture auto
+// est SOLVED → CLOSED (solvedAutoCloseScheduler), pas la perte de réponse.
+function buildReminderDraftBody({ toName, ticketId, subject }) {
   return `<p>Bonjour ${toName || ''},</p>\n<p>Nous revenons vers vous concernant votre ticket <strong>#${ticketId}</strong> : ${subject}.</p>\n<p>Votre demande est toujours en attente. Pouvez-vous nous confirmer si le problème est résolu ou s'il persiste ?</p>\n<p>Répondez simplement à cet email.</p>`;
 }
 
 // Crée le brouillon de relance (draftKind REMINDER) pour le ticket, sauf si un brouillon de
 // relance est déjà en attente de validation — sans cette garde, chaque passage du scheduler
 // empilerait un doublon dans le Centre de Validation tant que la Hotline n'a pas tranché.
-async function createReminderDraftIfMissing(ticket, isPreClose) {
+async function createReminderDraftIfMissing(ticket) {
   const hasPendingReminderDraft = await prisma.aiEmailDraft.findFirst({
     where: { ticketId: ticket.id, draftKind: 'REMINDER', status: 'PENDING' },
     orderBy: { createdAt: 'desc' },
@@ -35,7 +33,7 @@ async function createReminderDraftIfMissing(ticket, isPreClose) {
       subject: `[Ticket #${ticket.id}] ${ticket.title}`,
       proposedContent: buildReminderDraftBody({
         toName: ticket.sourceName, ticketId: ticket.id,
-        subject: ticket.title, isPreClose,
+        subject: ticket.title,
       }),
       draftKind: 'REMINDER',
     },
@@ -64,7 +62,7 @@ async function createReminderDraftIfMissing(ticket, isPreClose) {
 async function runReminderScheduler() {
   const anyConfig = await prisma.reminderConfig.findFirst();
   if (anyConfig && !anyConfig.isActive) return [];
-  const delays = anyConfig || { firstReminderDays: 2, secondReminderDays: 5, preCloseDays: 10, autoCloseDays: 15 };
+  const delays = anyConfig || { firstReminderDays: 2, secondReminderDays: 5 };
 
   const tickets = await prisma.ticket.findMany({
     where: { status: 'WAITING_FOR_USER', sourceEmail: { not: null }, closeSuggested: false },
@@ -87,34 +85,17 @@ async function runReminderScheduler() {
     if (latestMsg && daysSince(latestMsg.timestamp) < 1) continue;
 
     try {
-      if (since >= delays.autoCloseDays) {
-        await prisma.ticket.update({
-          where: { id: ticket.id },
-          // Clôture auto (sans réponse) : consommer la suggestion de clôture éventuelle
-          // (le filtre closeSuggested=false exclut déjà ces tickets ici, garde par sécurité)
-          data: { status: 'CLOSED', closedAt: new Date(), closeSuggested: false, closeSuggestedAt: null, closeSuggestionConfidence: null },
-        });
-        await logEvent(ticket.id, 'CLOSED_AUTO', 'SYSTEM', { reason: 'no_response', daysSinceLastReply: since });
-        results.push({ ticketId: ticket.id, action: 'AUTO_CLOSED' });
-        continue;
-      }
-
-      if (since >= delays.preCloseDays && count < 3) {
-        await createReminderDraftIfMissing(ticket, true);
-        await prisma.ticket.update({ where: { id: ticket.id }, data: { reminderCount: 3, reminderSentAt: new Date() } });
-        results.push({ ticketId: ticket.id, action: 'REMINDER_PRE_CLOSE' });
-        continue;
-      }
-
+      // Aucune clôture automatique ici : les tickets sans réponse restent en attente.
+      // La seule fermeture auto est SOLVED → CLOSED (solvedAutoCloseScheduler).
       if (since >= delays.secondReminderDays && count < 2) {
-        await createReminderDraftIfMissing(ticket, false);
+        await createReminderDraftIfMissing(ticket);
         await prisma.ticket.update({ where: { id: ticket.id }, data: { reminderCount: 2, reminderSentAt: new Date() } });
         results.push({ ticketId: ticket.id, action: 'REMINDER_2' });
         continue;
       }
 
       if (since >= delays.firstReminderDays && count < 1) {
-        await createReminderDraftIfMissing(ticket, false);
+        await createReminderDraftIfMissing(ticket);
         await prisma.ticket.update({ where: { id: ticket.id }, data: { reminderCount: 1, reminderSentAt: new Date() } });
         results.push({ ticketId: ticket.id, action: 'REMINDER_1' });
       }

@@ -1,6 +1,6 @@
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
-  Inbox, ChevronDown, Sparkles, Plus, RefreshCw, Flame,
+  Inbox, Sparkles, Plus, Flame, RefreshCw, ChevronDown,
   UserCheck, MessageSquare, Trash2, FileText, HelpCircle, TrendingUp,
   Clock, CheckCircle2, Shield, AlertTriangle, Layers, Link2, History,
 } from 'lucide-react';
@@ -99,28 +99,51 @@ function eventLabel(type) {
     ESCALATED: 'Ticket escaladé',
     ESCALATION_REQUESTED: 'Escalade demandée',
     REMINDER_SENT: 'Relance envoyée',
-    CLOSED_AUTO: 'Clôture automatique',
+    CLOSED_AUTO: 'Ticket fermé automatiquement',
     CLOSURE_SUGGESTED: 'Clôture suggérée',
     CLOSURE_VALIDATED: 'Clôture validée',
-    CLOSURE_REJECTED: 'Clôture rejetée',
-    APPROVED: 'Approuvé (Hotline)',
-    REJECTED: 'Rejeté (Hotline)',
-    SLA_BREACHED: 'SLA dépassé',
-    SLA_UPDATED: 'SLA mis à jour',
+    CLOSURE_REJECTED: 'Clôture refusée',
+    APPROVED: 'Demande approuvée',
+    REJECTED: 'Demande rejetée',
+    SLA_BREACHED: 'Délai de réponse dépassé',
+    SLA_UPDATED: 'Délai de réponse ajusté',
     MERGED_INTO: 'Fusionné dans un autre ticket',
     MERGED_FROM: 'Ticket fusionné ici',
     LINKED: 'Ticket lié',
     UNLINKED: 'Lien supprimé',
     GLPI_SYNC_FAILED: 'Échec synchronisation GLPI',
     REPLY_ON_CLOSED_SUGGESTED: 'Réponse suggérée (ticket fermé)',
-    REPLY_ON_CLOSED_REOPENED: 'Réponse sur ticket fermé : ticket rouvert',
-    REPLY_ON_CLOSED_NEW_TICKET: 'Réponse sur ticket fermé : nouvelle demande créée',
+    REPLY_ON_CLOSED_REOPENED: 'Ticket rouvert suite à une réponse',
+    REPLY_ON_CLOSED_NEW_TICKET: 'Nouvelle demande créée (ticket fermé)',
     REPLY_ON_CLOSED_DISMISSED: 'Suggestion de réponse ignorée',
     NEW_TICKET_SUGGESTED: 'Nouvelle demande détectée dans le fil',
     NEW_TICKET_SUGGESTED_CREATED: 'Nouvelle demande créée depuis la suggestion',
     NEW_TICKET_SUGGESTED_DISMISSED: 'Suggestion de nouvelle demande ignorée',
+    RESOLUTION_CONFIRMED_ON_CLOSED: 'Résolution confirmée sur ticket fermé',
   };
   return labels[type] || (type ? type.replace(/_/g, ' ').toLowerCase() : '');
+}
+
+/* Titre parlant : adapte le libellé au contenu réel de l'événement (qui + quoi),
+   pour que des non-techniciens comprennent d'un coup d'œil ce qui s'est passé. */
+function eventTitle(event) {
+  const p = event?.payload || {};
+  const type = event?.type;
+  if (type === 'STATUS_CHANGED') {
+    if (p.to === 'CLOSED' || p.toLabel === 'Fermé') return 'Ticket fermé';
+    if (p.to === 'SOLVED' || p.toLabel === 'Résolu') return 'Ticket marqué résolu';
+    if ((p.from === 'CLOSED' || p.from === 'SOLVED') && p.to === 'OPEN') return 'Ticket rouvert';
+    return 'Statut modifié';
+  }
+  if (type === 'CLOSED_AUTO') {
+    if (p.reason === 'solved_auto_close') return 'Ticket fermé automatiquement (résolu)';
+    return 'Ticket fermé automatiquement (sans réponse)';
+  }
+  if (type === 'ASSIGNED' && p.toName) return `Assigné à ${p.toName}`;
+  if (type === 'ESCALATED' && p.toTeam?.name) return `Escaladé vers « ${p.toTeam.name} »`;
+  if (type === 'REJECTED') return 'Demande rejetée par la Hotline';
+  if (type === 'APPROVED') return 'Demande approuvée par la Hotline';
+  return eventLabel(type);
 }
 
 function eventDetail(event) {
@@ -132,15 +155,18 @@ function eventDetail(event) {
     if (event.type === 'STATUS_CHANGED' || event.type === 'PRIORITY_CHANGED' || event.type === 'DUE_DATE_UPDATED') {
       parts.push(`${formatLogValue(p.fromLabel ?? p.from)} → ${formatLogValue(p.toLabel ?? p.to)}`);
     } else if (event.type === 'ASSIGNED') {
-      parts.push(`${p.fromName || formatLogValue(p.from)} → ${p.toName || formatLogValue(p.to)}`);
+      if (p.fromName || p.from) parts.push(`remplace ${p.fromName || formatLogValue(p.from)}`);
     }
   }
   if (p.action) parts.push(p.action);
-  if (p.reason) parts.push(p.reason);
+  if (p.reason) parts.push(`motif : ${p.reason}`);
   if (p.error) parts.push(p.error);
   if (p.dueAt) parts.push(`Échéance : ${new Date(p.dueAt).toLocaleString('fr-FR')}`);
-  if (p.level) parts.push(`Niveau ${p.level}`);
+  if (p.level) parts.push(`niveau ${p.level}`);
+  if (p.fromTeam?.name && p.toTeam?.name) parts.push(`${p.fromTeam.name} → ${p.toTeam.name}`);
   if (p.targetTicketId) parts.push(`Ticket #${p.targetTicketId}`);
+  if (p.daysSinceSolved !== undefined) parts.push(`résolu depuis ${p.daysSinceSolved} j`);
+  if (p.daysSinceLastReply !== undefined) parts.push(`sans réponse depuis ${p.daysSinceLastReply} j`);
   // Commentaires : extrait du contenu + auteur d'origine (tracé « qui a écrit quoi »)
   if (p.authorName && event.type !== 'CREATED') parts.push(`suivi de ${p.authorName}`);
   if (p.editedByAnother) parts.push('édité par un autre utilisateur');
@@ -250,8 +276,6 @@ export default function ActivityStream({
   scrollToEnd = false,
 }) {
   const [filter, setFilter] = useState(defaultFilter);
-  // Blocs « événements système » dépliés (par clé de jour)
-  const [expandedSystem, setExpandedSystem] = useState(() => new Set());
   // Horloge de référence pour le calcul des regroupements/jours.
   const [now, setNow] = useState(() => Date.now());
 
@@ -279,39 +303,23 @@ export default function ActivityStream({
 
   const decorated = useMemo(() => visible.map((i) => ({ ...i, now })), [visible, now]);
 
-  const toggleSystemGroup = (key) => setExpandedSystem((prev) => {
-    const next = new Set(prev);
-    if (next.has(key)) next.delete(key); else next.add(key);
-    return next;
-  });
-
-  // Découpage d'affichage par jour : commentaires et emails restent en ordre
-  // chronologique ; les événements système de la journée sont regroupés en UN
-  // seul bloc dépliable, placé à la position du premier événement système du jour.
-  // (En vue filtrée « Système », les lignes sont rendues directement : le bloc
-  // les cacherait derrière leur propre filtre.)
+  // Découpage d'affichage par jour : tous les entrées (commentaires, emails,
+  // événements système) restent en ordre chronologique, sans regroupement replié —
+  // les utilisateurs non techniques doivent voir l'historique sans clic supplémentaire.
   const days = useMemo(() => {
     const out = [];
     decorated.forEach((item) => {
       const k = dayKey(item.date);
       let last = out[out.length - 1];
       if (!last || last.key !== k) {
-        last = { key: k, label: dayLabel(item.date, item.now), items: [], segments: [], sysGroup: null, date: item.date };
+        last = { key: k, label: dayLabel(item.date, item.now), items: [], segments: [], date: item.date };
         out.push(last);
       }
       last.items.push(item);
-      if (item.kind === 'system' && filter === 'all') {
-        if (!last.sysGroup) {
-          last.sysGroup = { type: 'system-group', key: `${k}-sys`, items: [] };
-          last.segments.push(last.sysGroup);
-        }
-        last.sysGroup.items.push(item);
-      } else {
-        last.segments.push({ type: 'row', item });
-      }
+      last.segments.push({ type: 'row', item });
     });
     return out;
-  }, [decorated, filter]);
+  }, [decorated]);
 
   const hasItems = decorated.length > 0;
 
@@ -387,16 +395,6 @@ export default function ActivityStream({
               </div>
 
               {day.segments.map((seg) => {
-                if (seg.type === 'system-group') {
-                  return (
-                    <SystemGroup
-                      key={seg.key}
-                      items={seg.items}
-                      expanded={expandedSystem.has(seg.key)}
-                      onToggle={() => toggleSystemGroup(seg.key)}
-                    />
-                  );
-                }
                 const item = seg.item;
                 const [time, dayShort] = gutterDate(item.date);
                 const common = { item, time, dayShort };
@@ -477,57 +475,14 @@ function RailRow({ time, dayShort, nodeClass, children, right }) {
   );
 }
 
-/* ── Bloc « événements système » d'une journée, replié par défaut ──────── */
-function SystemGroup({ items, expanded, onToggle }) {
-  const [time, dayShort] = gutterDate(items[0].date);
-  const absolute = new Date(items[0].date).toLocaleString('fr-FR');
-  // Résumé en un coup d'œil : types uniques, 3 max, puis +N
-  const labels = [...new Set(items.map((i) => eventLabel(i.data.type)))];
-  const summary = labels.slice(0, 3).join(' · ') + (labels.length > 3 ? ` · +${labels.length - 3}` : '');
-
-  return (
-    <Fragment>
-      <RailRow
-        time={time}
-        dayShort={dayShort}
-        nodeClass="text-slate-400 dark:text-slate-500"
-        right={(
-          <button
-            type="button"
-            onClick={onToggle}
-            aria-expanded={expanded}
-            title={absolute}
-            className={`act-pill inline-flex h-7 items-center gap-1.5 rounded-full border px-3 text-[11px] font-semibold
-              text-primary transition-colors duration-150 cursor-pointer
-              ${expanded ? 'is-open' : ''}`}
-          >
-            {expanded ? 'Replier' : 'Voir'}
-            <ChevronDown className={`h-3.5 w-3.5 transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`} />
-          </button>
-        )}
-      >
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-          <h4 className="text-[13px] font-semibold leading-tight text-on-surface-variant">Événements système</h4>
-          <span className="text-[10px] font-mono tabular-nums act-faint">{items.length}</span>
-        </div>
-        <p className="act-muted mt-1 text-[11px] leading-snug">{summary}</p>
-      </RailRow>
-
-      {expanded && items.map((item) => {
-        const [t, d] = gutterDate(item.date);
-        return <SystemRow key={item.key} item={item} time={t} dayShort={d} />;
-      })}
-    </Fragment>
-  );
-}
-
 /* ── Événement système ─────────────────────────────────────────────────── */
 function SystemRow({ item, time, dayShort }) {
   const type = item.data.type || '';
   const tone = TONES[toneOf(type)];
-  const label = eventLabel(type);
+  const label = eventTitle(item.data);
   const detail = eventDetail(item.data);
-  const actor = item.data.actor && item.data.actor !== 'SYSTEM' ? item.data.actor : null;
+  const actor = item.data.actorName
+    || (item.data.actor && item.data.actor !== 'SYSTEM' ? item.data.actor : null);
   const absolute = new Date(item.date).toLocaleString('fr-FR');
   // Changements détaillés (TICKET_UPDATED) : chaque champ, avant → après
   const changes = Array.isArray(item.data.payload?.changes) ? item.data.payload.changes : null;
@@ -553,7 +508,7 @@ function SystemRow({ item, time, dayShort }) {
         <h4 className="text-[13px] font-semibold leading-tight text-on-surface">{label}</h4>
         {(actor || detail) && (
           <p className="act-muted mt-1 text-[11px] leading-snug">
-            {actor && <span className="font-semibold text-on-surface-variant">{actor}</span>}
+            {actor && <span className="font-semibold text-on-surface-variant">par {actor}</span>}
             {actor && detail && ' · '}
             {detail && <span>{detail}</span>}
           </p>

@@ -9,7 +9,7 @@ jest.mock('../prismaClient', () => ({
   ticketEvent: { findMany: (...args) => mockEventFindMany(...args) },
 }));
 jest.mock('./systemSettings', () => ({ getSystemSettings: (...args) => mockSettings(...args) }));
-jest.mock('./emailSender', () => ({ sendTechnicianReminderEmail: (...args) => mockSendEmail(...args) }));
+jest.mock('./emailSender', () => ({ sendTechnicianReminderDigestEmail: (...args) => mockSendEmail(...args) }));
 jest.mock('./ticketEvent', () => ({ logEvent: (...args) => mockLogEvent(...args) }));
 
 const { runTechnicianReminderScheduler } = require('./technicianReminderScheduler');
@@ -81,26 +81,63 @@ describe('runTechnicianReminderScheduler', () => {
     expect(mockTicketFindMany).not.toHaveBeenCalled();
   });
 
-  it('ticket assigné sans activité depuis 24h : email au technicien + tracé REMINDER_SENT', async () => {
+  it('ticket assigné sans activité depuis 24h : UN digest au technicien + tracé REMINDER_SENT', async () => {
     mockTicketFindMany.mockResolvedValue([makeTicket({ idleHours: 25 })]);
 
     const results = await runTechnicianReminderScheduler();
 
     expect(mockSendEmail).toHaveBeenCalledTimes(1);
     expect(mockSendEmail).toHaveBeenCalledWith(expect.objectContaining({
-      ticketId: 101,
       to: 'technicien@prosuma.ci',
-      technicianName: 'Koffi Tech',
-      criteriaLabels: ['assigné sans activité'],
-      hoursWaiting: expect.any(Number),
+      recipientName: 'Koffi Tech',
+      delayHours: 24,
+      tickets: [expect.objectContaining({
+        ticketId: 101,
+        ticketTitle: 'Imprimante bloquée',
+        priority: 'P2',
+        hoursWaiting: expect.any(Number),
+        criteriaLabels: ['assigné sans activité'],
+      })],
     }));
-    expect(mockSendEmail.mock.calls[0][0].hoursWaiting).toBeGreaterThanOrEqual(24);
+    expect(mockSendEmail.mock.calls[0][0].tickets[0].hoursWaiting).toBeGreaterThanOrEqual(24);
     expect(mockLogEvent).toHaveBeenCalledWith(101, 'REMINDER_SENT', 'SYSTEM', expect.objectContaining({
       kind: 'TECHNICIAN',
       criteria: 'NO_ACTIVITY',
       recipients: ['technicien@prosuma.ci'],
     }));
-    expect(results).toEqual([{ ticketId: 101, action: 'TECH_REMINDER_SENT', criteria: 'NO_ACTIVITY', recipients: 1 }]);
+    expect(results).toEqual([{ action: 'TECH_DIGEST_SENT', to: 'technicien@prosuma.ci', tickets: 1 }]);
+  });
+
+  it('DIGEST : deux tickets du même technicien → UN seul email avec un tableau de 2 lignes', async () => {
+    mockTicketFindMany.mockResolvedValue([
+      makeTicket({ id: 101, idleHours: 30 }),
+      makeTicket({ id: 102, title: 'Écran HS', idleHours: 40 }),
+    ]);
+
+    const results = await runTechnicianReminderScheduler();
+
+    expect(mockSendEmail).toHaveBeenCalledTimes(1);
+    const arg = mockSendEmail.mock.calls[0][0];
+    expect(arg.to).toBe('technicien@prosuma.ci');
+    expect(arg.tickets).toHaveLength(2);
+    expect(arg.tickets.map((t) => t.ticketId).sort()).toEqual([101, 102]);
+    expect(mockLogEvent).toHaveBeenCalledTimes(2); // tracé par ticket (anti-doublon)
+    expect(results).toEqual([{ action: 'TECH_DIGEST_SENT', to: 'technicien@prosuma.ci', tickets: 2 }]);
+  });
+
+  it('DIGEST : tickets de deux techniciens → deux emails distincts (un par destinataire)', async () => {
+    mockTicketFindMany.mockResolvedValue([
+      makeTicket({ id: 101, assignedToId: 5, assignedTo: { id: 5, email: 'technicien@prosuma.ci', fullName: 'Koffi Tech' } }),
+      makeTicket({ id: 102, assignedToId: 6, assignedTo: { id: 6, email: 'aya@prosuma.ci', fullName: 'Aya Tech' } }),
+    ]);
+
+    const results = await runTechnicianReminderScheduler();
+
+    expect(mockSendEmail).toHaveBeenCalledTimes(2);
+    const recipients = mockSendEmail.mock.calls.map(([args]) => args.to).sort();
+    expect(recipients).toEqual(['aya@prosuma.ci', 'technicien@prosuma.ci']);
+    expect(results).toHaveLength(2);
+    expect(results.every((r) => r.action === 'TECH_DIGEST_SENT')).toBe(true);
   });
 
   it('passe en revue uniquement les tickets ouverts (hors Résolu/Fermé)', async () => {
@@ -151,18 +188,24 @@ describe('runTechnicianReminderScheduler', () => {
     const results = await runTechnicianReminderScheduler();
 
     expect(mockSendEmail).toHaveBeenCalledTimes(1);
-    expect(results[0].action).toBe('TECH_REMINDER_SENT');
+    expect(results[0].action).toBe('TECH_DIGEST_SENT');
   });
 
-  it('ticket non assigné : email à chaque membre de l équipe + email de groupe, critère UNASSIGNED', async () => {
+  it('ticket non assigné : UN digest par membre de l équipe + email de groupe, critère UNASSIGNED', async () => {
     mockTicketFindMany.mockResolvedValue([makeTicket({ idleHours: 30, assignedToId: null, assignedTo: null })]);
 
     const results = await runTechnicianReminderScheduler();
 
+    // 3 destinataires (2 membres + groupEmail), chacun reçoit son digest avec le même ticket.
     const recipients = mockSendEmail.mock.calls.map(([args]) => args.to);
     expect(recipients.sort()).toEqual(['aya@prosuma.ci', 'support-n2@prosuma.ci', 'technicien@prosuma.ci']);
+    for (const [args] of mockSendEmail.mock.calls) {
+      expect(args.tickets).toHaveLength(1);
+      expect(args.tickets[0].ticketId).toBe(101);
+    }
     expect(mockLogEvent).toHaveBeenCalledWith(101, 'REMINDER_SENT', 'SYSTEM', expect.objectContaining({ criteria: 'UNASSIGNED' }));
-    expect(results[0]).toMatchObject({ action: 'TECH_REMINDER_SENT', criteria: 'UNASSIGNED', recipients: 3 });
+    expect(results).toHaveLength(3);
+    expect(results.every((r) => r.action === 'TECH_DIGEST_SENT' && r.tickets === 1)).toBe(true);
   });
 
   it('ticket non assigné sans équipe ni destinataire : rien ne part', async () => {
@@ -193,7 +236,7 @@ describe('runTechnicianReminderScheduler', () => {
     }]);
 
     const results = await runTechnicianReminderScheduler();
-    expect(results[0].action).toBe('TECH_REMINDER_SENT');
+    expect(results[0].action).toBe('TECH_DIGEST_SENT');
   });
 
   it('rappel répété : renvoi après X h, mais pas avant', async () => {
@@ -208,7 +251,7 @@ describe('runTechnicianReminderScheduler', () => {
     mockEventFindMany.mockResolvedValue([{ ticketId: 101, createdAt: new Date(Date.now() - 24 * HOUR_MS), payload: { kind: 'TECHNICIAN' } }]);
     const results = await runTechnicianReminderScheduler();
     expect(mockSendEmail).toHaveBeenCalledTimes(1);
-    expect(results[0].action).toBe('TECH_REMINDER_SENT');
+    expect(results[0].action).toBe('TECH_DIGEST_SENT');
   });
 
   it('un ticket trop récent (moins de 24h) ne déclenche rien', async () => {
@@ -218,19 +261,32 @@ describe('runTechnicianReminderScheduler', () => {
     expect(mockSendEmail).not.toHaveBeenCalled();
   });
 
-  it('un échec d envoi sur un ticket ne bloque pas les suivants', async () => {
+  it('un échec d envoi sur un destinataire ne bloque pas les suivants', async () => {
     mockTicketFindMany.mockResolvedValue([
-      makeTicket({ id: 1, idleHours: 30 }),
-      makeTicket({ id: 2, idleHours: 30 }),
+      makeTicket({ id: 1, assignedToId: 5, assignedTo: { id: 5, email: 'koffi@prosuma.ci', fullName: 'Koffi Tech' } }),
+      makeTicket({ id: 2, assignedToId: 6, assignedTo: { id: 6, email: 'aya@prosuma.ci', fullName: 'Aya Tech' } }),
     ]);
     mockSendEmail.mockRejectedValueOnce(new Error('SMTP en erreur'));
 
     const results = await runTechnicianReminderScheduler();
 
-    expect(results).toEqual([
-      { ticketId: 1, action: 'ERROR', error: 'SMTP en erreur' },
-      { ticketId: 2, action: 'TECH_REMINDER_SENT', criteria: 'NO_ACTIVITY', recipients: 1 },
-    ]);
-    expect(mockLogEvent).toHaveBeenCalledTimes(1); // seul l'envoi réussi est tracé
+    expect(results).toHaveLength(2);
+    expect(results[0]).toMatchObject({ action: 'ERROR', to: 'koffi@prosuma.ci', error: 'SMTP en erreur' });
+    expect(results[1]).toMatchObject({ action: 'TECH_DIGEST_SENT', to: 'aya@prosuma.ci', tickets: 1 });
+    // Seul le digest livré est tracé (ticket 2 uniquement).
+    expect(mockLogEvent).toHaveBeenCalledTimes(1);
+    expect(mockLogEvent).toHaveBeenCalledWith(2, 'REMINDER_SENT', 'SYSTEM', expect.objectContaining({
+      recipients: ['aya@prosuma.ci'],
+    }));
+  });
+
+  it('un ticket dont TOUS les destinataires échouent n est pas tracé (pas d anti-doublon à tort)', async () => {
+    mockTicketFindMany.mockResolvedValue([makeTicket({ idleHours: 30, assignedToId: null, assignedTo: null })]);
+    mockSendEmail.mockRejectedValue(new Error('SMTP en erreur'));
+
+    const results = await runTechnicianReminderScheduler();
+
+    expect(results.every((r) => r.action === 'ERROR')).toBe(true);
+    expect(mockLogEvent).not.toHaveBeenCalled(); // rien de livré → pas de REMINDER_SENT
   });
 });

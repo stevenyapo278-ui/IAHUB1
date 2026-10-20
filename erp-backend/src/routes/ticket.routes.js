@@ -217,6 +217,34 @@ router.get('/facets', async (req, res) => {
   });
 });
 
+// ── Suggestions de recherche (autocomplétion de la barre de recherche) ───────
+// Léger : champs minimaux, limite 8, même périmètre RBAC que la liste.
+router.get('/search-suggestions', async (req, res) => {
+  const q = String(req.query.q || '').trim();
+  if (q.length < 2) return res.json({ items: [] });
+
+  const where = buildTicketWhereClause(req.user, { search: q });
+  const items = await prisma.ticket.findMany({
+    where,
+    take: 8,
+    orderBy: { updatedAt: 'desc' },
+    select: {
+      id: true,
+      title: true,
+      status: true,
+      priority: true,
+      category: true,
+      locationName: true,
+      updatedAt: true,
+      requester: { select: { fullName: true } },
+      assignedTo: { select: { fullName: true } },
+      team: { select: { name: true } },
+    },
+  });
+
+  return res.json({ items });
+});
+
 // List tickets (with optional filters + pagination + sorting)
 router.get('/', async (req, res) => {
   const { limit, page, sortBy, sortOrder } = req.query;

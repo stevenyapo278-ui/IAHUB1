@@ -350,6 +350,9 @@ function StatusRenderer({ data, context }) {
           onChange={(e) => handleQuickStatusChange?.(data.id, e.target.value, e)}
           className="text-[11px] font-semibold px-2 py-1 rounded-lg border border-outline-variant/40 bg-surface text-on-surface cursor-pointer focus:outline-none focus:ring-1 focus:ring-primary/30 transition-all w-full max-w-[125px] truncate"
         >
+          {/* Affiche « Fermé » si le ticket l'est déjà — CLOSED n'est jamais un choix
+              manuel (MANUAL_STATUS_OPTIONS) : la fermeture passe par le bouton dédié. */}
+          {data.status === 'CLOSED' && <option value="CLOSED">Fermé</option>}
           {(opts || STATUS_OPTIONS).map(s => <option key={s} value={s}>{(labels || STATUS_LABELS)[s] || s}</option>)}
         </select>
       </div>
@@ -2483,6 +2486,7 @@ export default function Tickets() {
         searchInputRef={searchInputRef}
         currentUser={user ? { id: user.id, role: user.role, teamId: user.teamId } : null}
         facets={facets}
+        onSelectTicket={(id) => navigate(`/tickets/${id}`)}
       />
 
       {/* ── MAIN CONTENT ────────────────────────────────────────────────────── */}

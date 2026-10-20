@@ -1,11 +1,13 @@
 const prisma = require('../prismaClient');
 const { getSystemSettings } = require('./systemSettings');
-const { sendTechnicianReminderEmail } = require('./emailSender');
+const { sendTechnicianReminderDigestEmail } = require('./emailSender');
 const { logEvent } = require('./ticketEvent');
 
 // ── Rappels techniciens (Paramètres > Automatisation > Rappels techniciens) ──
 // Dès qu'un ticket OUVERT (pas Résolu/Fermé) dépasse le délai configuré (ex. 24 h)
-// sans prise en charge, un email part au(x) destinataire(s) technique(s) :
+// sans prise en charge, UN SEUL email DIGEST part par destinataire avec un tableau
+// regroupant TOUS ses tickets concernés — au lieu d'un email par ticket qui noie
+// la boîte :
 //   • ticket assigné      → le technicien assigné, si aucune activité (suivi ou
 //                           réponse sortante) depuis le délai ;
 //   • ticket non assigné  → les membres de l'équipe (et son email de groupe),
@@ -95,73 +97,95 @@ async function runTechnicianReminderScheduler() {
   }
 
   const now = Date.now();
-  const results = [];
 
+  // 1. Collecte des tickets éligibles + leurs destinataires.
+  const eligible = [];
   for (const ticket of tickets) {
+    const isUnassigned = !ticket.assignedToId;
+    if (isUnassigned ? !onUnassigned : !onNoActivity) continue;
+
+    const hoursWaiting = Math.floor((now - lastAgentActivityAt(ticket, ticket.requesterId)) / HOUR_MS);
+    if (hoursWaiting < delayHours) continue;
+
+    const lastAt = lastReminderAt.get(ticket.id);
+    if (lastAt && (repeatHours <= 0 || (now - lastAt) / HOUR_MS < repeatHours)) continue;
+
+    const criteria = isUnassigned ? 'UNASSIGNED' : 'NO_ACTIVITY';
+    const criteriaLabels = [CRITERIA_LABELS[criteria]];
+
+    let recipients;
+    if (!isUnassigned) {
+      if (!ticket.assignedTo?.email) continue; // technicien sans adresse : rien à envoyer
+      recipients = [{ email: ticket.assignedTo.email, name: ticket.assignedTo.fullName }];
+    } else {
+      const seen = new Set();
+      recipients = [];
+      for (const member of ticket.team?.members || []) {
+        if (!member.email || seen.has(member.email.toLowerCase())) continue;
+        seen.add(member.email.toLowerCase());
+        recipients.push({ email: member.email, name: member.fullName });
+      }
+      if (ticket.team?.groupEmail && !seen.has(ticket.team.groupEmail.toLowerCase())) {
+        recipients.push({ email: ticket.team.groupEmail, name: ticket.team?.name || null });
+      }
+      if (recipients.length === 0) continue; // équipe vide/inconnue : aucun destinataire
+    }
+
+    eligible.push({ ticket, criteria, criteriaLabels, hoursWaiting, recipients });
+  }
+  if (eligible.length === 0) return [];
+
+  // 2. Regroupement par destinataire : UN digest par adresse avec TOUS ses tickets.
+  const byRecipient = new Map(); // emailLower → { email, name, tickets: [] }
+  for (const item of eligible) {
+    for (const r of item.recipients) {
+      const key = r.email.toLowerCase();
+      if (!byRecipient.has(key)) byRecipient.set(key, { email: r.email, name: r.name, tickets: [] });
+      byRecipient.get(key).tickets.push({
+        ticketId: item.ticket.id,
+        ticketTitle: item.ticket.title,
+        priority: item.ticket.priority,
+        category: item.ticket.category || null,
+        teamName: item.ticket.team?.name || null,
+        hoursWaiting: item.hoursWaiting,
+        criteriaLabels: item.criteriaLabels,
+      });
+    }
+  }
+
+  // 3. Envoi d'un digest par destinataire. Un échec n'en bloque pas les autres.
+  const results = [];
+  const deliveredTo = new Map(); // emailLower → true si le digest est parti
+  for (const group of byRecipient.values()) {
     try {
-      const isUnassigned = !ticket.assignedToId;
-      if (isUnassigned ? !onUnassigned : !onNoActivity) continue;
-
-      const hoursWaiting = Math.floor((now - lastAgentActivityAt(ticket, ticket.requesterId)) / HOUR_MS);
-      if (hoursWaiting < delayHours) continue;
-
-      const lastAt = lastReminderAt.get(ticket.id);
-      if (lastAt && (repeatHours <= 0 || (now - lastAt) / HOUR_MS < repeatHours)) continue;
-
-      const criteria = isUnassigned ? 'UNASSIGNED' : 'NO_ACTIVITY';
-      const criteriaLabels = [CRITERIA_LABELS[criteria]];
-
-      // Destinataires : le technicien assigné, ou l'équipe entière si non assigné.
-      let recipients;
-      let technicianName;
-      if (!isUnassigned) {
-        if (!ticket.assignedTo?.email) continue; // technicien sans adresse : rien à envoyer
-        recipients = [ticket.assignedTo.email];
-        technicianName = ticket.assignedTo.fullName;
-      } else {
-        const seen = new Set();
-        recipients = [];
-        for (const member of ticket.team?.members || []) {
-          if (!member.email || seen.has(member.email.toLowerCase())) continue;
-          seen.add(member.email.toLowerCase());
-          recipients.push(member.email);
-        }
-        if (ticket.team?.groupEmail && !seen.has(ticket.team.groupEmail.toLowerCase())) {
-          recipients.push(ticket.team.groupEmail);
-        }
-        if (recipients.length === 0) continue; // équipe vide/inconnue : aucun destinataire
-      }
-
-      const sent = [];
-      for (const recipient of recipients) {
-        await sendTechnicianReminderEmail({
-          ticketId: ticket.id,
-          ticketTitle: ticket.title,
-          priority: ticket.priority,
-          category: ticket.category || null,
-          teamName: ticket.team?.name || null,
-          to: recipient,
-          technicianName,
-          hoursWaiting,
-          criteriaLabels,
-        });
-        sent.push(recipient);
-      }
-
-      // Tracé + anti-doublon pour les passes suivantes. Un échec de journalisation ne
-      // doit pas faire échouer l'envoi déjà effectué (try/catch enveloppe le ticket).
-      await logEvent(ticket.id, 'REMINDER_SENT', 'SYSTEM', {
-        kind: 'TECHNICIAN',
-        criteria,
-        recipients: sent,
-        hoursWaiting,
+      await sendTechnicianReminderDigestEmail({
+        to: group.email,
+        recipientName: group.name,
+        tickets: group.tickets,
         delayHours,
       });
-
-      results.push({ ticketId: ticket.id, action: 'TECH_REMINDER_SENT', criteria, recipients: sent.length });
+      deliveredTo.set(group.email.toLowerCase(), true);
+      results.push({ action: 'TECH_DIGEST_SENT', to: group.email, tickets: group.tickets.length });
     } catch (err) {
-      results.push({ ticketId: ticket.id, action: 'ERROR', error: err.message });
+      deliveredTo.set(group.email.toLowerCase(), false);
+      results.push({ action: 'ERROR', to: group.email, tickets: group.tickets.length, error: err.message });
     }
+  }
+
+  // 4. Tracé par ticket (anti-doublon) — seulement si le digest est parti à au moins
+  //    un destinataire. Un échec de journalisation ne doit pas faire échouer l'envoi.
+  for (const item of eligible) {
+    const sent = item.recipients
+      .filter((r) => deliveredTo.get(r.email.toLowerCase()))
+      .map((r) => r.email);
+    if (sent.length === 0) continue;
+    await logEvent(item.ticket.id, 'REMINDER_SENT', 'SYSTEM', {
+      kind: 'TECHNICIAN',
+      criteria: item.criteria,
+      recipients: sent,
+      hoursWaiting: item.hoursWaiting,
+      delayHours,
+    });
   }
 
   return results;

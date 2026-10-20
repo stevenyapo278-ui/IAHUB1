@@ -176,8 +176,8 @@ export default function AutomationTab() {
           {reminderConfig && (
             <div className="space-y-md">
               <SettingRow
-                title="Relance & Clôture automatique"
-                description="Crée des brouillons de relance (à valider dans le Centre de Validation) pour les tickets en attente de réponse utilisateur. Clôture automatiquement les tickets restés sans réponse."
+                title="Relances Tickets"
+                description="Crée des brouillons de relance (à valider dans le Centre de Validation) pour les tickets en attente de réponse utilisateur. Les tickets sans réponse ne sont jamais fermés automatiquement."
                 checked={reminderConfig.isActive}
                 onChange={(v) => updateReminderConfig({ isActive: v })}
                 disabled={reminderSaving}
@@ -198,24 +198,6 @@ export default function AutomationTab() {
                 onChange={(v) => updateReminderConfig({ secondReminderDays: v })}
                 disabled={reminderSaving || !reminderConfig.isActive}
                 max={60}
-                unit="jours"
-              />
-              <IntervalRow
-                title="Avertissement avant clôture"
-                description="Délai avant le brouillon d'avertissement « clôture automatique prochaine » (pré-clôture)."
-                value={reminderConfig.preCloseDays}
-                onChange={(v) => updateReminderConfig({ preCloseDays: v })}
-                disabled={reminderSaving || !reminderConfig.isActive}
-                max={90}
-                unit="jours"
-              />
-              <IntervalRow
-                title="Clôture automatique"
-                description="Délai avant clôture définitive d'un ticket sans réponse."
-                value={reminderConfig.autoCloseDays}
-                onChange={(v) => updateReminderConfig({ autoCloseDays: v })}
-                disabled={reminderSaving || !reminderConfig.isActive}
-                max={120}
                 unit="jours"
               />
             </div>

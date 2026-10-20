@@ -15,6 +15,7 @@ const { processIncomingAttachments } = require('./emailAttachmentProcessor');
 const { stripSignature } = require('./signatureStripper');
 const { logEvent } = require('./ticketEvent');
 const { getSystemSettings, resolveFrontendUrl } = require('./systemSettings');
+const { resolveAiReplyCc } = require('./aiReplyCc');
 const { emitTicketCreated, emitTicketAssigned, persistNotification, userHasPermission } = require('../utils/socket');
 const { tryHandleReminderReply } = require('./draftReplyApproval');
 const { getBreaker } = require('../utils/circuitBreaker');
@@ -169,12 +170,22 @@ function isTransientError(err) {
 // envoie directement l'email, ou crée un AiEmailDraft en attente d'approbation comme aujourd'hui.
 async function dispatchOrQueueEmail({ ticketId, recipientEmail, ccRecipients, subject, html, draftType, inReplyToGraphMessageId, outlookConversationId }) {
   const settings = await getSystemSettings();
+  // Copies (CC) configurables (Paramètres > Avancé) : quand un demandeur n'écrit
+  // qu'à la boîte IA, on ajoute les destinataires de pilotage en copie. Le résultat
+  // est stocké sur le brouillon comme sur l'envoi direct, pour que l'humain qui
+  // valide voie exactement qui sera prévenu.
+  let finalCc = ccRecipients;
+  try {
+    finalCc = await resolveAiReplyCc({ ticketId, toEmail: recipientEmail, existingCc: ccRecipients, channel: 'REPLY' });
+  } catch (err) {
+    console.error(`[emailPipeline] Échec résolution CC IA (ticket ${ticketId}):`, err.message);
+  }
   if (settings.autoSendAiEmails) {
-    await sendEmail({ ticketId, to: recipientEmail, cc: ccRecipients, subject, bodyHtml: html, saveAsMessage: true, inReplyToGraphMessageId, conversationId: outlookConversationId });
-    await logEvent(ticketId, 'EMAIL_SENT', 'AI', { to: recipientEmail, cc: ccRecipients, subject, autoSent: true });
+    await sendEmail({ ticketId, to: recipientEmail, cc: finalCc, subject, bodyHtml: html, saveAsMessage: true, inReplyToGraphMessageId, conversationId: outlookConversationId });
+    await logEvent(ticketId, 'EMAIL_SENT', 'AI', { to: recipientEmail, cc: finalCc, subject, autoSent: true });
   } else {
     await prisma.aiEmailDraft.create({
-      data: { ticketId, recipientEmail, ccRecipients, subject, proposedContent: html, inReplyToGraphMessageId, outlookConversationId },
+      data: { ticketId, recipientEmail, ccRecipients: finalCc, subject, proposedContent: html, inReplyToGraphMessageId, outlookConversationId },
     });
     await logEvent(ticketId, 'AI_DRAFT_GENERATED', 'AI', { type: draftType });
   }

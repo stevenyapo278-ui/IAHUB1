@@ -8,6 +8,7 @@ const { logEvent } = require('./ticketEvent');
 const { generateEmailSummary } = require('./emailSummaryGenerator');
 const { indexTicketMessage } = require('./emailRagService');
 const { resolveTemplate } = require('./emailTemplates');
+const { resolveAiReplyCc } = require('./aiReplyCc');
 
 const LOGO_CONTENT_ID = 'logo-signature';
 
@@ -432,6 +433,17 @@ function buildStyledTable(rows) {
 </table>`;
 }
 
+// Échappe le HTML des valeurs injectées dans un gabarit (titres de ticket,
+// catégories… peuvent contenir « < », « & » saisis par les utilisateurs).
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function buildActionLink(url, label) {
   return `<p style="margin:20px 0"><a href="${url}" style="background:#2563eb;color:#ffffff;padding:10px 20px;text-decoration:none;display:inline-block;border-radius:8px;font-weight:bold;font-size:14px;font-family:sans-serif">${label}</a></p>`;
 }
@@ -578,7 +590,17 @@ async function sendAcknowledgement({ ticketId, glpiTicketId, toEmail, toName, or
       ackTo.push(addr);
     }
   }
-  return sendEmail({ ticketId, to: ackTo, cc, subject, bodyHtml, saveAsMessage: true, inReplyToGraphMessageId, conversationId, inReplyTo });
+  // Copies (CC) configurables (Paramètres > Avancé) : toggle dédié pour l'accusé,
+  // souvent on ne veut prévenir les autres qu'à partir de la vraie réponse IA.
+  let finalCc = cc;
+  if (ticketId) {
+    try {
+      finalCc = await resolveAiReplyCc({ ticketId, toEmail, existingCc: cc, channel: 'ACK' });
+    } catch (err) {
+      console.error(`[emailSender] Échec résolution CC IA (ticket ${ticketId}):`, err.message);
+    }
+  }
+  return sendEmail({ ticketId, to: ackTo, cc: finalCc, subject, bodyHtml, saveAsMessage: true, inReplyToGraphMessageId, conversationId, inReplyTo });
 }
 
 // ── Template : Relance demandeur ─────────────────────────────────────────────
@@ -829,6 +851,69 @@ async function sendTechnicianReminderEmail({ ticketId, ticketTitle, priority, ca
   const bodyHtml = buildTechnicianReminderHtml({ technicianName, ticketId, ticketTitle, priority, category, teamName, hoursWaiting, criteriaLabels: criteriaLabels || [], signature, ticketLink });
 
   return sendEmail({ ticketId, to, subject, bodyHtml, saveAsMessage: false });
+}
+
+// ── Template : Récapitulatif des rappels techniciens (mode « tableau ») ──────
+// Mode DIGEST (Paramètres > Automatisation > Rappels techniciens) : UN SEUL
+// email par destinataire, avec un tableau regroupant TOUS ses tickets ouverts
+// dépassant le délai — au lieu d'un email par ticket qui noie la boîte.
+function buildTechnicianReminderDigestHtml({ recipientName, rows, delayHours, signature }) {
+  const tableRows = rows.map((r, i) => {
+    const bg = i % 2 === 1 ? 'background:#f9fafb;' : '';
+    const priorityColor = buildPriorityColor(r.priority);
+    const priorityLabel = buildPriorityLabel(r.priority);
+    const motive = (r.criteriaLabels || []).join(', ') || '—';
+    const teamOrCategory = r.teamName || r.category || '—';
+    return `<tr style="${bg}">
+      <td style="padding:8px 10px;border-top:1px solid #e5e7eb;white-space:nowrap"><a href="${r.ticketLink}" style="color:#2563eb;font-weight:600;text-decoration:none">#${r.ticketId}</a></td>
+      <td style="padding:8px 10px;border-top:1px solid #e5e7eb;color:#1f2937">${escapeHtml(r.ticketTitle || '')}</td>
+      <td style="padding:8px 10px;border-top:1px solid #e5e7eb;white-space:nowrap;color:${priorityColor};font-weight:600">${priorityLabel}</td>
+      <td style="padding:8px 10px;border-top:1px solid #e5e7eb;color:#4b5563">${escapeHtml(teamOrCategory)}</td>
+      <td style="padding:8px 10px;border-top:1px solid #e5e7eb;color:#4b5563">${escapeHtml(motive)}</td>
+      <td style="padding:8px 10px;border-top:1px solid #e5e7eb;text-align:right;white-space:nowrap;color:#1f2937;font-weight:600">${r.hoursWaiting} h</td>
+    </tr>`;
+  }).join('\n');
+
+  return buildEmailLayout({
+    headerTitle: 'Rappel — tickets ouverts sans prise en charge',
+    headerSubtitle: `${rows.length} ticket${rows.length > 1 ? 's' : ''} vous concernant`,
+    signature,
+    children: `
+<p style="margin:0 0 12px">Bonjour ${recipientName || ''},</p>
+<p style="margin:0 0 12px">Les tickets suivants sont restés ouverts <strong>plus de ${delayHours} h</strong> sans prise en charge :</p>
+<table style="border-collapse:collapse;margin:16px 0;width:100%;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;font-size:13px;font-family:sans-serif">
+  <thead>
+    <tr style="background:#2563eb;color:#ffffff;text-align:left">
+      <th style="padding:8px 10px">Ticket</th>
+      <th style="padding:8px 10px">Sujet</th>
+      <th style="padding:8px 10px">Priorité</th>
+      <th style="padding:8px 10px">Équipe / catégorie</th>
+      <th style="padding:8px 10px">Motif</th>
+      <th style="padding:8px 10px;text-align:right">Attente</th>
+    </tr>
+  </thead>
+  <tbody>
+${tableRows}
+  </tbody>
+</table>
+<p style="margin:0 0 12px;color:#6b7280;font-size:12px">Dès qu'un ticket avance (prise en charge, suivi, réponse sortante), il disparaît de ce récapitulatif.</p>`,
+  });
+}
+
+// Envoie le récapitulatif (mode DIGEST) à UN destinataire pour N tickets.
+async function sendTechnicianReminderDigestEmail({ to, recipientName, tickets, delayHours }) {
+  const settings = await getSystemSettings();
+  // Double garde avec le scheduler : si l'admin coupe le réglage entre deux passes,
+  // le dernier envoi ne part pas.
+  if (!settings.techReminderEnabled) return null;
+  const count = tickets.length;
+  const subject = `[Rappel] ${count} ticket${count > 1 ? 's' : ''} ouvert${count > 1 ? 's' : ''} sans prise en charge`;
+  const signature = await getEmailSignature();
+  const frontendUrl = resolveFrontendUrl(settings);
+  const rows = tickets.map((t) => ({ ...t, ticketLink: `${frontendUrl}/tickets/${t.ticketId}` }));
+  const bodyHtml = buildTechnicianReminderDigestHtml({ recipientName, rows, delayHours, signature });
+
+  return sendEmail({ to, subject, bodyHtml, saveAsMessage: false });
 }
 
 // ── Template : Dépassement d'échéance manuelle ───────────────────────────────
@@ -1600,6 +1685,7 @@ module.exports = {
   sendHotlineApprovalReminderEmail,
   sendSlaBreachEmail,
   sendTechnicianReminderEmail,
+  sendTechnicianReminderDigestEmail,
   sendDueDateEmail,
   sendEscalationEmail,
   sendRequesterEscalationEmail,
@@ -1617,6 +1703,7 @@ module.exports = {
   buildAssignmentNotificationHtml,
   buildSlaBreachHtml,
   buildTechnicianReminderHtml,
+  buildTechnicianReminderDigestHtml,
   buildDueDateHtml,
   buildStatusChangeHtml,
   buildEscalationEmailHtml,

@@ -389,6 +389,18 @@ export default function TicketDetail() {
     [ticket, events]
   );
 
+  // Événement de clôture (le plus récent) : qui a fermé le ticket, quand, et pourquoi.
+  // Priorité : STATUS_CHANGED → CLOSED (action humaine) > REJECTED (rejet Hotline) > CLOSED_AUTO.
+  const closingEvent = useMemo(() => {
+    if (ticket?.status !== 'CLOSED') return null;
+    const isClosing = (e) =>
+      (e.type === 'STATUS_CHANGED' && (e.payload?.to === 'CLOSED' || e.payload?.toLabel === 'Fermé'))
+      || e.type === 'CLOSED_AUTO'
+      || e.type === 'REJECTED';
+    // events est trié du plus récent au plus ancien (API orderBy desc)
+    return events.find(isClosing) || null;
+  }, [events, ticket?.status]);
+
   const toggleEmailExpanded = (id) => setExpandedEmails((prev) => {
     const next = new Set(prev);
     if (next.has(id)) next.delete(id); else next.add(id);
@@ -2172,6 +2184,33 @@ export default function TicketDetail() {
         </div>
       )}
 
+      {/* Bannière de clôture — visible en haut de fiche : qui a fermé, quand, pourquoi */}
+      {ticket.status === 'CLOSED' && (
+        <div className="border border-slate-400/40 bg-slate-500/10 rounded-xl p-4 flex items-start gap-3 text-slate-700 dark:text-slate-300">
+          <CheckCircle2 className="w-5 h-5 shrink-0 mt-0.5 text-slate-600 dark:text-slate-400" />
+          <div className="flex-1 min-w-0">
+            <h4 className="text-xs font-bold uppercase tracking-wider">Ticket fermé</h4>
+            <p className="text-xs mt-1">
+              {closingEvent?.type === 'CLOSED_AUTO'
+                ? <>Fermé <strong>automatiquement</strong> par le système</>
+                : closingEvent?.actorName
+                  ? <>Fermé par <strong>{closingEvent.actorName}</strong></>
+                  : <>Fermé</>}
+              {ticket.closedAt && <> le <strong>{new Date(ticket.closedAt).toLocaleString('fr-FR')}</strong></>}
+              {closingEvent?.type === 'CLOSED_AUTO' && closingEvent.payload?.reason === 'solved_auto_close' && (
+                <span className="text-slate-500 dark:text-slate-400"> — ticket résolu depuis {closingEvent.payload?.daysSinceSolved ?? '?'} jours, sans réponse du demandeur</span>
+              )}
+              {closingEvent?.type === 'CLOSED_AUTO' && closingEvent.payload?.reason === 'no_response' && (
+                <span className="text-slate-500 dark:text-slate-400"> — sans réponse du demandeur depuis {closingEvent.payload?.daysSinceLastReply ?? '?'} jours</span>
+              )}
+              {closingEvent?.type === 'REJECTED' && closingEvent.payload?.reason && (
+                <span className="text-slate-500 dark:text-slate-400"> — rejet de la Hotline : {closingEvent.payload.reason}</span>
+              )}
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Command Center Layout (Katalyst style) */}
       <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_340px] gap-5 min-w-0">
         {/* ── LEFT COLUMN: Properties & Metadata ────────────────────────── */}
@@ -3147,6 +3186,9 @@ export default function TicketDetail() {
                   disabled={(!canAssign && !isTeamTicket) || savingField === 'status' || isTechnicianClosedTicket}
                   onChange={(e) => updateField('status', e.target.value)}
                 >
+                  {/* Affiche « Fermé » si le ticket l'est déjà — CLOSED n'est jamais un choix
+                      manuel (MANUAL_STATUS_OPTIONS) : la fermeture passe par le bouton dédié. */}
+                  {ticket.status === 'CLOSED' && <option value="CLOSED">Fermé</option>}
                   {MANUAL_STATUS_OPTIONS.map((s) => (
                     <option key={s} value={s}>{STATUS_LABELS[s]}</option>
                   ))}

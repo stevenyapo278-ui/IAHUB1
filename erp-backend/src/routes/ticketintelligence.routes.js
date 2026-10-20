@@ -14,13 +14,21 @@ const router = express.Router();
 router.use(authenticate);
 
 // Un demandeur n'accède qu'aux messages/événements/assistance de ses propres tickets (404 = masque l'existence)
+// Miroir de GET /tickets/:id : demandeur principal, secondaire, listes requesterIds et observateurs.
 async function assertRequesterOwnsTicket(user, ticketId) {
   if (user.role !== 'REQUESTER') return true;
   const ticket = await prisma.ticket.findFirst({
-    where: { id: Number(ticketId), requesterId: user.sub },
-    select: { id: true },
+    where: { id: Number(ticketId) },
+    select: {
+      requesterId: true, secondaryRequesterId: true, requesterIds: true,
+      observers: { select: { id: true } },
+    },
   });
-  return !!ticket;
+  if (!ticket) return false;
+  return ticket.requesterId === user.sub
+    || ticket.secondaryRequesterId === user.sub
+    || (ticket.requesterIds || []).includes(user.sub)
+    || ticket.observers?.some(o => o.id === user.sub);
 }
 
 // Historique complet des messages d'un ticket
@@ -35,7 +43,8 @@ router.get('/tickets/:id/messages', async (req, res) => {
   res.json(messages);
 });
 
-// Journal d'audit d'un ticket
+// Journal d'audit d'un ticket — enrichi avec le nom complet de l'auteur (actor = email
+// pour les actions humaines) afin que l'affichage soit lisible pour des non-techniciens.
 router.get('/tickets/:id/events', async (req, res) => {
   if (!(await assertRequesterOwnsTicket(req.user, req.params.id))) {
     return res.status(404).json({ error: 'Ticket introuvable' });
@@ -44,6 +53,28 @@ router.get('/tickets/:id/events', async (req, res) => {
     where: { ticketId: Number(req.params.id) },
     orderBy: { createdAt: 'desc' },
   });
+
+  // Résolution des noms : actor contient l'email de l'auteur (ou 'SYSTEM').
+  try {
+    const emails = [...new Set(events
+      .map(e => e.actor)
+      .filter(a => a && a !== 'SYSTEM' && a.includes('@')))];
+    if (emails.length) {
+      const users = await prisma.user.findMany({
+        where: { email: { in: emails } },
+        select: { email: true, fullName: true },
+      });
+      const nameByEmail = new Map(users.map(u => [u.email, u.fullName || u.email]));
+      for (const e of events) {
+        if (e.actor && e.actor !== 'SYSTEM' && e.actor.includes('@')) {
+          e.actorName = nameByEmail.get(e.actor) || null;
+        }
+      }
+    }
+  } catch (err) {
+    console.error('[ticketintelligence] Résolution noms acteurs impossible:', err.message);
+  }
+
   res.json(events);
 });
 
@@ -121,18 +152,17 @@ router.post('/reminders/run', requirePermission('automation.manage', ['ADMIN']),
 // qu'il a précédemment désactivée, au lieu d'en recréer une nouvelle qui écraserait ses délais personnalisés.
 router.get('/reminders/config', requirePermission('automation.manage', ['ADMIN']), async (req, res) => {
   const config = await prisma.reminderConfig.findFirst();
-  res.json(config || { autoCloseDays: 15, isActive: true });
+  res.json(config || { firstReminderDays: 2, secondReminderDays: 5, isActive: true });
 });
 
 router.put('/reminders/config', requirePermission('automation.manage', ['ADMIN']), async (req, res) => {
-  const { autoCloseDays, firstReminderDays, secondReminderDays, preCloseDays, isActive } = req.body;
+  const { firstReminderDays, secondReminderDays, isActive } = req.body;
   const existing = await prisma.reminderConfig.findFirst();
-  const data = { autoCloseDays };
-  // Délais optionnels des relances (J+2 / J+5 / pré-clôture par défaut) — ignorés silencieusement
-  // avant, ce qui empêchait toute personnalisation depuis les Paramètres.
+  const data = {};
+  // Délais optionnels des relances (J+2 / J+5 par défaut) — le scheduler ne ferme plus
+  // les tickets sans réponse : la seule clôture auto est SOLVED → CLOSED.
   if (firstReminderDays !== undefined) data.firstReminderDays = firstReminderDays;
   if (secondReminderDays !== undefined) data.secondReminderDays = secondReminderDays;
-  if (preCloseDays !== undefined) data.preCloseDays = preCloseDays;
   if (isActive !== undefined) data.isActive = isActive;
   const config = existing
     ? await prisma.reminderConfig.update({ where: { id: existing.id }, data })

@@ -16,7 +16,6 @@ jest.mock('../prismaClient', () => ({
 }));
 jest.mock('../utils/socket', () => ({ getIO: (...args) => mockGetIO(...args) }));
 jest.mock('./emailSender', () => ({ sendReminder: jest.fn() }));
-jest.mock('./ticketEvent', () => ({ logEvent: jest.fn() }));
 jest.mock('./approvalReminderScheduler', () => ({ processApprovalReminders: jest.fn().mockResolvedValue(undefined) }));
 
 const { runReminderScheduler } = require('./reminderScheduler');
@@ -45,7 +44,7 @@ describe('runReminderScheduler — respect du réglage isActive', () => {
   });
 
   it("ne traite aucun ticket si une config existe et a été explicitement désactivée (isActive=false)", async () => {
-    mockFindFirst.mockResolvedValue({ isActive: false, firstReminderDays: 2, secondReminderDays: 5, preCloseDays: 10, autoCloseDays: 15 });
+    mockFindFirst.mockResolvedValue({ isActive: false, firstReminderDays: 2, secondReminderDays: 5 });
     const results = await runReminderScheduler();
     expect(results).toEqual([]);
     expect(mockFindMany).not.toHaveBeenCalled();
@@ -59,7 +58,7 @@ describe('runReminderScheduler — respect du réglage isActive', () => {
   });
 
   it('traite les tickets si la config existe et est active', async () => {
-    mockFindFirst.mockResolvedValue({ isActive: true, firstReminderDays: 2, secondReminderDays: 5, preCloseDays: 10, autoCloseDays: 15 });
+    mockFindFirst.mockResolvedValue({ isActive: true, firstReminderDays: 2, secondReminderDays: 5 });
     mockFindMany.mockResolvedValue([]);
     await runReminderScheduler();
     expect(mockFindMany).toHaveBeenCalled();
@@ -67,7 +66,7 @@ describe('runReminderScheduler — respect du réglage isActive', () => {
 });
 
 describe('runReminderScheduler — création des brouillons de relance (Centre de Validation)', () => {
-  const activeConfig = { isActive: true, firstReminderDays: 2, secondReminderDays: 5, preCloseDays: 10, autoCloseDays: 15 };
+  const activeConfig = { isActive: true, firstReminderDays: 2, secondReminderDays: 5 };
 
   beforeEach(() => {
     mockFindFirst.mockReset();
@@ -89,21 +88,15 @@ describe('runReminderScheduler — création des brouillons de relance (Centre d
     expect(mockTicketUpdate).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 101 }, data: expect.objectContaining({ reminderCount: 1 }) }));
   });
 
-  it('crée un brouillon pré-clôture au-delà du délai preCloseDays', async () => {
+  it('ne clôture JAMAIS un ticket sans réponse — la seule fermeture auto est SOLVED → CLOSED', async () => {
     mockFindFirst.mockResolvedValue(activeConfig);
-    mockFindMany.mockResolvedValue([makeTicket({ lastUserReplyAt: new Date(Date.now() - 11 * 24 * 60 * 60 * 1000) })]);
-    const results = await runReminderScheduler();
-    expect(mockDraftCreate).toHaveBeenCalledTimes(1);
-    expect(mockDraftCreate.mock.calls[0][0].data.proposedContent).toContain('automatiquement clôturé');
-    expect(results).toEqual([{ ticketId: 101, action: 'REMINDER_PRE_CLOSE' }]);
-  });
-
-  it('clôture automatiquement au-delà de autoCloseDays sans créer de brouillon', async () => {
-    mockFindFirst.mockResolvedValue(activeConfig);
+    // Ticket à J+16 : aurait été fermé avant ; désormais il reçoit la 2ème relance (plafond)
     mockFindMany.mockResolvedValue([makeTicket({ lastUserReplyAt: new Date(Date.now() - 16 * 24 * 60 * 60 * 1000) })]);
     const results = await runReminderScheduler();
-    expect(mockDraftCreate).not.toHaveBeenCalled();
-    expect(results).toEqual([{ ticketId: 101, action: 'AUTO_CLOSED' }]);
+    expect(mockTicketUpdate).not.toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: 'CLOSED' }),
+    }));
+    expect(results).toEqual([{ ticketId: 101, action: 'REMINDER_2' }]);
   });
 
   it('ne crée PAS de doublon si un brouillon de relance est déjà en attente', async () => {
@@ -117,9 +110,9 @@ describe('runReminderScheduler — création des brouillons de relance (Centre d
     expect(results).toEqual([{ ticketId: 101, action: 'REMINDER_1' }]);
   });
 
-  it('ne relance plus au-delà de reminderCount=3 (brouillons empilés interdits)', async () => {
+  it('ne relance plus une fois le plafond reminderCount=2 atteint (brouillons empilés interdits)', async () => {
     mockFindFirst.mockResolvedValue(activeConfig);
-    mockFindMany.mockResolvedValue([makeTicket({ lastUserReplyAt: new Date(Date.now() - 6 * 24 * 60 * 60 * 1000), reminderCount: 3 })]);
+    mockFindMany.mockResolvedValue([makeTicket({ lastUserReplyAt: new Date(Date.now() - 6 * 24 * 60 * 60 * 1000), reminderCount: 2 })]);
     const results = await runReminderScheduler();
     expect(mockDraftCreate).not.toHaveBeenCalled();
     expect(results).toEqual([]);
@@ -135,7 +128,7 @@ describe('runReminderScheduler — création des brouillons de relance (Centre d
 });
 
 describe('runReminderScheduler — notification temps réel du Centre de Validation', () => {
-  const activeConfig = { isActive: true, firstReminderDays: 2, secondReminderDays: 5, preCloseDays: 10, autoCloseDays: 15 };
+  const activeConfig = { isActive: true, firstReminderDays: 2, secondReminderDays: 5 };
 
   beforeEach(() => {
     mockFindFirst.mockReset();
