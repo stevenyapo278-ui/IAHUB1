@@ -399,6 +399,43 @@ router.get('/:id/requesters', async (req, res) => {
   res.json({ location, requesters: links });
 });
 
+// Détail d'un lieu (fiche d'info ouverte depuis la vue Tickets en cliquant sur
+// le nom du lieu). Placée APRÈS toutes les routes littérales à un segment
+// (/export, /tags, /counts, /potential-requesters, /requesters) : sinon :id
+// les masquerait (Express matche dans l'ordre de déclaration).
+router.get('/:id', async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Identifiant invalide' });
+
+  const location = await prisma.location.findUnique({
+    where: { id },
+    include: { _count: { select: { requesterLinks: true, assets: true } } },
+  });
+  if (!location) return res.status(404).json({ error: 'Lieu introuvable' });
+
+  // Compteurs de tickets — même périmètre que la vue Tickets (corbeille exclue,
+  // approbations PENDING/REJECTED exclues par défaut via applyDefaultApprovalExclusion).
+  const grouped = await prisma.ticket.groupBy({
+    by: ['status'],
+    where: applyDefaultApprovalExclusion({ deletedAt: null, locationId: id }),
+    _count: true,
+  });
+  let ticketCount = 0;
+  let openTicketCount = 0;
+  for (const row of grouped) {
+    ticketCount += row._count;
+    if (!['SOLVED', 'CLOSED'].includes(row.status)) openTicketCount += row._count;
+  }
+
+  res.json({
+    ...location,
+    ticketCount,
+    openTicketCount,
+    requesterCount: location._count?.requesterLinks ?? 0,
+    assetCount: location._count?.assets ?? 0,
+  });
+});
+
 // Associer manuellement un ou plusieurs expéditeurs à un lieu
 router.post(
   '/requesters',

@@ -75,6 +75,8 @@ import ImageAttachmentsEditor from '../components/ImageAttachmentsEditor';
 import { clipboardImageFiles, imageItemsFromFiles, revokeImageItems } from '../utils/imageAttachments';
 import DataGrid from '../components/DataGrid';
 import TicketFilterBar from '../components/TicketFilterBar';
+import UserProfileModal from '../components/UserProfileModal';
+import LocationInfoModal from '../components/LocationInfoModal';
 import {
   STATUS_OPTIONS, MANUAL_STATUS_OPTIONS, STATUS_LABELS, PRIORITY_OPTIONS, TYPE_OPTIONS, SOURCE_OPTIONS, URGENCY_IMPACT_OPTIONS,
   STATUS_CONFIG, ORIGIN_CONFIG,
@@ -172,7 +174,8 @@ function Avatar({ user, name, colorClass = 'bg-blue-500/15 text-blue-600 dark:te
 }
 
 // Carte ticket réutilisée par la vue Grille et par la variante mobile de la vue Table
-function TicketCard({ t, query, onClick, onDoubleClick }) {
+function TicketCard({ t, query, onClick, onDoubleClick, onOpenUser, onOpenLocation }) {
+  const stopCell = (e) => e.stopPropagation();
   return (
     <motion.div initial={false} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
       onClick={onClick}
@@ -200,13 +203,39 @@ function TicketCard({ t, query, onClick, onDoubleClick }) {
         )}
       </div>
       <div className="flex items-center justify-between gap-2 mt-auto">
-        <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-          {t.locationName && <><MapPin className="w-3 h-3 shrink-0" /><span className="truncate max-w-[100px]">{t.locationName}</span></>}
+        <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground min-w-0">
+          {t.locationName && (t.locationId && onOpenLocation ? (
+            <button
+              type="button"
+              onClick={(e) => { stopCell(e); onOpenLocation({ id: t.locationId, name: t.locationName }); }}
+              title="Voir la fiche du lieu"
+              className="flex items-center gap-1 min-w-0 cursor-pointer rounded hover:text-amber-600 dark:hover:text-amber-400 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+            >
+              <MapPin className="w-3 h-3 shrink-0" />
+              <span className="truncate max-w-[100px]">{t.locationName}</span>
+            </button>
+          ) : (
+            <><MapPin className="w-3 h-3 shrink-0" /><span className="truncate max-w-[100px]">{t.locationName}</span></>
+          ))}
         </div>
         {t.assignedTo ? (
-          <div className="flex items-center gap-1.5">
-            <Avatar user={t.assignedTo} name={t.assignedTo.fullName} />
-            <span className="text-[11px] font-medium text-foreground truncate max-w-[80px]">{t.assignedTo.fullName}</span>
+          <div className="flex items-center gap-1.5 min-w-0">
+            {t.assignedTo.id && onOpenUser ? (
+              <button
+                type="button"
+                onClick={(e) => { stopCell(e); onOpenUser(t.assignedTo); }}
+                title={`Voir le profil de ${t.assignedTo.fullName}`}
+                className="flex items-center gap-1.5 min-w-0 cursor-pointer rounded hover:text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+              >
+                <Avatar user={t.assignedTo} name={t.assignedTo.fullName} />
+                <span className="text-[11px] font-medium text-foreground truncate max-w-[80px] hover:underline">{t.assignedTo.fullName}</span>
+              </button>
+            ) : (
+              <>
+                <Avatar user={t.assignedTo} name={t.assignedTo.fullName} />
+                <span className="text-[11px] font-medium text-foreground truncate max-w-[80px]">{t.assignedTo.fullName}</span>
+              </>
+            )}
           </div>
         ) : (
           <span className="text-[10px] text-muted-foreground/60 italic">Non assigné</span>
@@ -297,7 +326,21 @@ function TicketInfoRenderer({ data, context }) {
       {(data.category || data.locationName) && (
         <div className="flex items-center gap-2 mt-0.5 text-[11px] text-on-surface-variant font-medium min-w-0 w-full overflow-hidden truncate">
           {data.category && <span className="truncate max-w-[140px]">{data.category}</span>}
-          {data.locationName && (
+          {data.locationName && data.locationId && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                context?.openLocationInfo?.({ id: data.locationId, name: data.locationName });
+              }}
+              title="Voir la fiche du lieu"
+              className="flex items-center gap-0.5 truncate max-w-[140px] cursor-pointer rounded hover:text-amber-600 dark:hover:text-amber-400 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+            >
+              <MapPin className="w-3 h-3 shrink-0 text-amber-500/70" />
+              {data.locationName}
+            </button>
+          )}
+          {data.locationName && !data.locationId && (
             <span className="flex items-center gap-0.5 truncate max-w-[140px]">
               <MapPin className="w-3 h-3 shrink-0 text-amber-500/70" />
               {data.locationName}
@@ -361,7 +404,14 @@ function StatusRenderer({ data, context }) {
   return <StatusPill status={data.status} />;
 }
 
-function AssigneeRenderer({ data }) {
+// Ouvre la fiche profil au clic sur un nom — stopPropagation + élément <button>
+// pour que le clic soit ignoré par le handler de sélection/ligne de DataGrid.
+function openUserProfileCell(context, user, e) {
+  e?.stopPropagation?.();
+  if (user?.id) context?.openUserProfile?.(user);
+}
+
+function AssigneeRenderer({ data, context }) {
   if (!data) return null;
   const assignees = (data.assignees && data.assignees.length > 0) ? data.assignees : (data.assignedTo ? [data.assignedTo] : []);
   if (assignees.length === 0) return <span className="text-sm text-muted-foreground/60 italic">Non assigné</span>;
@@ -369,8 +419,17 @@ function AssigneeRenderer({ data }) {
     const assignee = assignees[0];
     return (
       <div className="flex h-full items-center gap-2.5">
-        <Avatar user={assignee} name={assignee.fullName} />
-        <span className="text-sm font-medium text-foreground truncate">{assignee.fullName}</span>
+        <button
+          type="button"
+          onClick={(e) => openUserProfileCell(context, assignee, e)}
+          title={`Voir le profil de ${assignee.fullName}`}
+          className="flex items-center gap-2.5 min-w-0 text-left cursor-pointer rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+        >
+          <Avatar user={assignee} name={assignee.fullName} />
+          <span className="text-sm font-medium text-foreground truncate hover:text-primary hover:underline">
+            {assignee.fullName}
+          </span>
+        </button>
       </div>
     );
   }
@@ -378,63 +437,138 @@ function AssigneeRenderer({ data }) {
     <div className="flex h-full items-center gap-1.5">
       <div className="flex -space-x-1.5 overflow-hidden">
         {assignees.slice(0, 3).map((a) => (
-          <Avatar key={a.id} user={a} name={a.fullName} />
+          <button
+            key={a.id}
+            type="button"
+            onClick={(e) => openUserProfileCell(context, a, e)}
+            title={`Voir le profil de ${a.fullName}`}
+            className="rounded-full cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+          >
+            <Avatar user={a} name={a.fullName} />
+          </button>
         ))}
       </div>
       <span className="text-xs font-semibold text-foreground truncate">
-        {assignees.map((a) => a.fullName.split(' ')[0]).join(', ')}
+        {assignees.map((a, i) => (
+          <button
+            key={a.id}
+            type="button"
+            onClick={(e) => openUserProfileCell(context, a, e)}
+            title={`Voir le profil de ${a.fullName}`}
+            className="cursor-pointer hover:text-primary hover:underline rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+          >
+            {i > 0 && ', '}{a.fullName.split(' ')[0]}
+          </button>
+        ))}
       </span>
     </div>
   );
 }
 
-function RequesterRenderer({ data }) {
+function RequesterRenderer({ data, context }) {
   if (!data) return null;
   const reqName = data.requester?.fullName || data.sourceName || data.sourceEmail;
   // Afficher les demandeurs depuis requesterIds si disponible, sinon fallback sur secondaryRequester
   const allRequesterIds = data.requesterIds || [];
   const secondaryFromIds = allRequesterIds.length > 1;
-  if (!reqName && !secondaryFromIds && !data.secondaryRequester?.fullName) return <span className="text-sm text-muted-foreground/60 italic">—</span>;
+  const secondaryName = data.secondaryRequester?.fullName;
+  if (!reqName && !secondaryFromIds && !secondaryName) return <span className="text-sm text-muted-foreground/60 italic">—</span>;
+
+  const avatar = (
+    <Avatar user={data.requester} name={reqName} colorClass="bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20" />
+  );
+  const nameCls = 'text-sm truncate';
+
   return (
     <div className="flex h-full items-center gap-2 font-medium text-foreground truncate">
-      <Avatar user={data.requester} name={reqName} colorClass="bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20" />
-      <span className="text-sm truncate">{reqName}</span>
+      {data.requester?.id ? (
+        <button
+          type="button"
+          onClick={(e) => openUserProfileCell(context, data.requester, e)}
+          title={`Voir le profil de ${reqName}`}
+          className="flex items-center gap-2 min-w-0 cursor-pointer rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+        >
+          {avatar}
+          <span className={`${nameCls} hover:text-primary hover:underline`}>{reqName}</span>
+        </button>
+      ) : (
+        <>
+          {avatar}
+          <span className={nameCls}>{reqName}</span>
+        </>
+      )}
       {secondaryFromIds && (
         <span className="text-xs text-emerald-600 dark:text-emerald-400 font-semibold truncate" title={`${allRequesterIds.length - 1} autre(s) demandeur(s)`}>
           + {allRequesterIds.length - 1}
         </span>
       )}
-      {!secondaryFromIds && data.secondaryRequester?.fullName && (
-        <span className="text-xs text-emerald-600 dark:text-emerald-400 font-semibold truncate" title={`2nd demandeur: ${data.secondaryRequester.fullName}`}>
-          + {data.secondaryRequester.fullName}
-        </span>
+      {!secondaryFromIds && secondaryName && (
+        data.secondaryRequester?.id ? (
+          <button
+            type="button"
+            onClick={(e) => openUserProfileCell(context, data.secondaryRequester, e)}
+            title={`Voir le profil de ${secondaryName}`}
+            className="text-xs text-emerald-600 dark:text-emerald-400 font-semibold truncate cursor-pointer rounded hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+          >
+            + {secondaryName}
+          </button>
+        ) : (
+          <span className="text-xs text-emerald-600 dark:text-emerald-400 font-semibold truncate" title={`2nd demandeur: ${secondaryName}`}>
+            + {secondaryName}
+          </span>
+        )
       )}
     </div>
   );
 }
 
-function LocationRenderer({ data }) {
+function LocationRenderer({ data, context }) {
   if (!data) return null;
   if (!data.locationName) return <span className="text-sm text-muted-foreground/60 italic">—</span>;
+  // Sans locationId pas de fiche à ouvrir (libellé dénormalisé seul) : nom brut.
+  if (!data.locationId) {
+    return (
+      <div className="flex h-full items-center gap-2">
+        <MapPin className="w-3.5 h-3.5 shrink-0 text-amber-500/60" />
+        <span className="text-sm font-medium text-foreground truncate">{data.locationName}</span>
+      </div>
+    );
+  }
   return (
-    <div className="flex h-full items-center gap-2">
-      <MapPin className="w-3.5 h-3.5 shrink-0 text-amber-500/60" />
-      <span className="text-sm font-medium text-foreground truncate">{data.locationName}</span>
-    </div>
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        context?.openLocationInfo?.({ id: data.locationId, name: data.locationName });
+      }}
+      title="Voir la fiche du lieu"
+      className="group/loc flex h-full items-center gap-2 w-full min-w-0 text-left cursor-pointer rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+    >
+      <MapPin className="w-3.5 h-3.5 shrink-0 text-amber-500/60 group-hover/loc:text-amber-500" />
+      <span className="text-sm font-medium text-foreground truncate group-hover/loc:text-amber-600 dark:group-hover/loc:text-amber-400 group-hover/loc:underline">
+        {data.locationName}
+      </span>
+    </button>
   );
 }
 
-function ObserverRenderer({ data }) {
+function ObserverRenderer({ data, context }) {
   if (!data) return null;
   const observers = data.observers;
   if (!observers || observers.length === 0) return <span className="text-sm text-muted-foreground/60 italic">—</span>;
   return (
     <div className="flex h-full items-center gap-1.5 flex-wrap">
       {observers.slice(0, 2).map((o) => (
-        <span key={o.id} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-purple-500/10 text-purple-600 dark:text-purple-400 text-[10px] font-semibold">
+        <button
+          key={o.id}
+          type="button"
+          onClick={(e) => openUserProfileCell(context, o, e)}
+          title={`Voir le profil de ${o.fullName}`}
+          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-purple-500/10 text-purple-600 dark:text-purple-400 text-[10px] font-semibold cursor-pointer hover:bg-purple-500/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+        >
           <Eye className="w-3 h-3" />
           {o.fullName}
-        </span>
+        </button>
       ))}
       {observers.length > 2 && (
         <span className="text-[10px] text-muted-foreground font-medium">+{observers.length - 2}</span>
@@ -1166,6 +1300,10 @@ export default function Tickets() {
     if (ticket) setPreviewTicket(ticket);
   }
   const [exportModalOpen, setExportModalOpen] = useState(false);
+  // Fiches contextuelles ouvertes depuis les cellules de la grille :
+  // clic sur un nom (demandeur / technicien / observateur) ou sur le lieu.
+  const [profileUser, setProfileUser] = useState(null);
+  const [locationInfo, setLocationInfo] = useState(null);
   const [showTrash, setShowTrash] = useState(false);
   const [trashItems, setTrashItems] = useState([]);
   const [trashLoading, setTrashLoading] = useState(false);
@@ -2064,7 +2202,10 @@ export default function Tickets() {
     navigate,
     STATUS_OPTIONS: MANUAL_STATUS_OPTIONS,
     STATUS_LABELS,
-  }), [debouncedSearch, filterQs, user, canAssign, canDelete, handleQuickStatusChange, askDeleteOne, navigate]);
+    // Clic dans une cellule (nom / lieu) → fiche contextuelle (modal)
+    openUserProfile: setProfileUser,
+    openLocationInfo: setLocationInfo,
+  }), [debouncedSearch, filterQs, user, canAssign, canDelete, handleQuickStatusChange, askDeleteOne, navigate, setProfileUser, setLocationInfo]);
 
   const gridColumnDefs = useMemo(() => {
     const cols = [];
@@ -2674,7 +2815,9 @@ export default function Tickets() {
               {tickets.map((t) => (
                 <TicketCard key={t.id} t={t} query={debouncedSearch}
                   onClick={() => handleRowOpen(t.id)}
-                  onDoubleClick={() => handleRowPreview(t)} />
+                  onDoubleClick={() => handleRowPreview(t)}
+                  onOpenUser={setProfileUser}
+                  onOpenLocation={setLocationInfo} />
               ))}
             </AnimatePresence>
             {tickets.length === 0 && (
@@ -2689,7 +2832,9 @@ export default function Tickets() {
             {tickets.map((t) => (
               <TicketCard key={t.id} t={t} query={debouncedSearch}
                 onClick={() => handleRowOpen(t.id)}
-                onDoubleClick={() => handleRowPreview(t)} />
+                onDoubleClick={() => handleRowPreview(t)}
+                onOpenUser={setProfileUser}
+                onOpenLocation={setLocationInfo} />
             ))}
             {tickets.length === 0 && (
               <EmptyState icon="tickets" title="Aucun ticket trouvé" description="Modifie les filtres ou crée un nouveau ticket." />
@@ -3204,6 +3349,10 @@ export default function Tickets() {
         searchQuery={debouncedSearch}
         totalFiltered={totalCount}
       />
+
+      {/* ── FICHES CONTEXTUELLES (clic sur un nom ou sur le lieu) ─────────── */}
+      <UserProfileModal user={profileUser} onClose={() => setProfileUser(null)} />
+      <LocationInfoModal location={locationInfo} onClose={() => setLocationInfo(null)} />
 
       {/* ── CONFIRM REMOVE ATTACHMENT ───────────────────────────────────────── */}
       <ConfirmDialog

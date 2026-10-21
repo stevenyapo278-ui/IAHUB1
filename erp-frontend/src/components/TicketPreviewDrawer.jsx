@@ -250,9 +250,19 @@ export default function TicketPreviewDrawer({ open, ticket, filterQs = '', onClo
                     </span>
                     <span className="text-[10px] text-on-surface-variant shrink-0">{fmtDateTime(item.date)}</span>
                   </div>
-                  <p className="text-[12px] text-on-surface-variant leading-relaxed whitespace-pre-wrap break-words line-clamp-4">
-                    {stripHtml(item.data.content)}
-                  </p>
+                  {/* Suivis : le contenu peut contenir des <img> collées
+                      (/uploads/followup-images/…) — stripHtml les détruisait.
+                      HTML sanitisé avec images bornées, texte = résumé ligne. */}
+                  {/<img[^>]*>/i.test(item.data.content || '') ? (
+                    <div
+                      className="text-[12px] text-on-surface-variant leading-relaxed break-words max-h-44 overflow-y-auto [&_img]:max-w-full [&_img]:max-h-32 [&_img]:rounded-lg [&_img]:my-1 [&_p]:my-1"
+                      dangerouslySetInnerHTML={{ __html: sanitizeHtml(item.data.content) }}
+                    />
+                  ) : (
+                    <p className="text-[12px] text-on-surface-variant leading-relaxed whitespace-pre-wrap break-words line-clamp-4">
+                      {stripHtml(item.data.content)}
+                    </p>
+                  )}
                   {item.data.isPrivate && (
                     <span className="mt-1 inline-block text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-600">
                       Privé
