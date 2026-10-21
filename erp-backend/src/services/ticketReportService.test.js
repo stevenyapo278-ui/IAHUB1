@@ -263,6 +263,57 @@ describe('buildTicketsXlsxBuffer — fichier Excel généré', () => {
     expect(row[headers.indexOf('Catégorie') + 1]).toBe('Catégorie orpheline');
     expect(row[headers.indexOf('Sous-catégorie') + 1]).toBe('');
   });
+
+  it('une seule colonne « Technicien » quand un seul technicien (porteur seul)', async () => {
+    const buffer = await buildTicketsXlsxBuffer([buildTicket()]);
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(buffer);
+    const headers = workbook.getWorksheet('Tickets').getRow(1).values.slice(1);
+    expect(headers).toContain('Technicien');
+    expect(headers).not.toContain('Technicien 1');
+    expect(headers).not.toContain('Technicien 2');
+  });
+
+  it('découpe en Technicien 1..N quand plusieurs co-affectés (principal + m2m)', async () => {
+    const buffer = await buildTicketsXlsxBuffer([buildTicket({
+      assignees: [
+        { id: 1, email: 'tech@prosuma.ci', fullName: 'Tech Test', avatarUrl: null },
+        { id: 2, email: 'fatou@prosuma.ci', fullName: 'Fatou Co', avatarUrl: null },
+        { id: 3, email: 'ali@prosuma.ci', fullName: 'Ali Co', avatarUrl: null },
+      ],
+    })]);
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(buffer);
+    const sheet = workbook.getWorksheet('Tickets');
+    const headers = sheet.getRow(1).values.slice(1);
+    expect(headers).toContain('Technicien 1');
+    expect(headers).toContain('Technicien 2');
+    expect(headers).toContain('Technicien 3');
+    expect(headers).not.toContain('Technicien');
+
+    const row = sheet.getRow(2).values;
+    // Le porteur principal (assignedTo) est Technicien 1, les co-affectés à la suite
+    expect(row[headers.indexOf('Technicien 1') + 1]).toBe('Tech Test (tech@prosuma.ci)');
+    expect(row[headers.indexOf('Technicien 2') + 1]).toBe('Fatou Co (fatou@prosuma.ci)');
+    expect(row[headers.indexOf('Technicien 3') + 1]).toBe('Ali Co (ali@prosuma.ci)');
+  });
+
+  it('fusionne assignedTo absent + assignees m2m (pas de trou en Technicien 1)', async () => {
+    const buffer = await buildTicketsXlsxBuffer([buildTicket({
+      assignedTo: null,
+      assignees: [
+        { id: 5, email: 'a@prosuma.ci', fullName: 'A Co', avatarUrl: null },
+        { id: 6, email: 'b@prosuma.ci', fullName: 'B Co', avatarUrl: null },
+      ],
+    })]);
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(buffer);
+    const sheet = workbook.getWorksheet('Tickets');
+    const headers = sheet.getRow(1).values.slice(1);
+    const row = sheet.getRow(2).values;
+    expect(row[headers.indexOf('Technicien 1') + 1]).toBe('A Co (a@prosuma.ci)');
+    expect(row[headers.indexOf('Technicien 2') + 1]).toBe('B Co (b@prosuma.ci)');
+  });
 });
 
 describe('buildTicketsCsv — extraction CSV', () => {
@@ -290,6 +341,24 @@ describe('buildTicketsCsv — extraction CSV', () => {
     expect(line).not.toContain('OPEN');
     expect(line).not.toContain('INCIDENT');
     expect(line).not.toContain('NOT_REQUIRED');
+  });
+
+  it('génère technicien_1..N quand plusieurs techniciens, technicien simple sinon', async () => {
+    const single = await buildTicketsCsv([buildTicket()]);
+    expect(single.split('\n')[0]).toContain('technicien;');
+    expect(single.split('\n')[0]).not.toContain('technicien_1');
+
+    const multi = await buildTicketsCsv([buildTicket({
+      assignees: [
+        { id: 1, email: 'tech@prosuma.ci', fullName: 'Tech Test', avatarUrl: null },
+        { id: 2, email: 'fatou@prosuma.ci', fullName: 'Fatou Co', avatarUrl: null },
+      ],
+    })]);
+    const [header, line] = multi.split('\n');
+    expect(header).toContain('technicien_1');
+    expect(header).toContain('technicien_2');
+    expect(line).toContain('Tech Test (tech@prosuma.ci)');
+    expect(line).toContain('Fatou Co (fatou@prosuma.ci)');
   });
 });
 

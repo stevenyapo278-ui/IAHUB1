@@ -310,9 +310,50 @@ async function decorateCategoryPaths(tickets) {
   return tickets;
 }
 
+// ── Techniciens d'un ticket dans les extractions ─────────────────────────────
+// Un ticket peut avoir un porteur principal (assignedTo, FK legacy) ET plusieurs
+// co-affectés (assignees, m2m). On fusionne les deux (principal en 1er, dédoublonné
+// par id) pour produire des colonnes Technicien 1..N adaptées au lot exporté.
+function getTicketTechnicians(t) {
+  const list = [];
+  const seen = new Set();
+  const keysOf = (u) => {
+    const keys = [];
+    if (u.id != null) keys.push(`id:${u.id}`);
+    if (u.email) keys.push(`email:${String(u.email).toLowerCase()}`);
+    return keys;
+  };
+  const add = (u) => {
+    const keys = keysOf(u);
+    // Dédoublonnage : le porteur principal (assignedTo) est souvent présent
+    // dans assignees (rétro-compat m2m) — on compare par id OU email.
+    if (keys.some((k) => seen.has(k))) return false;
+    keys.forEach((k) => seen.add(k));
+    list.push(u);
+    return true;
+  };
+  if (t.assignedTo) add(t.assignedTo);
+  for (const a of t.assignees || []) {
+    if (a) add(a);
+  }
+  return list;
+}
+
+function formatTechnician(u) {
+  return u?.fullName ? `${u.fullName} (${u.email})` : (u?.email || '');
+}
+
+// Nombre max de techniciens sur le lot exporté (1 minimum → colonne simple)
+function maxTechnicianCount(tickets) {
+  let max = 0;
+  for (const t of tickets) max = Math.max(max, getTicketTechnicians(t).length);
+  return Math.max(max, 1);
+}
+
 // ── Génération XLSX (mêmes colonnes que l'export serveur) ────────────────────
 async function buildTicketsXlsxBuffer(tickets) {
   await decorateCategoryPaths(tickets);
+  const techCount = maxTechnicianCount(tickets);
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet('Tickets');
   sheet.columns = [
@@ -325,7 +366,11 @@ async function buildTicketsXlsxBuffer(tickets) {
     { header: 'Type', key: 'type', width: 12 },
     { header: 'Source', key: 'source', width: 12 },
     { header: 'Demandeur', key: 'requester', width: 28 },
-    { header: 'Technicien', key: 'technician', width: 28 },
+    ...Array.from({ length: techCount }, (_, i) => ({
+      header: techCount === 1 ? 'Technicien' : `Technicien ${i + 1}`,
+      key: `technician${i + 1}`,
+      width: 28,
+    })),
     { header: 'Équipe', key: 'team', width: 20 },
     { header: 'Lieu', key: 'location', width: 18 },
     { header: 'Créé le', key: 'createdAt', width: 18 },
@@ -348,7 +393,8 @@ async function buildTicketsXlsxBuffer(tickets) {
   sheet.autoFilter = { from: 'A1', to: `${sheet.getColumn(sheet.columns.length).letter}1` };
 
   for (const t of tickets) {
-    sheet.addRow({
+    const techs = getTicketTechnicians(t);
+    const row = {
       id: t.id,
       title: t.title,
       status: frLabel(EXPORT_STATUS_LABELS, t.status),
@@ -358,7 +404,6 @@ async function buildTicketsXlsxBuffer(tickets) {
       type: frLabel(EXPORT_TYPE_LABELS, t.type),
       source: frLabel(EXPORT_SOURCE_LABELS, t.source),
       requester: t.requester?.fullName ? `${t.requester.fullName} (${t.requester.email})` : (t.requester?.email || ''),
-      technician: t.assignedTo?.fullName ? `${t.assignedTo.fullName} (${t.assignedTo.email})` : (t.assignedTo?.email || ''),
       team: t.team?.name || '',
       location: t.locationName || '',
       createdAt: t.createdAt,
@@ -370,7 +415,11 @@ async function buildTicketsXlsxBuffer(tickets) {
       firstResponseAt: t.firstResponseAt,
       aiProcessed: t.aiProcessed ? 'oui' : 'non',
       approvalStatus: frLabel(EXPORT_APPROVAL_LABELS, t.approvalStatus),
-    });
+    };
+    for (let i = 0; i < techCount; i++) {
+      row[`technician${i + 1}`] = formatTechnician(techs[i]);
+    }
+    sheet.addRow(row);
   }
   const buffer = await workbook.xlsx.writeBuffer();
   return Buffer.from(buffer);
@@ -379,24 +428,33 @@ async function buildTicketsXlsxBuffer(tickets) {
 // ── Génération CSV (séparateur « ; », UTF-8 BOM, mêmes colonnes que le XLSX) ─
 async function buildTicketsCsv(tickets) {
   await decorateCategoryPaths(tickets);
+  const techCount = maxTechnicianCount(tickets);
+  const techHeaders = Array.from(
+    { length: techCount },
+    (_, i) => (techCount === 1 ? 'technicien' : `technicien_${i + 1}`),
+  );
   const header = [
     'id', 'titre', 'statut', 'priorite', 'categorie', 'sous_categorie', 'type', 'source',
-    'demandeur', 'technicien', 'equipe', 'lieu', 'cree_le', 'resolu_le', 'ferme_le',
+    'demandeur', ...techHeaders, 'equipe', 'lieu', 'cree_le', 'resolu_le', 'ferme_le',
     'sla_reponse_due', 'sla_resolution_due', 'sla_depasse_le', 'premiere_reponse', 'ia', 'approbation',
   ];
   const cell = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-  const rows = tickets.map((t) => [
-    t.id, cell(t.title), frLabel(EXPORT_STATUS_LABELS, t.status), t.priority,
-    cell(t.categoryRoot || t.category || ''), cell(t.categorySub || ''),
-    frLabel(EXPORT_TYPE_LABELS, t.type), cell(frLabel(EXPORT_SOURCE_LABELS, t.source)),
-    t.requester?.fullName ? `${t.requester.fullName} (${t.requester.email})` : (t.requester?.email || ''),
-    t.assignedTo?.fullName ? `${t.assignedTo.fullName} (${t.assignedTo.email})` : (t.assignedTo?.email || ''),
-    t.team?.name || '',
-    t.locationName || '', t.createdAt?.toISOString() || '', t.solvedAt?.toISOString() || '',
-    t.closedAt?.toISOString() || '', t.slaResponseDueAt?.toISOString() || '', t.slaResolutionDueAt?.toISOString() || '',
-    t.slaBreachedAt?.toISOString() || '', t.firstResponseAt?.toISOString() || '', t.aiProcessed ? 'oui' : 'non',
-    frLabel(EXPORT_APPROVAL_LABELS, t.approvalStatus),
-  ]);
+  const rows = tickets.map((t) => {
+    const techs = getTicketTechnicians(t);
+    const techCells = Array.from({ length: techCount }, (_, i) => cell(formatTechnician(techs[i])));
+    return [
+      t.id, cell(t.title), frLabel(EXPORT_STATUS_LABELS, t.status), t.priority,
+      cell(t.categoryRoot || t.category || ''), cell(t.categorySub || ''),
+      frLabel(EXPORT_TYPE_LABELS, t.type), cell(frLabel(EXPORT_SOURCE_LABELS, t.source)),
+      t.requester?.fullName ? `${t.requester.fullName} (${t.requester.email})` : (t.requester?.email || ''),
+      ...techCells,
+      t.team?.name || '',
+      t.locationName || '', t.createdAt?.toISOString() || '', t.solvedAt?.toISOString() || '',
+      t.closedAt?.toISOString() || '', t.slaResponseDueAt?.toISOString() || '', t.slaResolutionDueAt?.toISOString() || '',
+      t.slaBreachedAt?.toISOString() || '', t.firstResponseAt?.toISOString() || '', t.aiProcessed ? 'oui' : 'non',
+      frLabel(EXPORT_APPROVAL_LABELS, t.approvalStatus),
+    ];
+  });
   return [header.join(';'), ...rows.map((r) => r.join(';'))].join('\n');
 }
 
