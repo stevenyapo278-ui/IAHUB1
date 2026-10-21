@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import {
   Gauge, Timer, CheckCircle2, Star, Users, RefreshCw,
   TrendingUp, Clock, User, X, CalendarRange,
+  Search, Download, FileSpreadsheet, FileDown, Loader2,
 } from 'lucide-react';
 import {
   ResponsiveContainer, AreaChart, Area, BarChart, Bar,
@@ -110,6 +111,8 @@ export default function TechnicianStats() {
   const [technicians, setTechnicians] = useState([]);
   const [data, setData] = useState({ items: [], totals: null, trend: [] });
   const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
+  const [exporting, setExporting] = useState(null);
 
   const hasCustomDates = dateFrom && dateTo;
 
@@ -181,6 +184,18 @@ export default function TechnicianStats() {
   const items = data.items || [];
   const totals = data.totals || {};
 
+  // Recherche texte sur le tableau « Détail par membre » (nom, email, rôle, équipe)
+  const filteredItems = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return items;
+    return items.filter((t) => (
+      (t.fullName || '').toLowerCase().includes(q)
+      || (t.email || '').toLowerCase().includes(q)
+      || (t.teamName || '').toLowerCase().includes(q)
+      || (ROLE_STYLES[t.role]?.label || t.role || '').toLowerCase().includes(q)
+    ));
+  }, [items, search]);
+
   const periodLabel = useMemo(() => {
     if (data?.period) return `${fmtDate(data.period.since)} → ${fmtDate(data.period.until)}`;
     return activePeriod || 'Période personnalisée';
@@ -226,7 +241,65 @@ export default function TechnicianStats() {
     { label: 'CSAT moyen', value: fmtCsat(totals.csatAvg), icon: Star, color: 'text-amber-500' },
   ]).map((card) => ({ ...card, loading })), [isTechnicianOnly, items, totals, loading]);
 
-  const gridHeight = Math.min(Math.max(items.length, 3), 14) * ROW_HEIGHT + HEADER_HEIGHT;
+  const gridHeight = Math.min(Math.max(filteredItems.length, 3), 14) * ROW_HEIGHT + HEADER_HEIGHT;
+
+  // Extraction du tableau détaillé (membres filtrés par la recherche)
+  const EXPORT_COLUMNS = [
+    { header: 'Membre', get: (t) => t.fullName },
+    { header: 'Email', get: (t) => t.email || '' },
+    { header: 'Rôle', get: (t) => ROLE_STYLES[t.role]?.label || t.role || '' },
+    { header: 'Équipe', get: (t) => t.teamName || '' },
+    { header: 'Créés', get: (t) => t.created ?? 0 },
+    { header: 'Reçus', get: (t) => t.assigned ?? 0 },
+    { header: 'Ouverts', get: (t) => t.open ?? 0 },
+    { header: 'Résolus', get: (t) => t.resolved ?? 0 },
+    { header: 'Suivis', get: (t) => t.followups ?? 0 },
+    { header: 'Délai moyen (h)', get: (t) => t.avgResolutionHours ?? '' },
+    { header: '1ère réponse (h)', get: (t) => t.avgFirstResponseHours ?? '' },
+    { header: 'SLA respecté (%)', get: (t) => t.slaCompliancePct ?? '' },
+    { header: 'CSAT', get: (t) => t.csatAvg ?? '' },
+    { header: 'Temps (min)', get: (t) => t.loggedMinutes ?? 0 },
+  ];
+
+  async function exportTable(format) {
+    const rows = filteredItems;
+    if (rows.length === 0) {
+      toast.error('Aucune ligne à exporter');
+      return;
+    }
+    setExporting(format);
+    try {
+      const aoa = [
+        EXPORT_COLUMNS.map((c) => c.header),
+        ...rows.map((t) => EXPORT_COLUMNS.map((c) => c.get(t))),
+      ];
+      const baseName = `perf-membres_${new Date().toISOString().slice(0, 10)}`;
+      if (format === 'xlsx') {
+        const XLSX = await import('xlsx');
+        const ws = XLSX.utils.aoa_to_sheet(aoa);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'Performance membres');
+        XLSX.writeFile(wb, `${baseName}.xlsx`);
+      } else {
+        const csv = aoa.map((r) => r.map((v) => {
+          const s = String(v ?? '');
+          return /[";\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+        }).join(';')).join('\n');
+        const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${baseName}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+      toast.success(`Export ${format.toUpperCase()} généré (${rows.length} membre${rows.length > 1 ? 's' : ''})`);
+    } catch {
+      toast.error("Échec de l'export");
+    } finally {
+      setExporting(null);
+    }
+  }
 
   return (
     <PageShell
@@ -418,9 +491,54 @@ export default function TechnicianStats() {
               <p className="text-xs text-on-surface-variant">
                 {loading
                   ? 'Chargement…'
-                  : `${items.length} membre(s) · ${totals.assigned ?? 0} reçus · ${totals.resolved ?? 0} résolus · ${totals.followups ?? 0} suivis saisis`}
+                  : `${filteredItems.length}${search.trim() ? `/${items.length}` : ''} membre(s) · ${totals.assigned ?? 0} reçus · ${totals.resolved ?? 0} résolus · ${totals.followups ?? 0} suivis saisis`}
               </p>
             </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Recherche dans le tableau */}
+            <div className="relative">
+              <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-on-surface-variant pointer-events-none" />
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Rechercher un membre…"
+                className="w-52 pl-8 pr-7 py-1.5 rounded-xl border border-outline-variant/30 bg-surface-container text-xs text-on-surface placeholder:text-on-surface-variant/60 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/40 transition-all"
+              />
+              {search && (
+                <button
+                  onClick={() => setSearch('')}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-on-surface-variant hover:text-on-surface cursor-pointer"
+                  aria-label="Effacer la recherche"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              )}
+            </div>
+
+            <div className="w-px h-5 bg-outline-variant/30 shrink-0" />
+
+            {/* Exports */}
+            <button
+              onClick={() => exportTable('xlsx')}
+              disabled={exporting != null || loading}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-xs font-bold text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20 transition-colors disabled:opacity-50 cursor-pointer"
+              title="Exporter le tableau en Excel"
+            >
+              {exporting === 'xlsx' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileSpreadsheet className="w-3.5 h-3.5" />}
+              XLSX
+            </button>
+            <button
+              onClick={() => exportTable('csv')}
+              disabled={exporting != null || loading}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-outline-variant/40 bg-surface-container text-xs font-bold text-on-surface hover:bg-surface-container-high transition-colors disabled:opacity-50 cursor-pointer"
+              title="Exporter le tableau en CSV"
+            >
+              {exporting === 'csv' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileDown className="w-3.5 h-3.5" />}
+              CSV
+            </button>
           </div>
         </div>
 
@@ -513,13 +631,15 @@ export default function TechnicianStats() {
               },
             },
           ]}
-          rowData={items}
+          rowData={filteredItems}
           loading={loading}
           pagination={false}
           headerHeight={HEADER_HEIGHT}
           rowHeight={ROW_HEIGHT}
           height={gridHeight}
-          noRowsText="Aucune activité détectée sur la période sélectionnée (assignations, suivis, tickets saisis)."
+          noRowsText={search.trim()
+            ? `Aucun membre ne correspond à « ${search.trim()} »`
+            : "Aucune activité détectée sur la période sélectionnée (assignations, suivis, tickets saisis)."}
         />
       </motion.div>
     </PageShell>
