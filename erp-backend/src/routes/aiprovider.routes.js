@@ -28,7 +28,7 @@ function trackTestUsage(providerName, modelName, rawUsage, durationMs) {
     usage = { promptTokens, completionTokens, totalTokens: rawUsage.total_tokens || (promptTokens + completionTokens) };
   }
   if (!usage.totalTokens) return;
-  trackAiUsage(usage, providerName, 'test', { model: modelName, durationMs }).catch(() => {});
+  trackAiUsage(usage, providerName, 'test', { model: modelName, durationMs, source: 'providerTest' }).catch(() => {});
 }
 
 // La liste des fournisseurs et les pages détail (/api/ai-providers/:id) sont mises en cache

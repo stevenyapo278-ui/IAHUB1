@@ -14,7 +14,7 @@ async function stripSignature(rawBody) {
   const prompt = await getPrompt('stripSignature', { rawBody: rawBody.substring(0, 2000) });
 
   try {
-    const raw = await callProviderWithFallback(providers, prompt, 'email');
+    const raw = await callProviderWithFallback(providers, prompt, 'email', { source: 'stripSignature' });
     const jsonMatch = raw.match(/\{[\s\S]*\}/);
     const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : raw);
     const cleaned = (parsed.body || '').trim();

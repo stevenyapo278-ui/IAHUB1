@@ -50,18 +50,19 @@ describe('trackAiUsage', () => {
     expect(mockAiUsageLogCreate).not.toHaveBeenCalled();
   });
 
-  it('enregistre les champs enrichis (model, durationMs, estimated, userId)', async () => {
+  it('enregistre les champs enrichis (model, durationMs, estimated, userId, source)', async () => {
     await trackAiUsage(
       { promptTokens: 100, completionTokens: 50, totalTokens: 150 },
       'gemini',
       'chatbot',
-      { model: 'gemini-3.5-flash', durationMs: 1234, estimated: true, userId: 42 }
+      { model: 'gemini-3.5-flash', durationMs: 1234, estimated: true, userId: 42, source: 'chatbotAnswer' }
     );
 
     expect(mockAiUsageLogCreate).toHaveBeenCalledWith({
       data: {
         provider: 'gemini',
         usage: 'chatbot',
+        source: 'chatbotAnswer',
         model: 'gemini-3.5-flash',
         userId: 42,
         promptTokens: 100,
@@ -73,13 +74,14 @@ describe('trackAiUsage', () => {
     });
   });
 
-  it('enregistre avec estimated=false et userId=null par défaut', async () => {
+  it("enregistre avec estimated=false, userId=null et source=null par défaut", async () => {
     await trackAiUsage({ promptTokens: 10, completionTokens: 5, totalTokens: 15 }, 'openai', 'email');
     const data = mockAiUsageLogCreate.mock.calls[0][0].data;
     expect(data.estimated).toBe(false);
     expect(data.userId).toBeNull();
     expect(data.model).toBeNull();
     expect(data.durationMs).toBeNull();
+    expect(data.source).toBeNull();
   });
 
   it("vérifie le budget journalier après l'enregistrement", async () => {
@@ -100,6 +102,11 @@ describe('getAiUsageStats', () => {
       ])
       .mockResolvedValueOnce([
         { date: new Date('2026-10-14'), totalTokens: 5000n, calls: 12n },
+      ])
+      .mockResolvedValueOnce([
+        { hour: '2026-10-14 08:00', source: 'dailySummary', totalTokens: 600n, calls: 2n },
+        { hour: '2026-10-14 08:00', source: 'analyzeEmail', totalTokens: 300n, calls: 1n },
+        { hour: '2026-10-14 09:00', source: null, totalTokens: 120n, calls: 4n },
       ]);
 
     const stats = await getAiUsageStats(7);
@@ -109,13 +116,47 @@ describe('getAiUsageStats', () => {
     expect(stats.byDay[0]).toMatchObject({ totalTokens: 5000, calls: 12 });
     expect(typeof stats.byDay[0].totalTokens).toBe('number');
     expect(typeof stats.byDay[0].calls).toBe('number');
+    // Agrégat horaire = somme des tâches sur chaque heure
+    expect(stats.byHour).toEqual([
+      { hour: '2026-10-14 08:00', totalTokens: 900, calls: 3 },
+      { hour: '2026-10-14 09:00', totalTokens: 120, calls: 4 },
+    ]);
+    // Détail horaire × tâche (permet d'imputer un pic à une tâche)
+    expect(stats.byHourSource).toEqual([
+      { hour: '2026-10-14 08:00', source: 'dailySummary', totalTokens: 600, calls: 2 },
+      { hour: '2026-10-14 08:00', source: 'analyzeEmail', totalTokens: 300, calls: 1 },
+      { hour: '2026-10-14 09:00', source: null, totalTokens: 120, calls: 4 },
+    ]);
+    expect(stats.byHourPeriodStart).toBeTruthy();
   });
 
-  it('gère un byDay vide sans planter', async () => {
-    mockQueryRaw.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+  it("gère un byDay vide sans planter", async () => {
+    mockQueryRaw.mockResolvedValueOnce([]).mockResolvedValueOnce([]).mockResolvedValueOnce([]);
     const stats = await getAiUsageStats(7);
     expect(stats.byUser).toEqual([]);
     expect(stats.byDay).toEqual([]);
+    expect(stats.byHour).toEqual([]);
+    expect(stats.byHourSource).toEqual([]);
+  });
+
+  it('normalise bySource (tâche appelante) avec feature, tokens et appels', async () => {
+    mockAiUsageLogGroupBy.mockImplementation(async ({ by }) => {
+      if (by && by[0] === 'source') {
+        return [
+          { source: 'dailySummary', usage: 'background', _sum: { totalTokens: 1200, promptTokens: 1000, completionTokens: 200 }, _count: { id: 4 } },
+          { source: null, usage: 'email', _sum: { totalTokens: 50, promptTokens: 40, completionTokens: 10 }, _count: { id: 2 } },
+        ];
+      }
+      return [];
+    });
+    mockQueryRaw.mockResolvedValueOnce([]).mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+
+    const stats = await getAiUsageStats(7);
+
+    expect(stats.bySource).toEqual([
+      { source: 'dailySummary', usage: 'background', totalTokens: 1200, promptTokens: 1000, completionTokens: 200, calls: 4 },
+      { source: null, usage: 'email', totalTokens: 50, promptTokens: 40, completionTokens: 10, calls: 2 },
+    ]);
   });
 });
 

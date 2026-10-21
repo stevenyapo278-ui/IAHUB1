@@ -330,7 +330,7 @@ function trackComparisonUsage(providerName, modelName, rawUsage, durationMs) {
     usage = { promptTokens, completionTokens, totalTokens: rawUsage.total_tokens || (promptTokens + completionTokens) };
   }
   if (!usage.totalTokens) return;
-  trackAiUsage(usage, providerName, 'background', { model: modelName, durationMs }).catch(() => {});
+  trackAiUsage(usage, providerName, 'background', { model: modelName, durationMs, source: 'ticketComparison' }).catch(() => {});
 }
 
 /* ── Analyse principale ────────────────────────────────────────────────── */

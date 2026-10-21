@@ -1526,7 +1526,7 @@ function setupVoiceLive() {
                       trackAiUsage(
                         { promptTokens: turnIn, completionTokens: turnOut, totalTokens: turnIn + turnOut },
                         'gemini', 'voice',
-                        { model: LIVE_MODEL, estimated: true, userId: currentUser?.id ?? null }
+                        { model: LIVE_MODEL, estimated: true, userId: currentUser?.id ?? null, source: 'voiceLive' }
                       ).catch(() => {});
                     }
                   }

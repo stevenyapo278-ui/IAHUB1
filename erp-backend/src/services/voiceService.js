@@ -87,7 +87,7 @@ async function transcribeAudio(audioBuffer, mimeType = 'audio/webm') {
         },
         'gemini',
         'voice',
-        { model, durationMs: Date.now() - start }
+        { model, durationMs: Date.now() - start, source: 'voiceTranscription' }
       ).catch(() => {});
     }
 
@@ -156,7 +156,7 @@ async function synthesizeAudio(text, voiceName = 'Kore') {
         },
         'gemini',
         'voice',
-        { model, durationMs: Date.now() - start }
+        { model, durationMs: Date.now() - start, source: 'voiceSynthesis' }
       ).catch(() => {});
     }
 

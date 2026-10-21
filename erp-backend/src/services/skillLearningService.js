@@ -156,7 +156,7 @@ async function extractAndCreateFineSkill(ticket, level) {
     ticketCategory: ticket.category || '',
   });
 
-  const raw = await callProviderWithFallback(providers, prompt, 'background');
+  const raw = await callProviderWithFallback(providers, prompt, 'background', { source: 'skillLearning' });
   const jsonMatch = raw.match(/\{[\s\S]*\}/);
   if (!jsonMatch) {
     console.log(`[skillLearning] Pas de JSON dans la réponse IA : ${raw.substring(0, 150)}`);

@@ -37,7 +37,7 @@ async function summarizeTicketThread({ ticketId, take = 20 }) {
   });
 
   const raw = await callAiWithRetry(
-    () => callProviderWithFallback(providers, prompt, 'background'),
+    () => callProviderWithFallback(providers, prompt, 'background', { source: 'threadSummary' }),
     { maxRetries: 2, baseDelay: 1000 }
   );
 

@@ -82,7 +82,7 @@ async function analyzeIntent({ subject, body, ticketTitle, ticketSummary, conver
 
   let raw;
   try {
-    raw = (await callProviderWithFallback(providers, prompt, 'email')).trim();
+    raw = (await callProviderWithFallback(providers, prompt, 'email', { source: 'analyzeIntent' })).trim();
   } catch {
     return { intent: 'UNKNOWN', confidence: 0, newIssueSummary: null, isAutoReply: false, evidence: null, userAnsweredSupport: false };
   }

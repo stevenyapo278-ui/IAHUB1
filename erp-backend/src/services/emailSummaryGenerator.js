@@ -41,7 +41,7 @@ async function generateEmailSummary({ body, direction, ticketTitle = '', sender 
       body: cleanBody,
       contextBlock: ctx.join('\n'),
     });
-    const raw = await callAiWithRetry(() => callProviderWithFallback(providers, prompt, 'background'), { maxRetries: 2, baseDelay: 800 });
+    const raw = await callAiWithRetry(() => callProviderWithFallback(providers, prompt, 'background', { source: 'emailSummary' }), { maxRetries: 2, baseDelay: 800 });
     const summary = raw.trim()
       .replace(/^["'`\u201c\u201d]+/, '')
       .replace(/["'`\u201c\u201d]+$/, '');

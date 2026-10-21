@@ -1837,6 +1837,7 @@ model AiUsageLog {
   id               Int      @id @default(autoincrement())
   provider         String // nom du provider (gemini, openai, anthropic, etc.)
   usage            String // feature / contexte (email, chatbot, background, vision, voice, embedding, rerank, test)
+  source           String? // tâche précise appelante (analyzeEmail, dailySummary, skillLearning…) — null = non renseigné
   model            String? // nom du modèle appelé (ex: gemini-3.5-flash)
   userId           Int? // utilisateur à l'origine de l'appel (null = système/background)
   promptTokens     Int      @default(0)
@@ -1849,6 +1850,7 @@ model AiUsageLog {
   @@index([provider])
   @@index([createdAt])
   @@index([usage])
+  @@index([source])
   @@index([model])
   @@index([userId])
 }

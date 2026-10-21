@@ -2157,6 +2157,7 @@ async function callAIWithTools(messages, options = {}) {
       maxTokens: options.maxTokens ?? 4096,
       tools: callTools ? CHATBOT_TOOLS : undefined,
       forcedModelId: forcedModelId || options.forcedModelId,
+      source: 'chatbotAnswer',
     }), { maxRetries: 2, baseDelay: 1500 });
 
     // result est { text, toolCalls } quand tools sont fournis, sinon string
@@ -2283,6 +2284,7 @@ Réponds UNIQUEMENT avec le résumé en texte brut (pas de JSON, pas de markdown
       forcedModelId,
       temperature: 0.1,
       maxTokens: 300,
+      source: 'chatbotSummary',
     });
     return (raw || '').trim().substring(0, 1000) || null;
   } catch (err) {
@@ -2439,6 +2441,7 @@ async function callAI(messages, options = {}) {
   return callAiWithRetry(() => callProviderWithFallback(providers, null, 'chatbot', {
     ...providerOptions,
     forcedModelId: options.forcedModelId,
+    source: options.source || 'chatbotAnswer',
   }), {
     maxRetries: 2,
     baseDelay: 1500,

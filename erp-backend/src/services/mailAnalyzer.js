@@ -486,7 +486,7 @@ async function callProviderWithFallback(providers, prompt, usage = 'email', opti
     throw new Error('Aucun provider IA configuré (Paramètres → Intelligence Artificielle)');
   }
 
-  const { forcedModelId, messages, system, responseFormat, tools, toolChoice } = options;
+  const { forcedModelId, messages, system, responseFormat, tools, toolChoice, source } = options;
   const errors = [];
   for (const provider of providers) {
     // Skip les providers en cooldown 429
@@ -510,6 +510,7 @@ async function callProviderWithFallback(providers, prompt, usage = 'email', opti
         trackAiUsage(result.usage, provider.name, usage, {
           model: result.model || null,
           durationMs: result.durationMs || null,
+          source: source || null,
         }).catch(() => {});
       }
 
@@ -709,7 +710,7 @@ async function analyzeEmail({ subject, body, from, fromName, senderRole, senderT
     signatureText: signatureText || '(signature non détectée)',
   });
 
-  const raw = await callProviderWithFallback(providers, prompt, 'email');
+  const raw = await callProviderWithFallback(providers, prompt, 'email', { source: 'analyzeEmail' });
   const jsonMatch = raw.match(/\{[\s\S]*\}/);
   if (!jsonMatch) throw new Error(`Le provider IA n'a pas retourné de JSON valide : ${raw.substring(0, 200)}`);
   const rawResult = JSON.parse(jsonMatch[0]);
@@ -751,7 +752,7 @@ function trackVisionUsage(providerName, modelName, rawUsage, durationMs) {
     usage = { promptTokens, completionTokens, totalTokens: rawUsage.total_tokens || (promptTokens + completionTokens) };
   }
   if (!usage.totalTokens) return;
-  trackAiUsage(usage, providerName, 'vision', { model: modelName, durationMs }).catch(() => {});
+  trackAiUsage(usage, providerName, 'vision', { model: modelName, durationMs, source: 'attachmentVision' }).catch(() => {});
 }
 
 async function analyzeSingleImage(provider, apiKey, modelName, imageBase64, mimeType, prompt) {

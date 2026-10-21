@@ -44,7 +44,7 @@ Ticket B: "${ticket.title}" - "${ticket.aiSummary || ticket.title}"
 Same problem? Reply YES or NO only.`;
 
     try {
-      const raw = await callProviderWithFallback(providers, prompt, 'email');
+      const raw = await callProviderWithFallback(providers, prompt, 'email', { source: 'similarIncident' });
       const answer = (raw || '').trim().toUpperCase();
       if (answer && (answer.startsWith('YES') || answer.startsWith('OUI'))) {
         return { ticketId: ticket.id, ticketTitle: ticket.title, similarity: 1, method: 'SIMILAR_INCIDENT' };

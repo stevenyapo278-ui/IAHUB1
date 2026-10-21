@@ -95,7 +95,7 @@ async function embedWithGemini(config, text) {
       { promptTokens: totalTokens, completionTokens: 0, totalTokens },
       'gemini',
       'embedding',
-      { model: config.model, durationMs: Date.now() - start }
+      { model: config.model, durationMs: Date.now() - start, source: 'embeddings' }
     ).catch(() => {});
   }
   return data.embedding.values;
@@ -126,7 +126,7 @@ async function embedWithOpenAICompat(config, text) {
       { promptTokens, completionTokens: 0, totalTokens: promptTokens },
       config.providerName,
       'embedding',
-      { model: config.model, durationMs: Date.now() - start }
+      { model: config.model, durationMs: Date.now() - start, source: 'embeddings' }
     ).catch(() => {});
   }
   return data.data?.[0]?.embedding;

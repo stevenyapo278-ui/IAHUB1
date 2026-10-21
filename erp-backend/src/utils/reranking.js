@@ -81,7 +81,7 @@ async function rerank(query, passages) {
         trackAiUsage(
           { promptTokens: nvidiaTokens, completionTokens: 0, totalTokens: nvidiaTokens },
           'nvidia', 'rerank',
-          { model: config.model, durationMs: Date.now() - start }
+          { model: config.model, durationMs: Date.now() - start, source: 'rerank' }
         ).catch(() => {});
       }
       
@@ -125,7 +125,7 @@ async function rerank(query, passages) {
         trackAiUsage(
           { promptTokens: Math.round(cohereTokens), completionTokens: 0, totalTokens: Math.round(cohereTokens) },
           'cohere', 'rerank',
-          { model: config.model, durationMs: Date.now() - start }
+          { model: config.model, durationMs: Date.now() - start, source: 'rerank' }
         ).catch(() => {});
       }
 

@@ -45,7 +45,7 @@ async function generateInsight(tickets) {
 
   try {
     const prompt = await getPrompt('dailySummaryInsight', { ticketsList });
-    const raw = await callAiWithRetry(() => callProviderWithFallback(providers, prompt, 'background'), { maxRetries: 3, baseDelay: 1000 });
+    const raw = await callAiWithRetry(() => callProviderWithFallback(providers, prompt, 'background', { source: 'dailySummary' }), { maxRetries: 3, baseDelay: 1000 });
     const jsonMatch = raw.match(/\{[\s\S]*\}/);
     const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : raw);
     return parsed.insight || null;

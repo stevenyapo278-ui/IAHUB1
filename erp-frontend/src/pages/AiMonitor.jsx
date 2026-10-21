@@ -25,6 +25,36 @@ const FEATURE_LABELS = {
   test: 'Tests de modèles',
 };
 
+// Libellés français des tâches appelantes (champ `source`) — déplie le contexte
+// coarse 'background' pour savoir QUI consomme réellement (pipeline email,
+// récap quotidien, apprentissage, résumé de fil…).
+const SOURCE_LABELS = {
+  analyzeEmail: 'Analyse d’e-mail',
+  stripSignature: 'Nettoyage de signature',
+  analyzeIntent: 'Détection d’intention',
+  similarIncident: 'Détection d’incidents similaires',
+  attachmentAnalysis: 'Analyse de pièces jointes',
+  attachmentVision: 'Vision (captures & images)',
+  emailSummary: 'Résumé d’e-mail',
+  followupReply: 'Réponse de suivi auto',
+  dailySummary: 'Récap quotidien',
+  closureScanner: 'Scanner de clôture',
+  skillLearning: 'Apprentissage de compétences',
+  knowledgeDraft: 'Brouillon base de connaissance',
+  threadSummary: 'Résumé de fil de ticket',
+  ticketComparison: 'Comparaison de tickets',
+  chatbotAnswer: 'Chatbot — réponse',
+  chatbotSummary: 'Chatbot — résumé de conversation',
+  voiceTranscription: 'Vocal — transcription',
+  voiceSynthesis: 'Vocal — synthèse',
+  voiceLive: 'Vocal — session live',
+  embeddings: 'Embeddings (indexation RAG)',
+  rerank: 'Re-ranking',
+  providerTest: 'Test de modèle',
+};
+
+const sourceLabel = (key) => (key ? (SOURCE_LABELS[key] || key) : 'Non renseigné (anciennes entrées)');
+
 const fmt = (n) => (n ?? 0).toLocaleString('fr-FR');
 
 function StatCard({ icon: Icon, label, value, sub, color = 'text-primary' }) {
@@ -92,6 +122,66 @@ export default function AiMonitor() {
   const byModel = (stats?.byModel || []).map((m) => ({ name: m.model, tokens: m._sum?.totalTokens || 0, calls: m._count?.id || 0 }));
   const byUser = (stats?.byUser || []).map((u) => ({ name: u.fullName || u.email, tokens: u.totalTokens, calls: u.calls }));
   const byDay = (stats?.byDay || []).map((d) => ({ date: typeof d.date === 'string' ? d.date.slice(0, 10) : new Date(d.date).toISOString().slice(0, 10), tokens: Number(d.totalTokens || 0), calls: Number(d.calls || 0) }));
+  const bySource = (stats?.bySource || []).map((s) => ({ name: sourceLabel(s.source), key: s.source || 'none', feature: FEATURE_LABELS[s.usage] || s.usage || '—', tokens: Number(s.totalTokens || 0), calls: Number(s.calls || 0) }));
+
+  // Libellé horaire « 14/10 08h » à partir de « 2026-10-14 08:00 »
+  const fmtHourLabel = (raw) => {
+    const [datePart, timePart] = String(raw || '').split(' ');
+    if (!datePart || !timePart) return String(raw || '');
+    return `${datePart.slice(5).split('-').reverse().join('/')} ${timePart.slice(0, 2)}h`;
+  };
+
+  const byHour = (stats?.byHour || []).map((h) => ({ label: fmtHourLabel(h.hour), full: h.hour, tokens: Number(h.totalTokens || 0), calls: Number(h.calls || 0) }));
+
+  // Vue empilée : chaque heure est décomposée par tâche appelante (top 7 + « Autres »)
+  const hourlyStack = (() => {
+    const rows = stats?.byHourSource || [];
+    if (rows.length === 0) return null;
+
+    const totals = new Map();
+    rows.forEach((r) => {
+      const k = r.source || 'none';
+      totals.set(k, (totals.get(k) || 0) + Number(r.totalTokens || 0));
+    });
+    const top = [...totals.entries()].sort((a, b) => b[1] - a[1]).slice(0, 7).map(([k]) => k);
+
+    const hours = [...new Set(rows.map((r) => r.hour))].sort();
+    const data = hours.map((h) => {
+      const row = { label: fmtHourLabel(h), full: h, total: 0 };
+      let other = 0;
+      rows.filter((r) => r.hour === h).forEach((r) => {
+        const n = Number(r.totalTokens || 0);
+        row.total += n;
+        const k = r.source || 'none';
+        if (top.includes(k)) row[k] = (row[k] || 0) + n;
+        else other += n;
+      });
+      if (other > 0) row.__other = other;
+      return row;
+    });
+
+    const series = top.map((k) => ({ key: k, name: k === 'none' ? 'Non renseigné' : sourceLabel(k) }));
+    if (data.some((d) => d.__other > 0)) series.push({ key: '__other', name: 'Autres' });
+    return { data, series };
+  })();
+
+  // Pic de consommation : heure la plus chargée + tâche dominante sur ce pic
+  const peak = (() => {
+    if (byHour.length === 0) return null;
+    const best = byHour.reduce((a, b) => (b.tokens > a.tokens ? b : a));
+    if (!hourlyStack) return { hour: best.label, total: best.tokens, task: null, share: 0 };
+    const row = hourlyStack.data.find((d) => d.full === best.full);
+    if (!row) return { hour: best.label, total: best.tokens, task: null, share: 0 };
+    const dominant = hourlyStack.series
+      .map((s) => ({ name: s.name, tokens: Number(row[s.key] || 0) }))
+      .sort((a, b) => b.tokens - a.tokens)[0];
+    return {
+      hour: best.label,
+      total: best.tokens,
+      task: dominant?.name || null,
+      share: dominant && best.tokens ? Math.round((dominant.tokens / best.tokens) * 100) : 0,
+    };
+  })();
 
   const budgetPct = stats?.budgetUsagePercent;
   const overBudget = budgetPct !== null && budgetPct !== undefined && budgetPct >= 100;
@@ -191,6 +281,32 @@ export default function AiMonitor() {
             </ChartCard>
           </div>
 
+          {/* ── Consommation horaire : corréler un pic à une tâche ──── */}
+          <ChartCard title="Par heure et par tâche (7 derniers jours) — d'où viennent les pics ?">
+            {!hourlyStack || hourlyStack.data.length === 0 ? (
+              <p className="text-xs text-on-surface-variant italic py-8 text-center">Aucune donnée</p>
+            ) : (
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart data={hourlyStack.data} margin={{ left: 8, right: 16, bottom: 4 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="currentColor" className="text-outline-variant/30" />
+                  <XAxis dataKey="label" tick={{ fontSize: 10 }} interval={Math.max(0, Math.ceil(hourlyStack.data.length / 12) - 1)} angle={-35} textAnchor="end" height={48} />
+                  <YAxis tick={{ fontSize: 11 }} tickFormatter={fmt} />
+                  <RechartsTooltip content={<ChartTooltip formatter={fmt} />} />
+                  <Legend wrapperStyle={{ fontSize: 11 }} />
+                  {hourlyStack.series.map((s, i) => (
+                    <Bar key={s.key} dataKey={s.key} name={s.name} stackId="tokens" fill={COLORS[i % COLORS.length]} radius={i === hourlyStack.series.length - 1 ? [4, 4, 0, 0] : undefined} />
+                  ))}
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+            <p className="text-[11px] text-on-surface-variant mt-2">
+              Chaque barre = une heure, découpée par tâche. Les entrées antérieures au 20/10/2026 apparaissent en « Non renseigné ».
+              {peak && peak.task && (
+                <> Pic maximal : <span className="font-semibold text-on-surface">{peak.hour}</span> — {fmt(peak.total)} tokens, dont {peak.share}% imputables à « {peak.task} ».</>
+              )}
+            </p>
+          </ChartCard>
+
           {/* ── Charts barres : provider, modèle, utilisateur ───────── */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             <ChartCard title="Par provider">
@@ -241,6 +357,36 @@ export default function AiMonitor() {
               )}
             </ChartCard>
           </div>
+
+          {/* ── Détail par tâche appelante (source) ──────────────────── */}
+          <ChartCard title="Détail par tâche (quelle tâche consomme)">
+            {bySource.length === 0 ? (
+              <p className="text-xs text-on-surface-variant italic py-4 text-center">Aucune donnée — les entrées récentes seulement (tag « source » introduit le 20/10/2026)</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-on-surface-variant border-b border-outline-variant/40">
+                      <th className="text-left py-2 pr-4 font-semibold">Tâche</th>
+                      <th className="text-left py-2 px-4 font-semibold">Feature</th>
+                      <th className="text-right py-2 px-4 font-semibold">Tokens</th>
+                      <th className="text-right py-2 pl-4 font-semibold">Appels</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {bySource.map((s) => (
+                      <tr key={s.key} className="border-b border-outline-variant/20 hover:bg-surface-container-high/50">
+                        <td className="py-2 pr-4 font-medium text-on-surface">{s.name}</td>
+                        <td className="py-2 px-4 text-on-surface-variant">{s.feature}</td>
+                        <td className="py-2 px-4 text-right font-bold text-on-surface">{fmt(s.tokens)}</td>
+                        <td className="py-2 pl-4 text-right text-on-surface-variant">{fmt(s.calls)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </ChartCard>
 
           {/* ── Détail feature : tokens + appels ────────────────────── */}
           <ChartCard title="Détail par feature">

@@ -111,7 +111,7 @@ async function analyzeCandidate(ticket, cutoff) {
 
   let raw;
   try {
-    raw = (await callAiWithRetry(() => callProviderWithFallback(providers, prompt, 'background'), { maxRetries: 3, baseDelay: 1000 })).trim();
+    raw = (await callAiWithRetry(() => callProviderWithFallback(providers, prompt, 'background', { source: 'closureScanner' }), { maxRetries: 3, baseDelay: 1000 })).trim();
   } catch (err) {
     return { ...context, action: 'SKIP_PROVIDER_ERROR', confidence: null, evidence: '', reasoning: `Erreur provider IA: ${err.message}` };
   }

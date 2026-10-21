@@ -36,6 +36,8 @@ async function isAiEnabled() {
  * @param {number} [options.userId] - utilisateur à l'origine (null = système)
  * @param {number} [options.durationMs] - durée de l'appel réseau
  * @param {boolean} [options.estimated] - true si tokens estimés (len/4) et non rapportés par le provider
+ * @param {string} [options.source] - tâche précise appelante (analyzeEmail, dailySummary, skillLearning…)
+ *                                     — permet de découper le contexte coarse 'background'
  */
 async function trackAiUsage(usage, provider, usageContext = 'email', options = {}) {
   if (!usage || !usage.totalTokens) return;
@@ -46,6 +48,7 @@ async function trackAiUsage(usage, provider, usageContext = 'email', options = {
       data: {
         provider: provider || 'unknown',
         usage: usageContext,
+        source: options.source || null,
         model: options.model || null,
         userId: options.userId ?? null,
         promptTokens: usage.promptTokens || 0,
@@ -137,7 +140,10 @@ async function getAiUsageStats(days = 7) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
-  const [totalTokens, todayTokens, byProvider, byFeature, byModel, byUser, byDay, totalCalls] = await Promise.all([
+  // Plage horaire : au plus 7 jours glissants (24 × 7 buckets max, restent lisibles)
+  const hourSince = new Date(Math.max(since.getTime(), Date.now() - 7 * 24 * 60 * 60 * 1000));
+
+  const [totalTokens, todayTokens, byProvider, byFeature, bySource, byModel, byUser, byDay, byHour, totalCalls] = await Promise.all([
     prisma.aiUsageLog.aggregate({ where: { createdAt: { gte: since } }, _sum: { totalTokens: true } }),
     prisma.aiUsageLog.aggregate({ where: { createdAt: { gte: today } }, _sum: { totalTokens: true } }),
     prisma.aiUsageLog.groupBy({
@@ -149,6 +155,13 @@ async function getAiUsageStats(days = 7) {
     }),
     prisma.aiUsageLog.groupBy({
       by: ['usage'],
+      where: { createdAt: { gte: since } },
+      _sum: { totalTokens: true, promptTokens: true, completionTokens: true },
+      _count: { id: true },
+      orderBy: { _sum: { totalTokens: 'desc' } },
+    }),
+    prisma.aiUsageLog.groupBy({
+      by: ['source', 'usage'],
       where: { createdAt: { gte: since } },
       _sum: { totalTokens: true, promptTokens: true, completionTokens: true },
       _count: { id: true },
@@ -179,6 +192,18 @@ async function getAiUsageStats(days = 7) {
       GROUP BY DATE("createdAt")
       ORDER BY date
     `,
+    // Découpage horaire × tâche appelante : borné à 7 jours glissants pour éviter
+    // des dizaines de milliers de buckets quand on sélectionne 90 jours.
+    // Chaque pic horaire est ainsi imputable à une tâche précise.
+    prisma.$queryRaw`
+      SELECT to_char(date_trunc('hour', "createdAt"), 'YYYY-MM-DD HH24:00') as hour,
+             "source" as source,
+             SUM("totalTokens") as "totalTokens", COUNT(*) as calls
+      FROM "AiUsageLog"
+      WHERE "createdAt" >= ${hourSince}
+      GROUP BY 1, 2
+      ORDER BY 1
+    `,
     prisma.aiUsageLog.count({ where: { createdAt: { gte: since } } }),
   ]);
 
@@ -196,6 +221,16 @@ async function getAiUsageStats(days = 7) {
       : null,
     byProvider,
     byFeature,
+    // Découpe fine par tâche appelante ('background' y est déplié : dailySummary,
+    // closureScanner, skillLearning, knowledgeDraft, threadSummary…)
+    bySource: (bySource || []).map((r) => ({
+      source: r.source,
+      usage: r.usage,
+      totalTokens: r._sum?.totalTokens || 0,
+      promptTokens: r._sum?.promptTokens || 0,
+      completionTokens: r._sum?.completionTokens || 0,
+      calls: r._count?.id || 0,
+    })),
     byModel,
     byUser: (byUser || []).map((r) => ({
       userId: r.userId,
@@ -212,7 +247,28 @@ async function getAiUsageStats(days = 7) {
       totalTokens: Number(r.totalTokens || 0),
       calls: Number(r.calls || 0),
     })),
+    byHour: aggregateHourly(byHour || []),
+    byHourSource: (byHour || []).map((r) => ({
+      hour: r.hour,
+      source: r.source ?? null,
+      totalTokens: Number(r.totalTokens || 0),
+      calls: Number(r.calls || 0),
+    })),
+    byHourPeriodStart: hourSince.toISOString(),
   };
+}
+
+// À partir des lignes horaires × tâche, recalcule l'agrégat horaire total.
+function aggregateHourly(rows) {
+  const byBucket = new Map();
+  for (const r of rows) {
+    const key = r.hour;
+    const bucket = byBucket.get(key) || { hour: key, totalTokens: 0, calls: 0 };
+    bucket.totalTokens += Number(r.totalTokens || 0);
+    bucket.calls += Number(r.calls || 0);
+    byBucket.set(key, bucket);
+  }
+  return [...byBucket.values()].sort((a, b) => (a.hour < b.hour ? -1 : a.hour > b.hour ? 1 : 0));
 }
 
 module.exports = { isAiEnabled, trackAiUsage, getAiUsageStats, getTodayTokenUsage, checkTokenBudget };
