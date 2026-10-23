@@ -3377,7 +3377,16 @@ export default function Tickets() {
                       ref={attachmentInputRef}
                       type="file"
                       className="hidden"
-                      onChange={(e) => setAttachment(e.target.files?.[0] || null)}
+                      onChange={(e) => {
+                        const f = e.target.files?.[0] || null;
+                        // Miroir de la limite multer côté serveur (200 Mo)
+                        if (f && f.size > 200 * 1024 * 1024) {
+                          toast.error(`« ${f.name} » dépasse la taille maximale de 200 Mo`);
+                          e.target.value = '';
+                          return;
+                        }
+                        setAttachment(f);
+                      }}
                     />
                     {attachment ? (
                       <div className="flex items-center gap-2 px-3 py-2 rounded-xl border border-primary/30 bg-primary/5 text-xs font-semibold text-primary">

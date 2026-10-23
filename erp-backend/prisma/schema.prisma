@@ -183,6 +183,7 @@ model User {
   ticketsCreated               Ticket[]                @relation("TicketCreator")
   ticketsDeleted               Ticket[]                @relation("TicketDeletedBy")
   ticketsObserved              Ticket[]                @relation("TicketObservers")
+  ticketAttachmentsUploaded    TicketAttachment[]      @relation("TicketAttachmentUploader")
   followups                    Followup[]
   aiEmailDraftsReviewed        AiEmailDraft[]
   knowledgeDraftsReviewed      KnowledgeDraft[]
@@ -597,6 +598,8 @@ model TicketAttachment {
   incomingEmailId Int?
   contentHash     String? // hash sha256 du contenu binaire, pour détecter les logos/signatures dupliqués entre messages d'un même ticket
   localFilepath   String? // chemin fichier local si stocké sur disque (attente approbation)
+  uploadedBy      User?                 @relation("TicketAttachmentUploader", fields: [uploadedById], references: [id], onDelete: SetNull)
+  uploadedById    Int? // auteur de l'upload (null pour les PJ reçues par email)
   createdAt       DateTime              @default(now())
 
   @@index([incomingEmailId])

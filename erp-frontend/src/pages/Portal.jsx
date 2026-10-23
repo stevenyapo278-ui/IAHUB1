@@ -771,7 +771,16 @@ export default function Portal() {
                 <textarea value={form.content} onChange={(e) => setForm({ ...form, content: e.target.value })} rows={5} placeholder="Décrivez le problème : quand est-il apparu, sur quel équipement, qu'avez-vous essayé..." className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2.5 text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all resize-none" />
               </div>
               <div>
-                <input ref={fileInputRef} type="file" className="hidden" onChange={(e) => setAttachment(e.target.files?.[0] || null)} />
+                <input ref={fileInputRef} type="file" className="hidden" onChange={(e) => {
+                  const f = e.target.files?.[0] || null;
+                  // Miroir de la limite multer côté serveur (200 Mo)
+                  if (f && f.size > 200 * 1024 * 1024) {
+                    toast.error(`« ${f.name} » dépasse la taille maximale de 200 Mo`);
+                    e.target.value = '';
+                    return;
+                  }
+                  setAttachment(f);
+                }} />
                 {attachment ? (
                   <div className="flex items-center gap-2 px-3.5 py-2.5 rounded-xl border border-primary/30 bg-primary/5 text-xs font-semibold text-primary">
                     <button type="button" onClick={() => fileInputRef.current?.click()} className="flex items-center gap-2 flex-1 min-w-0 text-left cursor-pointer" title="Choisir un autre fichier">

@@ -4,7 +4,7 @@ const path = require('path');
 const fs = require('fs');
 const prisma = require('../prismaClient');
 const { authenticate } = require('../middleware/auth');
-const { requirePermission } = require('../middleware/permissions');
+const { requirePermission, hasPermission } = require('../middleware/permissions');
 const { notifyMajorIncidentResolved, sendTicketStatusNotification, sendResolvedNotificationEmail, sendTicketCreationNotification, sendAcknowledgement, sendAssignmentNotificationEmail, sendEmail } = require('../services/emailSender');
 const { approveTicket } = require('../services/ticketApproval');
 const { isRequesterOnly, buildTicketWhereClause } = require('../services/ticketQueryService');
@@ -24,7 +24,8 @@ const { loadCidMap, resolveHtml } = require('../services/emailHtml');
 const multer = require('multer');
 const { validateUpload, safeFilename: makeSafeFilename } = require('../utils/security');
 
-const upload = multer({ limits: { fileSize: 20 * 1024 * 1024 } }); // 20 Mo max
+const MAX_ATTACHMENT_SIZE = 200 * 1024 * 1024; // 200 Mo max par pièce jointe
+const upload = multer({ limits: { fileSize: MAX_ATTACHMENT_SIZE } });
 const router = express.Router();
 router.use(authenticate);
 
@@ -1348,14 +1349,33 @@ router.get('/:id/attachments/:attachmentId/file', async (req, res) => {
   }
 });
 
-// Suppression d'une pièce jointe (le groupe « Demandeurs » n'a pas tickets.manage :
-// un demandeur ne peut donc pas retirer les fichiers d'un ticket existant)
-router.delete('/:id/attachments/:attachmentId', requirePermission('tickets.manage'), async (req, res) => {
+// Suppression d'une pièce jointe. Autorisation :
+// - tickets.manage (SUPERADMIN toujours, sinon groupe de droits) → toute PJ du ticket ;
+// - sinon, le(s) assigné(s) du ticket (direct ou multi-assignés) peuvent retirer
+//   les PJ qu'ils ont jointes eux-mêmes (uploadedById).
+// Un demandeur sans tickets.manage ne peut donc pas retirer les fichiers d'un ticket.
+router.delete('/:id/attachments/:attachmentId', async (req, res) => {
   try {
     const attachment = await prisma.ticketAttachment.findFirst({
       where: { id: Number(req.params.attachmentId), ticketId: Number(req.params.id) },
     });
     if (!attachment) return res.status(404).json({ error: 'Pièce jointe introuvable' });
+
+    let authorized = hasPermission(req.user, 'tickets.manage');
+    if (!authorized && attachment.uploadedById != null) {
+      const userId = req.user.sub;
+      const assignedTicket = await prisma.ticket.findFirst({
+        where: {
+          id: Number(req.params.id),
+          OR: [{ assignedToId: userId }, { assignees: { some: { id: userId } } }],
+        },
+        select: { id: true },
+      });
+      authorized = !!assignedTicket && attachment.uploadedById === userId;
+    }
+    if (!authorized) {
+      return res.status(403).json({ error: 'Vous ne pouvez retirer que les pièces jointes que vous avez vous-même jointes à ce ticket.' });
+    }
 
     if (attachment.localFilepath) {
       // Résolution relative à process.cwd() (volume Docker monté sur <WORKDIR>/uploads)
@@ -1644,6 +1664,7 @@ router.post(
             filename: singleAttachment.originalname,
             mimeType: singleAttachment.mimetype,
             localFilepath: path.join('uploads', 'ticket-attachments', safeFilename),
+            uploadedById: req.user.sub,
           },
         });
       } catch (err) {
@@ -1671,6 +1692,7 @@ router.post(
               filename: file.originalname || safeFilename,
               mimeType: file.mimetype || 'image/png',
               localFilepath: path.join('uploads', 'ticket-attachments', safeFilename),
+              uploadedById: req.user.sub,
             },
           });
           savedImages.push(`/uploads/ticket-attachments/${safeFilename}`);
@@ -2672,7 +2694,7 @@ function dropUploadedFiles(files = []) {
 // Partagé par la création (POST) et la modification (PATCH) d'un suivi.
 // Lance une Error (message prêt à afficher) si un fichier est refusé — les
 // fichiers déjà traités sont alors supprimés.
-async function saveFollowupImages(files = [], ticketId) {
+async function saveFollowupImages(files = [], ticketId, userId = null) {
   const saved = [];
   for (const file of files) {
     const validation = validateUpload(file.originalname, file.mimetype, 'followup');
@@ -2697,6 +2719,7 @@ async function saveFollowupImages(files = [], ticketId) {
         filename: file.originalname || safeFilename,
         mimeType: file.mimetype || 'image/png',
         localFilepath: path.join('uploads', 'followup-images', safeFilename),
+        uploadedById: userId,
       },
     });
 
@@ -2767,7 +2790,7 @@ async function cleanupOrphanFollowupImages(ticketId) {
 
 const ticketAttachmentUpload = multer({
   dest: TICKET_ATTACHMENTS_DIR,
-  limits: { fileSize: 10 * 1024 * 1024 },
+  limits: { fileSize: MAX_ATTACHMENT_SIZE },
 });
 
 // Joindre manuellement des fichiers à un ticket (pièces jointes)
@@ -2806,6 +2829,7 @@ router.post('/:id/attachments', ticketAttachmentUpload.array('files', 10), async
         mimeType: file.mimetype,
         localFilepath: path.join('uploads', 'ticket-attachments', safeFilename),
         source: 'MANUAL_UPLOAD',
+        uploadedById: req.user.sub,
       },
     });
     created.push(attachment);
@@ -2912,7 +2936,7 @@ router.post('/:id/followups', followupUpload.array('images', 10), [body('content
   // Sauvegarder les images uploadées et créer des TicketAttachment
   let imageAttachments = [];
   try {
-    imageAttachments = await saveFollowupImages(req.files || [], ticketId);
+    imageAttachments = await saveFollowupImages(req.files || [], ticketId, req.user.sub);
   } catch (err) {
     return res.status(400).json({ error: err.message });
   }
@@ -3122,7 +3146,7 @@ router.patch('/:id/followups/:followupId', requirePermission('tickets.assign', [
   // Nouvelles images éventuelles (collées / glissées / choisies à l'édition)
   let imageAttachments = [];
   try {
-    imageAttachments = await saveFollowupImages(req.files || [], ticketId);
+    imageAttachments = await saveFollowupImages(req.files || [], ticketId, req.user.sub);
   } catch (err) {
     return res.status(400).json({ error: err.message });
   }

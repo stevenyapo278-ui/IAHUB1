@@ -319,6 +319,12 @@ app.use((req, res) => {
 // eslint-disable-next-line no-unused-vars
 app.use((err, req, res, next) => {
   const log = childLogger(req.requestId);
+  // multer : dépassement de la limite de taille (LIMIT_FILE_SIZE) → 413 propre
+  // au lieu d'une erreur 500 générique
+  if (err && err.code === 'LIMIT_FILE_SIZE') {
+    log.warn('Fichier trop volumineux refusé par multer', { limit: '200 Mo' });
+    return res.status(413).json({ error: 'Fichier trop volumineux — 200 Mo maximum par pièce jointe' });
+  }
   log.error('Erreur non gérée', { error: err.message, stack: err.stack });
   res.status(500).json({ error: 'Erreur interne du serveur' });
 });

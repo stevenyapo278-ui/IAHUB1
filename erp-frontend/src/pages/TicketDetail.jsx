@@ -58,6 +58,10 @@ function extractCleanTextAndImages(content) {
   return { text, images };
 }
 
+// Miroir de MAX_ATTACHMENT_SIZE côté serveur (multer) : contrôle avant envoi
+// pour éviter un upload de 200 Mo qui échouerait au dernier moment.
+const MAX_ATTACHMENT_SIZE = 200 * 1024 * 1024;
+
 // Variants du "défilement" entre tickets (carrousel) : le ticket sorti glisse dans le sens du voyage,
 // le nouveau entre par le côté opposé — sortie rapide puis entrée longue et douce (ease-out quintique)
 const TICKET_SLIDE_VARIANTS = {
@@ -475,8 +479,16 @@ export default function TicketDetail() {
   // - ticket de SON ÉQUIPE → peut changer le statut uniquement
   // - ticket résolu/fermé → aucune modification
   const canEditTicketsRole = canEditTickets(user);
-  // Miroir du garde-fou serveur requirePermission('tickets.manage') sur DELETE attachments
+  // Miroir du garde-fou serveur sur DELETE attachments : tickets.manage → toute PJ,
+  // sinon le(s) assigné(s) du ticket ne retirent que leurs propres pièces jointes
+  // (champ uploadedById, renseigné à l'upload).
   const canManageAttachments = hasPermission(user, 'tickets.manage');
+  const isTicketAssignee = ticket != null && (
+    ticket.assignedToId === user?.id ||
+    (Array.isArray(ticket.assignees) && ticket.assignees.some((a) => a.id === user?.id))
+  );
+  const canRemoveAttachment = (a) =>
+    canManageAttachments || (isTicketAssignee && a?.uploadedById === user?.id);
   const isAssignedTechnician = user?.role === 'TECHNICIAN' &&
     ticket != null &&
     (
@@ -1325,6 +1337,12 @@ export default function TicketDetail() {
   async function handleAttachmentUpload(e) {
     const files = Array.from(e.target.files || []);
     if (files.length === 0) return;
+    const tooLarge = files.find((f) => f.size > MAX_ATTACHMENT_SIZE);
+    if (tooLarge) {
+      toast.error(`« ${tooLarge.name} » dépasse la taille maximale de 200 Mo`);
+      if (attachmentInputRef.current) attachmentInputRef.current.value = '';
+      return;
+    }
     setUploadingAttachment(true);
     const fd = new FormData();
     files.forEach((f) => fd.append('files', f));
@@ -2404,7 +2422,7 @@ export default function TicketDetail() {
                               </span>
                             )}
                           </button>
-                          {canManageAttachments && (
+                          {canRemoveAttachment(a) && (
                             <button
                               type="button"
                               aria-label="Retirer la pièce jointe"
@@ -2462,7 +2480,7 @@ export default function TicketDetail() {
                             <Eye className="w-3.5 h-3.5" />
                           </span>
                         </button>
-                        {canManageAttachments && (
+                        {canRemoveAttachment(a) && (
                           <button
                             type="button"
                             aria-label="Retirer la pièce jointe"

@@ -1,13 +1,21 @@
 // DELETE /tickets/:id/attachments/:attachmentId — retrait d'une pièce jointe :
 //   1. suppression de l'enregistrement ET du fichier sur disque → 200,
 //   2. pièce jointe inexistante → 404,
-//   3. pièce jointe rattachée à un AUTRE ticket → 404 (pas de suppression croisée).
+//   3. pièce jointe rattachée à un AUTRE ticket → 404 (pas de suppression croisée),
+//   4. sans tickets.manage : assigné du ticket retirant SA propre PJ → 200,
+//   5. assigné retirant la PJ d'un autre → 403,
+//   6. auteur de la PJ mais non assigné → 403.
 // Même montage HTTP réel que ticket.patch.technician.test.js (multer ne se joue pas hors (req, res)).
 jest.mock('../prismaClient', () => {
-  const state = { attachments: [], nextId: 1 };
+  const state = { attachments: [], nextId: 1, ticketRow: null };
   return {
     __state: state,
-    ticket: { findUnique: jest.fn(), update: jest.fn(), updateMany: jest.fn() },
+    ticket: {
+      findUnique: jest.fn(),
+      findFirst: jest.fn(async () => state.ticketRow),
+      update: jest.fn(),
+      updateMany: jest.fn(),
+    },
     ticketFieldCorrection: { create: jest.fn(async () => ({ id: 1 })) },
     user: { findUnique: jest.fn(async () => null) },
     systemSettings: { findUnique: jest.fn(async () => null) },
@@ -30,6 +38,8 @@ jest.mock('../middleware/auth', () => ({
 }));
 jest.mock('../middleware/permissions', () => ({
   requirePermission: () => (req, res, next) => next(),
+  // Configurable par test : true = tickets.manage, false = contrainte assigné/auteur
+  hasPermission: jest.fn(() => true),
 }));
 jest.mock('../utils/socket', () => ({
   emitTicketCreated: jest.fn(),
@@ -67,6 +77,7 @@ const fs = require('fs');
 const path = require('path');
 const express = require('express');
 const prisma = require('../prismaClient');
+const { hasPermission } = require('../middleware/permissions');
 const router = require('./ticket.routes');
 
 const ATTACHMENTS_DIR = path.join(process.cwd(), 'uploads', 'ticket-attachments');
@@ -93,7 +104,7 @@ afterAll((done) => {
   server.close(done);
 });
 
-function seedAttachment({ ticketId = 1 } = {}) {
+function seedAttachment({ ticketId = 1, uploadedById = null } = {}) {
   fs.mkdirSync(ATTACHMENTS_DIR, { recursive: true });
   const safeFilename = `test-del-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.png`;
   const relPath = path.join('uploads', 'ticket-attachments', safeFilename);
@@ -105,6 +116,7 @@ function seedAttachment({ ticketId = 1 } = {}) {
     mimeType: 'image/png',
     localFilepath: relPath,
     source: 'MANUAL_UPLOAD',
+    uploadedById,
     createdAt: new Date(),
   };
   prisma.__state.attachments.push(row);
@@ -112,6 +124,11 @@ function seedAttachment({ ticketId = 1 } = {}) {
 }
 
 describe('DELETE /tickets/:id/attachments/:attachmentId', () => {
+  beforeEach(() => {
+    hasPermission.mockReturnValue(true);
+    prisma.__state.ticketRow = null;
+  });
+
   it("supprime l'enregistrement et le fichier sur disque → 200", async () => {
     const att = seedAttachment({ ticketId: 1 });
     const localPath = path.join(process.cwd(), att.localFilepath);
@@ -133,6 +150,36 @@ describe('DELETE /tickets/:id/attachments/:attachmentId', () => {
     const att = seedAttachment({ ticketId: 1 });
     const res = await fetch(`${base}/tickets/2/attachments/${att.id}`, { method: 'DELETE' });
     expect(res.status).toBe(404);
+    expect(prisma.__state.attachments.some((a) => a.id === att.id)).toBe(true);
+  });
+
+  it("200 si l'assigné retire une pièce jointe qu'il a jointe lui-même (sans tickets.manage)", async () => {
+    hasPermission.mockReturnValue(false);
+    // sub de authenticate = 1 : ticket assigné à l'utilisateur 1, PJ uploadée par lui
+    prisma.__state.ticketRow = { id: 1 };
+    const att = seedAttachment({ ticketId: 1, uploadedById: 1 });
+    const res = await fetch(`${base}/tickets/1/attachments/${att.id}`, { method: 'DELETE' });
+    expect(res.status).toBe(200);
+    expect(prisma.__state.attachments.some((a) => a.id === att.id)).toBe(false);
+  });
+
+  it("403 si l'assigné retire la pièce jointe d'un autre (sans tickets.manage)", async () => {
+    hasPermission.mockReturnValue(false);
+    prisma.__state.ticketRow = { id: 1 };
+    const att = seedAttachment({ ticketId: 1, uploadedById: 42 });
+    const res = await fetch(`${base}/tickets/1/attachments/${att.id}`, { method: 'DELETE' });
+    expect(res.status).toBe(403);
+    expect(prisma.__state.attachments.some((a) => a.id === att.id)).toBe(true);
+  });
+
+  it("403 si l'auteur de la pièce jointe n'est pas assigné au ticket (sans tickets.manage)", async () => {
+    hasPermission.mockReturnValue(false);
+    // ticket assigné à quelqu'un d'autre (ticketRow présent mais le WHERE assigné échoue
+    // → findFirst retourne null dans ce mock : simule un ticket non assigné à l'utilisateur)
+    prisma.__state.ticketRow = null;
+    const att = seedAttachment({ ticketId: 1, uploadedById: 1 });
+    const res = await fetch(`${base}/tickets/1/attachments/${att.id}`, { method: 'DELETE' });
+    expect(res.status).toBe(403);
     expect(prisma.__state.attachments.some((a) => a.id === att.id)).toBe(true);
   });
 });
