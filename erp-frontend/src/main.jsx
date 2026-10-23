@@ -8,6 +8,7 @@ if (bootLoader) bootLoader.remove();
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
+import { MotionConfig } from 'framer-motion'
 import './index.css'
 import App from './App.jsx'
 import Toaster from './components/ui/toaster'
@@ -29,7 +30,9 @@ createRoot(document.getElementById('root')).render(
               <UserPreferencesProvider>
                 <VoiceSessionProvider>
                   <TooltipProvider>
-                    <App />
+                    <MotionConfig reducedMotion="user">
+                      <App />
+                    </MotionConfig>
                   </TooltipProvider>
                 </VoiceSessionProvider>
                 <Toaster />

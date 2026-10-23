@@ -155,6 +155,20 @@ function ensureThemeInjected() {
       background-color: color-mix(in srgb, var(--ag-checkbox-checked-color) 8%, transparent) !important;
       box-shadow: inset 3px 0 0 0 var(--ag-checkbox-checked-color);
     }
+    /* Flash « ticket mis à jour » (détecté au refresh silencieux / temps réel) */
+    .ag-theme-katalyst-datagrid .ag-row.ticket-flash-row {
+      animation: ticket-row-flash 1.4s ease-out !important;
+    }
+    @keyframes ticket-row-flash {
+      0%   { background-color: color-mix(in srgb, var(--color-primary, #0067ff) 16%, transparent) !important; }
+      100% { background-color: color-mix(in srgb, var(--color-primary, #0067ff) 0%, transparent) !important; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .ag-theme-katalyst-datagrid .ag-row.ticket-flash-row {
+        animation: none !important;
+        background-color: color-mix(in srgb, var(--color-primary, #0067ff) 8%, transparent) !important;
+      }
+    }
 
     /* Cells — clean typography */
     .ag-theme-katalyst-datagrid .ag-cell {

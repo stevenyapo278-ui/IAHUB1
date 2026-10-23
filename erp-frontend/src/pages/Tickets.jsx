@@ -174,13 +174,24 @@ function Avatar({ user, name, colorClass = 'bg-blue-500/15 text-blue-600 dark:te
 }
 
 // Carte ticket réutilisée par la vue Grille et par la variante mobile de la vue Table
-function TicketCard({ t, query, onClick, onDoubleClick, onOpenUser, onOpenLocation }) {
+function TicketCard({ t, query, onClick, onDoubleClick, onOpenUser, onOpenLocation, index = 0, flash = false }) {
   const stopCell = (e) => e.stopPropagation();
   return (
-    <motion.div initial={false} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+    <motion.div
+      initial={{ opacity: 0, y: 14, scale: 0.98 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, scale: 0.97, transition: { duration: 0.15, ease: 'easeIn', delay: 0 } }}
+      transition={{
+        duration: 0.25,
+        ease: [0.16, 1, 0.3, 1],
+        // Stagger plafonné (12 × 30 ms) : au-delà, pas d'attente — aucune carte
+        // ne met plus de 0,33 s à apparaître même avec 100+ résultats.
+        delay: Math.min(index, 11) * 0.03,
+        layout: { duration: 0.2, ease: 'easeOut', delay: 0 },
+      }}
       onClick={onClick}
       onDoubleClick={onDoubleClick}
-      className="rounded-xl border border-border/25 bg-surface hover:border-primary/30 hover:shadow-md hover:-translate-y-0.5 transition-all cursor-pointer group relative overflow-hidden p-4 flex flex-col gap-3">
+      className={`rounded-xl border border-border/25 bg-surface hover:border-primary/30 hover:shadow-md hover:-translate-y-0.5 transition-all cursor-pointer group relative overflow-hidden p-4 flex flex-col gap-3 ${flash ? 'ticket-card-flash' : ''}`}>
       <div className={`absolute top-0 left-0 right-0 h-0.5 ${
         t.priority === 'P1' ? 'bg-red-500' : t.priority === 'P2' ? 'bg-orange-400' :
         t.priority === 'P3' ? 'bg-amber-400' : 'bg-emerald-500'
@@ -824,9 +835,18 @@ function ActionsRenderer({ data, context }) {
   );
 }
 
+// Transition partagée des vues (corbeille / rejetées / kanban / dossier /
+// grille / table) : swap de vue en crossfade court, plus de « flash blanc »
+// brutal entre table et grille. Entrée ease-out, sortie ease-in.
+const VIEW_TRANSITION = {
+  initial: { opacity: 0, y: 8 },
+  animate: { opacity: 1, y: 0, transition: { duration: 0.18, ease: [0.16, 1, 0.3, 1] } },
+  exit: { opacity: 0, y: -6, transition: { duration: 0.13, ease: [0.4, 0, 1, 1] } },
+};
+
 function TableSkeleton() {
   return (
-    <div className="mx-4 sm:mx-6 lg:mx-8 mb-4 rounded-2xl border border-border/30 bg-surface overflow-hidden animate-pulse">
+    <motion.div {...VIEW_TRANSITION} className="mx-4 sm:mx-6 lg:mx-8 mb-4 rounded-2xl border border-border/30 bg-surface overflow-hidden animate-pulse">
       <table className="w-full text-left">
         <thead>
           <tr className="border-b border-border/20 bg-surface-muted/50">
@@ -856,7 +876,7 @@ function TableSkeleton() {
           ))}
         </tbody>
       </table>
-    </div>
+    </motion.div>
   );
 }
 
@@ -1154,6 +1174,29 @@ function sameTicketList(a, b) {
     if (a[i].id !== b[i].id || a[i].updatedAt !== b[i].updatedAt || a[i].status !== b[i].status) return false;
   }
   return true;
+}
+
+// IDs à faire « clignoter » entre deux listes : tickets déjà affichés dont le
+// statut, la priorité ou l'assignation a bougé, + tickets nouveaux arrivés en
+// temps réel (socket/polling). Sert au flash visuel (carte + ligne AG Grid).
+function findFlashedTicketIds(prevList, nextList) {
+  if (!prevList || prevList.length === 0 || !nextList) return [];
+  const prevById = new Map(prevList.map((t) => [t.id, t]));
+  const changed = [];
+  for (const t of nextList) {
+    const old = prevById.get(t.id);
+    if (!old) {
+      // Ticket jamais vu : arrivé par socket/polling (même params → vrai ajout)
+      changed.push(t.id);
+      continue;
+    }
+    if (old.status !== t.status
+      || old.priority !== t.priority
+      || (old.assignedTo?.id ?? null) !== (t.assignedTo?.id ?? null)) {
+      changed.push(t.id);
+    }
+  }
+  return changed;
 }
 
 export default function Tickets() {
@@ -1711,11 +1754,43 @@ export default function Tickets() {
   const ticketsRef = useRef(tickets);
   useEffect(() => { ticketsRef.current = tickets; }, [tickets]);
 
+  // ── Flash « mis à jour » : feedback visuel des changements temps réel ──────
+  // Un ticket dont le statut/priorité/assignation change (ou qui apparaît) est
+  // mis en avant 1,4 s (anneau sur les cartes, fond sur les lignes AG Grid).
+  const [flashIds, setFlashIds] = useState(() => new Set());
+  const flashTimersRef = useRef(new Map());
+  const flashTickets = useCallback(function flashTickets(ids) {
+    if (!ids || ids.length === 0) return;
+    // Effets (timers) HORS updater : StrictMode invoque les updaters deux fois.
+    const fresh = ids.filter((id) => !flashTimersRef.current.has(id));
+    for (const id of fresh) {
+      const timer = setTimeout(() => {
+        setFlashIds((cur) => { if (!cur.has(id)) return cur; const s = new Set(cur); s.delete(id); return s; });
+        flashTimersRef.current.delete(id);
+      }, 1400);
+      flashTimersRef.current.set(id, timer);
+    }
+    if (fresh.length === 0) return;
+    setFlashIds((prev) => {
+      const next = new Set(prev);
+      let added = false;
+      for (const id of fresh) {
+        if (next.has(id)) continue; // déjà en flash → on laisse courir
+        next.add(id);
+        added = true;
+      }
+      return added ? next : prev;
+    });
+  }, []);
+  useEffect(() => () => { flashTimersRef.current.forEach((t) => clearTimeout(t)); }, []);
+
   const refreshTicketsSilently = useCallback(function refreshTicketsSilently() {
     const params = buildListParams({ filters, debouncedSearch, searchField, sortBy, sortOrder, page, pageSize, viewMode });
     api.get('/tickets', { params }).then(({ data }) => {
       // Rien n'a bougé depuis le dernier fetch → pas de re-render
       if (sameTicketList(ticketsRef.current, data.items)) return;
+      const flashed = findFlashedTicketIds(ticketsRef.current, data.items);
+      if (flashed.length > 0) flashTickets(flashed);
       setTickets(data.items);
       setTotalPages(data.pages);
       setTotalCount(data.total);
@@ -1791,9 +1866,14 @@ export default function Tickets() {
   const kbCursor = kbCursorId == null ? -1 : tickets.findIndex((t) => t.id === kbCursorId);
   const gridApiRef = useRef(null);
 
-  const kbRowClass = useCallback((params) => (params.data?.id === kbCursorId ? ['kb-cursor-row'] : []), [kbCursorId]);
-  // AG Grid n'évalue getRowClass qu'au moment du rendu des lignes : on force le refresh
-  useEffect(() => { gridApiRef.current?.redrawRows(); }, [kbCursorId]);
+  const kbRowClass = useCallback((params) => {
+    const classes = [];
+    if (params.data?.id === kbCursorId) classes.push('kb-cursor-row');
+    if (params.data?.id != null && flashIds.has(params.data.id)) classes.push('ticket-flash-row');
+    return classes;
+  }, [kbCursorId, flashIds]);
+  // Flash + curseur clavier : AG Grid n'évalue getRowClass qu'au rendu des lignes → on force
+  useEffect(() => { gridApiRef.current?.redrawRows(); }, [kbCursorId, flashIds]);
 
   useEffect(() => {
     const onKey = (e) => {
@@ -2655,11 +2735,12 @@ export default function Tickets() {
           </div>
         )}
 
+        <AnimatePresence mode="wait" initial={false}>
         {loading ? (
-          <TableSkeleton />
+          <TableSkeleton key="skeleton" />
         ) : showTrash ? (
           /* ── CORBEILLE (soft delete + rollback) ── */
-          <div className="flex-1 min-h-0 flex flex-col gap-3 px-4 sm:px-6 lg:px-8 py-3">
+          <motion.div key="trash" {...VIEW_TRANSITION} className="flex-1 min-h-0 flex flex-col gap-3 px-4 sm:px-6 lg:px-8 py-3">
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <h3 className="text-sm font-bold text-on-surface flex items-center gap-2">
                 <Trash2 className="w-4 h-4 text-amber-500" />
@@ -2704,10 +2785,10 @@ export default function Tickets() {
                 ))}
               </div>
             )}
-          </div>
+          </motion.div>
         ) : showRejected ? (
           /* ── SUGGESTIONS REJETÉES (décisions négatives de la Hotline) ── */
-          <div className="flex-1 min-h-0 flex flex-col gap-3 px-4 sm:px-6 lg:px-8 py-3">
+          <motion.div key="rejected" {...VIEW_TRANSITION} className="flex-1 min-h-0 flex flex-col gap-3 px-4 sm:px-6 lg:px-8 py-3">
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <h3 className="text-sm font-bold text-on-surface flex items-center gap-2">
                 <Ban className="w-4 h-4 text-red-500" />
@@ -2795,25 +2876,25 @@ export default function Tickets() {
                 })}
               </div>
             )}
-          </div>
+          </motion.div>
         ) : viewMode === 'kanban' ? (
-          <div className="flex-1 min-h-0 overflow-auto p-4 sm:p-6">
+          <motion.div key="kanban" {...VIEW_TRANSITION} className="flex-1 min-h-0 overflow-auto p-4 sm:p-6">
             <KanbanBoard
               tickets={tickets} canAssign={canAssign}
               onStatusChange={(ticket, newStatus) => handleQuickStatusChange(ticket.id, newStatus)}
               filterQs={filterQs}
             />
-          </div>
+          </motion.div>
         ) : viewMode === 'folders' ? (
-          <div className="flex-1 min-h-0 overflow-auto">
+          <motion.div key="folders" {...VIEW_TRANSITION} className="flex-1 min-h-0 overflow-auto">
             <TeamFolderView tickets={tickets} teams={teams} filterQs={filterQs} />
-          </div>
+          </motion.div>
         ) : viewMode === 'grid' ? (
           /* ── GRID VIEW ── */
-          <div className="p-4 sm:p-6 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+          <motion.div key="grid" {...VIEW_TRANSITION} className="p-4 sm:p-6 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
             <AnimatePresence mode="popLayout">
-              {tickets.map((t) => (
-                <TicketCard key={t.id} t={t} query={debouncedSearch}
+              {tickets.map((t, i) => (
+                <TicketCard key={t.id} t={t} query={debouncedSearch} index={i} flash={flashIds.has(t.id)}
                   onClick={() => handleRowOpen(t.id)}
                   onDoubleClick={() => handleRowPreview(t)}
                   onOpenUser={setProfileUser}
@@ -2825,12 +2906,12 @@ export default function Tickets() {
                 <EmptyState icon="tickets" title="Aucun ticket trouvé" description="Modifie les filtres ou crée un nouveau ticket." />
               </div>
             )}
-          </div>
+          </motion.div>
         ) : viewMode === 'table' && isMobile ? (
           /* ── TABLE VIEW — variante mobile : AG Grid est illisible sous 640px ── */
-          <div className="p-4 space-y-3 overflow-auto">
-            {tickets.map((t) => (
-              <TicketCard key={t.id} t={t} query={debouncedSearch}
+          <motion.div key="table-cards" {...VIEW_TRANSITION} className="p-4 space-y-3 overflow-auto">
+            {tickets.map((t, i) => (
+              <TicketCard key={t.id} t={t} query={debouncedSearch} index={i} flash={flashIds.has(t.id)}
                 onClick={() => handleRowOpen(t.id)}
                 onDoubleClick={() => handleRowPreview(t)}
                 onOpenUser={setProfileUser}
@@ -2839,10 +2920,10 @@ export default function Tickets() {
             {tickets.length === 0 && (
               <EmptyState icon="tickets" title="Aucun ticket trouvé" description="Modifie les filtres ou crée un nouveau ticket." />
             )}
-          </div>
+          </motion.div>
         ) : (
           /* ── TABLE VIEW (AG Grid with pinned columns — Katalyst style) ── */
-          <div className="flex-1 min-h-0 mx-4 sm:mx-6 lg:mx-8 mt-3.5 mb-4 flex flex-col">
+          <motion.div key="table" {...VIEW_TRANSITION} className="flex-1 min-h-0 mx-4 sm:mx-6 lg:mx-8 mt-3.5 mb-4 flex flex-col">
             <div className="flex-1 min-h-0 rounded-2xl border border-outline-variant/30 bg-surface-container-lowest overflow-hidden flex flex-col">
               <DataGrid
                 columns={gridColumnDefs}
@@ -2877,8 +2958,9 @@ export default function Tickets() {
                 className="rounded-2xl overflow-hidden flex-1"
               />
             </div>
-          </div>
+          </motion.div>
         )}
+        </AnimatePresence>
       </div>
 
       {/* ── BULK ACTIONS BAR ──────────────────────────────────────────────── */}

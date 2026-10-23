@@ -3010,3 +3010,20 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   font-weight: 600;
   white-space: nowrap;
 }
+
+/* ── Flash « ticket mis à jour » — cartes (vue Grille + liste mobile) ─────────
+   Feedback temps réel : anneau primaire qui se dissipe quand un ticket change
+   (statut / priorité / assignation) au refresh silencieux ou via les sockets. */
+.ticket-card-flash {
+  animation: ticket-card-flash 1.4s ease-out;
+}
+@keyframes ticket-card-flash {
+  0%   { box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary, #0067ff) 50%, transparent); }
+  100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-primary, #0067ff) 0%, transparent); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ticket-card-flash {
+    animation: none;
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary, #0067ff) 35%, transparent);
+  }
+}
