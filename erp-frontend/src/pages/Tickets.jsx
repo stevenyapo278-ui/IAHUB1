@@ -1350,6 +1350,7 @@ export default function Tickets() {
   const [showTrash, setShowTrash] = useState(false);
   const [trashItems, setTrashItems] = useState([]);
   const [trashLoading, setTrashLoading] = useState(false);
+  const [trashTotal, setTrashTotal] = useState(0);
 
   // ── Vue « Suggestions rejetées » (tickets refusés, clôtures IA refusées,
   //    nouvelles demandes ignorées) — panneau latéral façon corbeille ──
@@ -1357,6 +1358,13 @@ export default function Tickets() {
   const [rejectedLoading, setRejectedLoading] = useState(false);
   const [rejectedData, setRejectedData] = useState({ tickets: [], closures: [], newRequests: [] });
   const [rejectedTab, setRejectedTab] = useState('tickets');
+
+  // Pagination pour la corbeille et les rejetés
+  const [trashPage, setTrashPage] = useState(1);
+  const [rejectedPage, setRejectedPage] = useState(1);
+  const [paginating, setPaginating] = useState(false);
+  const [activeTab, setActiveTab] = useState('tickets');
+  const [activePage, setActivePage] = useState(1);
   // Vue latérale (corbeille / rejetées) : masque la liste en render (les gardes des
   // callbacks et effets restent calqués sur showTrash, comme avant).
   const isSideView = showTrash || showRejected;
@@ -1622,40 +1630,44 @@ export default function Tickets() {
   const loadTrash = useCallback(async function loadTrash() {
     setTrashLoading(true);
     try {
-      const { data } = await api.get('/tickets/trash/list');
+      const { data } = await api.get('/tickets/trash/list', { params: { page: trashPage, limit: 50 } });
       setTrashItems(data.items || []);
+      setTrashTotal(data.total || 0);
     } catch (err) {
       toast.error(err.response?.data?.error || 'Erreur chargement corbeille');
     } finally {
       setTrashLoading(false);
     }
-  }, []);
+  }, [trashPage]);
 
   function openTrash() {
     setShowRejected(false);
     setShowTrash(true);
+    setTrashPage(1);
     loadTrash();
   }
 
   const loadRejectedSuggestions = useCallback(async function loadRejectedSuggestions() {
     setRejectedLoading(true);
     try {
-      const { data } = await api.get('/tickets/rejected-suggestions');
+      const { data } = await api.get('/tickets/rejected-suggestions', { params: { page: rejectedPage, limit: 50 } });
       setRejectedData({
         tickets: data.tickets || [],
         closures: data.closures || [],
         newRequests: data.newRequests || [],
+        total: data.total || 0,
       });
     } catch (err) {
       toast.error(err.response?.data?.error || 'Erreur chargement des suggestions rejetées');
     } finally {
       setRejectedLoading(false);
     }
-  }, []);
+  }, [rejectedPage]);
 
   function openRejected() {
     setShowTrash(false);
     setShowRejected(true);
+    setRejectedPage(1);
     loadRejectedSuggestions();
   }
 
@@ -2744,7 +2756,7 @@ export default function Tickets() {
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <h3 className="text-sm font-bold text-on-surface flex items-center gap-2">
                 <Trash2 className="w-4 h-4 text-amber-500" />
-                Corbeille — {trashItems.length} ticket(s) supprimé(s)
+                Corbeille — {trashPage} / {Math.ceil(trashTotal / 50)} page(s), {trashTotal} ticket(s) supprimé(s)
               </h3>
               <button onClick={() => setShowTrash(false)}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border border-border/30 text-muted-foreground hover:text-foreground hover:bg-surface-muted transition-all">
@@ -2754,6 +2766,21 @@ export default function Tickets() {
             <p className="text-[11px] text-muted-foreground -mt-1">
               Les tickets ici ne sont plus visibles dans les vues principales et exclus des exports/statistiques. Restaurez-les ou supprimez-les définitivement.
             </p>
+            <div className="flex items-center gap-2">
+              <button onClick={() => setTrashPage((p) => Math.max(1, p - 1))}
+                disabled={trashPage <= 1}
+                className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-border/30 text-xs font-semibold text-muted-foreground hover:text-foreground hover:bg-surface-muted transition-all disabled:opacity-40 disabled:cursor-not-allowed">
+                <ChevronLeft className="w-3.5 h-3.5" /> Précédent
+              </button>
+              <span className="text-xs text-muted-foreground">
+                Page {trashPage} sur {Math.ceil(trashTotal / 50)} · {trashItems.length} affichés
+              </span>
+              <button onClick={() => setTrashPage((p) => p + 1)}
+                disabled={trashPage >= Math.ceil(trashTotal / 50)}
+                className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-border/30 text-xs font-semibold text-muted-foreground hover:text-foreground hover:bg-surface-muted transition-all disabled:opacity-40 disabled:cursor-not-allowed">
+                Suivant <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
             {trashLoading ? (
               <div className="flex items-center justify-center py-10 text-muted-foreground text-xs gap-2">
                 <RefreshCw className="w-4 h-4 animate-spin" /> Chargement...
@@ -2792,7 +2819,7 @@ export default function Tickets() {
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <h3 className="text-sm font-bold text-on-surface flex items-center gap-2">
                 <Ban className="w-4 h-4 text-red-500" />
-                Suggestions rejetées — {rejectedTotal} élément(s)
+                Suggestions rejetées — Page {rejectedPage} · {rejectedTotal} élément(s)
               </h3>
               <button onClick={() => setShowRejected(false)}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border border-border/30 text-muted-foreground hover:text-foreground hover:bg-surface-muted transition-all">
@@ -2823,6 +2850,21 @@ export default function Tickets() {
               ))}
             </div>
 
+              <div className="flex items-center gap-2">
+                <button onClick={() => setRejectedPage((p) => Math.max(1, p - 1))}
+                  disabled={rejectedPage <= 1}
+                  className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-border/30 text-xs font-semibold text-muted-foreground hover:text-foreground hover:bg-surface-muted transition-all disabled:opacity-40 disabled:cursor-not-allowed">
+                    <ChevronLeft className="w-3.5 h-3.5" /> Précédent
+                </button>
+                <span className="text-xs text-muted-foreground">
+                  Page {rejectedPage} · {rejectedTotal} éléments au total
+                </span>
+                <button onClick={() => setRejectedPage((p) => p + 1)}
+                  disabled={rejectedPage >= Math.ceil(rejectedTotal / 50)}
+                  className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-border/30 text-xs font-semibold text-muted-foreground hover:text-foreground hover:bg-surface-muted transition-all disabled:opacity-40 disabled:cursor-not-allowed">
+                    Suivant <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
             {rejectedLoading ? (
               <div className="flex items-center justify-center py-10 text-muted-foreground text-xs gap-2">
                 <RefreshCw className="w-4 h-4 animate-spin" /> Chargement...

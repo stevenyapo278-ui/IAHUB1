@@ -926,12 +926,15 @@ async function fetchRejectedNewRequests(limit) {
 
 router.get('/rejected-suggestions', requirePermission('tickets.approve', ['ADMIN', 'TECHNICIAN', 'HOTLINE']), async (req, res) => {
   try {
-    const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(Math.max(1, parseInt(req.query.limit) || 50), 200);
+    const skip = (page - 1) * limit;
 
     const [tickets, closures, newRequests] = await Promise.all([
       prisma.ticket.findMany({
         where: { approvalStatus: 'REJECTED' },
         orderBy: { approvedAt: 'desc' },
+        skip,
         take: limit,
         select: {
           id: true, title: true, status: true, priority: true, category: true,
@@ -941,14 +944,17 @@ router.get('/rejected-suggestions', requirePermission('tickets.approve', ['ADMIN
           assignedTo: { select: { id: true, fullName: true } },
         },
       }),
-      fetchRejectedClosures(limit),
-      fetchRejectedNewRequests(limit),
+      fetchRejectedClosures(limit, skip),
+      fetchRejectedNewRequests(limit, skip),
     ]);
 
     return res.json({
       tickets: tickets.map((t) => ({ ...t, rejectionReason: t.approvalNote || null })),
       closures,
       newRequests,
+      page,
+      limit,
+      total: tickets.length + closures.length + newRequests.length,
     });
   } catch (err) {
     console.error('[ticket.routes] Erreur rejected-suggestions:', err);
