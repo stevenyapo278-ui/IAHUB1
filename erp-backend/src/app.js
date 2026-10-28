@@ -54,6 +54,7 @@ const formDefinitionRoutes = require('./routes/formDefinition.routes');
 const { requestId } = require('./middleware/requestId');
 const { logger, childLogger } = require('./utils/logger');
 const { apiCache } = require('./middleware/apiCache');
+const { auditLogger } = require('./middleware/auditLogger');
 
 const app = express();
 
@@ -68,6 +69,13 @@ if (process.env.TRUST_PROXY !== '0') {
 // (utilisateurs, tickets) sont divisées par 5 à 10. Sans effet si l'en-tête
 // Accept-Encoding du client n'accepte pas gzip (toujours le cas des navigateurs).
 app.use(compression());
+
+// ── Middleware audit (observateur, sans modifier le flux) ──────────────────────
+// Inscrit un événement HTTP_REQUEST à chaque requête : IP, User-Agent,
+// méthode, chemin, requestId, rôle/utilisateur, code de statut et temps de
+// réponse. Il ne coupe jamais le flux et filtre les en-têtes sensibles
+// (Authorization, Cookie, Set-Cookie).
+app.use(auditLogger);
 
 app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' },

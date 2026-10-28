@@ -669,18 +669,44 @@ router.get('/trash/list', async (req, res) => {
   if (!req.user || !['SUPERADMIN', 'ADMIN'].includes(req.user.role)) {
     return res.status(403).json({ error: 'Accès refusé' });
   }
-  const items = await prisma.ticket.findMany({
-    where: { deletedAt: { not: null } },
-    orderBy: { deletedAt: 'desc' },
-    take: 200,
-    include: {
-      requester: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
-      secondaryRequester: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
-      assignedTo: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
-      deletedBy: { select: { id: true, fullName: true } },
-    },
+  const page = Math.max(1, parseInt(req.query.page) || 1);
+  const limit = Math.min(Math.max(1, parseInt(req.query.limit) || 50), 200);
+  const skip = (page - 1) * limit;
+
+  // Recherche interne sur le titre + contenu (utilise les index GIN/trgm).
+  const searchTerm = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+  const searchWhere = searchTerm
+    ? {
+        OR: [
+          { title: { contains: searchTerm, mode: 'insensitive' } },
+          { content: { contains: searchTerm, mode: 'insensitive' } },
+        ],
+      }
+    : {};
+
+  const [items, total] = await Promise.all([
+    prisma.ticket.findMany({
+      where: { AND: [{ deletedAt: { not: null } }, searchWhere] },
+      orderBy: { deletedAt: 'desc' },
+      skip,
+      take: limit,
+      include: {
+        requester: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
+        secondaryRequester: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
+        assignedTo: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
+        deletedBy: { select: { id: true, fullName: true } },
+      },
+    }),
+    prisma.ticket.count({ where: { AND: [{ deletedAt: { not: null } }, searchWhere] } }),
+  ]);
+
+  return res.json({
+    items,
+    page,
+    limit,
+    total,
+    totalPages: Math.ceil(total / limit),
   });
-  return res.json({ items });
 });
 
 router.get('/pending-approval', async (req, res) => {
@@ -930,9 +956,20 @@ router.get('/rejected-suggestions', requirePermission('tickets.approve', ['ADMIN
     const limit = Math.min(Math.max(1, parseInt(req.query.limit) || 50), 200);
     const skip = (page - 1) * limit;
 
-    const [tickets, closures, newRequests] = await Promise.all([
+    // Recherche interne sur le titre + contenu (utilise les index GIN/trgm).
+    const searchTerm = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+    const searchWhere = searchTerm
+      ? {
+          OR: [
+            { title: { contains: searchTerm, mode: 'insensitive' } },
+            { content: { contains: searchTerm, mode: 'insensitive' } },
+          ],
+        }
+      : {};
+
+    const [tickets, closures, newRequests, rejectedCounts] = await Promise.all([
       prisma.ticket.findMany({
-        where: { approvalStatus: 'REJECTED' },
+        where: { AND: [{ approvalStatus: 'REJECTED' }, searchWhere] },
         orderBy: { approvedAt: 'desc' },
         skip,
         take: limit,
@@ -946,6 +983,7 @@ router.get('/rejected-suggestions', requirePermission('tickets.approve', ['ADMIN
       }),
       fetchRejectedClosures(limit, skip),
       fetchRejectedNewRequests(limit, skip),
+      prisma.ticket.count({ where: { AND: [{ approvalStatus: 'REJECTED' }, searchWhere] } }),
     ]);
 
     return res.json({
@@ -954,7 +992,12 @@ router.get('/rejected-suggestions', requirePermission('tickets.approve', ['ADMIN
       newRequests,
       page,
       limit,
-      total: tickets.length + closures.length + newRequests.length,
+      total: rejectedCounts,
+      rejectedCounts: {
+        tickets: tickets.length,
+        closures: closures.length,
+        newRequests: newRequests.length,
+      },
     });
   } catch (err) {
     console.error('[ticket.routes] Erreur rejected-suggestions:', err);

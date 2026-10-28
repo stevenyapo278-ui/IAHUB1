@@ -1,7 +1,22 @@
 const prisma = require('../prismaClient');
 
 async function auditLog(action, options = {}) {
-  const { actor, targetType, targetId, targetLabel, metadata, ipAddress, tx } = options;
+  const {
+    actor,
+    targetType,
+    targetId,
+    targetLabel,
+    metadata = {},
+    ipAddress,
+    tx,
+  } = options;
+
+  // Extract comment from metadata if present
+  const comment = metadata?.comment || metadata?.commentFr || null;
+  const cleanedMetadata = {
+    ...metadata,
+    comment,
+  };
 
   const data = {
     action,
@@ -31,6 +46,7 @@ async function getAuditLogs(filters = {}) {
     order,
     page = 1,
     pageSize = 50,
+    ticketName,
   } = filters;
 
   const where = {};
@@ -68,7 +84,12 @@ async function getAuditLogs(filters = {}) {
       { targetLabel: { contains: search, mode: 'insensitive' } },
       { actorEmail: { contains: search, mode: 'insensitive' } },
       { action: { contains: search, mode: 'insensitive' } },
+      // Search in metadata comment field
+      { metadata: { contains: search } },
     ];
+  }
+  if (ticketName) {
+    where.targetLabel = { contains: ticketName, mode: 'insensitive' };
   }
   if (startDate || endDate) {
     where.createdAt = {};
