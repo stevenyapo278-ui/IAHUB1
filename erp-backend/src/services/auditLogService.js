@@ -34,6 +34,33 @@ async function auditLog(action, options = {}) {
 }
 
 async function getAuditLogs(filters = {}) {
+  const { order, page = 1, pageSize = 50 } = filters;
+
+  const where = buildAuditWhere(filters);
+
+  const pageNum = Math.max(1, Number(page));
+  const size = Math.min(Math.max(1, Number(pageSize) || 50), 200);
+  const skip = (pageNum - 1) * size;
+
+  const [logs, total] = await Promise.all([
+    prisma.auditLog.findMany({
+      where,
+      orderBy: { createdAt: order === 'asc' ? 'asc' : 'desc' },
+      skip,
+      take: size,
+    }),
+    prisma.auditLog.count({ where }),
+  ]);
+
+  return {
+    logs,
+    pagination: { page: pageNum, pageSize: size, total, totalPages: Math.ceil(total / size) },
+  };
+}
+
+// Construction du where — partagée par la liste (GET /) et l'export (GET /export)
+// pour que l'extraction reflète EXACTEMENT les filtres affichés à l'écran.
+function buildAuditWhere(filters = {}) {
   const {
     action,
     domain,
@@ -43,9 +70,6 @@ async function getAuditLogs(filters = {}) {
     search,
     startDate,
     endDate,
-    order,
-    page = 1,
-    pageSize = 50,
     ticketName,
   } = filters;
 
@@ -77,8 +101,6 @@ async function getAuditLogs(filters = {}) {
   if (targetType) where.targetType = targetType;
   if (targetId && !Number.isNaN(Number(targetId))) where.targetId = Number(targetId);
   if (actor) where.actorEmail = { contains: actor, mode: 'insensitive' };
-  if (targetType) where.targetType = targetType;
-  if (targetId) where.targetId = Number(targetId);
   if (search) {
     where.OR = [
       { targetLabel: { contains: search, mode: 'insensitive' } },
@@ -101,24 +123,30 @@ async function getAuditLogs(filters = {}) {
     }
   }
 
-  const pageNum = Math.max(1, Number(page));
-  const size = Math.min(Math.max(1, Number(pageSize) || 50), 200);
-  const skip = (pageNum - 1) * size;
-
-  const [logs, total] = await Promise.all([
-    prisma.auditLog.findMany({
-      where,
-      orderBy: { createdAt: order === 'asc' ? 'asc' : 'desc' },
-      skip,
-      take: size,
-    }),
-    prisma.auditLog.count({ where }),
-  ]);
-
-  return {
-    logs,
-    pagination: { page: pageNum, pageSize: size, total, totalPages: Math.ceil(total / size) },
-  };
+  return where;
 }
 
-module.exports = { auditLog, getAuditLogs };
+// Acteurs distincts (les plus fréquents en premier) → liste déroulante du filtre « Acteur »
+async function getAuditLogActors() {
+  const grouped = await prisma.auditLog.groupBy({
+    by: ['actorEmail'],
+    _count: { _all: true },
+    orderBy: { _count: { actorEmail: 'desc' } },
+    take: 200,
+  });
+  return grouped
+    .filter((g) => g.actorEmail)
+    .map((g) => ({ actor: g.actorEmail, count: g._count?._all ?? 0 }));
+}
+
+// Export CSV/XLSX : mêmes filtres que la liste affichée (jusqu'à 10 000 lignes)
+async function getAuditLogsExport(filters = {}) {
+  const where = buildAuditWhere(filters);
+  return prisma.auditLog.findMany({
+    where,
+    orderBy: { createdAt: filters.order === 'asc' ? 'asc' : 'desc' },
+    take: 10000,
+  });
+}
+
+module.exports = { auditLog, getAuditLogs, getAuditLogActors, getAuditLogsExport, buildAuditWhere };

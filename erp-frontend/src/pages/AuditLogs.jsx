@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import api from '../api/client';
+import exportFile from '../utils/exportFile';
 import { useFilterParam, useFilterParams } from '../hooks/useFilterParam';
 import { FIELD_LABELS, formatLogValue } from '../utils/logFields';
 import PageShell from '../components/PageShell';
@@ -12,7 +13,7 @@ import {
   Activity, Search, Filter, Calendar, RefreshCw, ChevronDown,
   Shield, UserPlus, UserMinus, Settings, Trash2, Edit3,
   AlertTriangle, Globe, Key, Mail, Bot, FileText, LogIn, LogOut,
-  X, HardDrive, MapPin, Briefcase, Lock
+  X, HardDrive, MapPin, Briefcase, Lock, Download
 } from 'lucide-react';
 
 const ACTION_META = {
@@ -131,12 +132,21 @@ export default function AuditLogs({ embedded = false } = {}) {
   const [quickRange, setQuickRange] = useState('');
   const [expandedId, setExpandedId] = useState(null);
   const [showFilters, setShowFilters] = useState(false);
+  const [actors, setActors] = useState([]);
+  const [showExport, setShowExport] = useState(false);
+  const [exporting, setExporting] = useState(null);
   const [searchParams, setSearchParams] = useSearchParams();
 
-  function load(page = 1) {
-    setLoading(true);
-    const pageSizeNum = parseInt(pageSize, 10) || 50;
-    const params = { page, pageSize: pageSizeNum, order: orderFilter };
+  // Acteurs distincts (backend) → liste déroulante du filtre « Acteur »
+  useEffect(() => {
+    api.get('/audit-logs/actors')
+      .then(({ data }) => setActors(data.actors || []))
+      .catch(() => {});
+  }, []);
+
+  // Filtres actifs — partagés entre la liste et l'export (mêmes critères à l'écran et au téléchargement)
+  function buildFilterParams() {
+    const params = {};
     if (actionFilter) params.action = actionFilter;
     if (domainFilter) params.domain = domainFilter;
     if (targetTypeFilter) params.targetType = targetTypeFilter;
@@ -145,6 +155,13 @@ export default function AuditLogs({ embedded = false } = {}) {
     if (searchFilter) params.search = searchFilter;
     if (startDate) params.startDate = startDate;
     if (endDate) params.endDate = endDate;
+    return params;
+  }
+
+  function load(page = 1) {
+    setLoading(true);
+    const pageSizeNum = parseInt(pageSize, 10) || 50;
+    const params = { page, pageSize: pageSizeNum, order: orderFilter, ...buildFilterParams() };
 
     api.get('/audit-logs', { params })
       .then(({ data }) => {
@@ -153,6 +170,22 @@ export default function AuditLogs({ embedded = false } = {}) {
       })
       .catch((err) => toast.error(err.response?.data?.error || 'Erreur de chargement'))
       .finally(() => setLoading(false));
+  }
+
+  async function exportLogs(format) {
+    setExporting(format);
+    try {
+      await exportFile({
+        url: '/audit-logs/export',
+        params: { format, order: orderFilter, ...buildFilterParams() },
+        fallbackName: `audit_systeme_${new Date().toISOString().slice(0, 10)}.${format}`,
+      });
+      toast.success(`Export ${format.toUpperCase()} généré`);
+    } catch {
+      toast.error("Échec de l'export");
+    } finally {
+      setExporting(null);
+    }
   }
 
   useEffect(() => { load(); }, [actionFilter, domainFilter, targetTypeFilter, targetIdFilter, actorFilter, searchFilter, startDate, endDate, orderFilter, pageSize]);
@@ -227,10 +260,9 @@ export default function AuditLogs({ embedded = false } = {}) {
     >
 
       {/* ── Filters Strip ──────────────────────────────────────────────── */}
-      {/* Barre outils inline — indispensable en mode embarqué (hub) où l'en-tête PageShell
-          est masqué : sans elle, ni la recherche ni le bouton Filtres ne seraient accessibles. */}
-      {embedded && (
-        <div className="flex items-center gap-2 mb-3 flex-wrap px-4 sm:px-6 lg:px-8 pt-4">
+      {/* Barre outils inline — toujours visible (mode embarqué ET autonome) : recherche,
+          période et export ne doivent pas dépendre du mode d'affichage. */}
+      <div className="flex items-center gap-2 mb-3 flex-wrap px-4 sm:px-6 lg:px-8 pt-4">
           <div className="relative flex-1 min-w-[200px] max-w-md">
             <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant/50" />
             <input
@@ -240,6 +272,34 @@ export default function AuditLogs({ embedded = false } = {}) {
               onChange={(e) => setSearchFilter(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') applyFilters(); }}
               className="input-katalyst pl-8 pr-8 py-2 text-xs w-full"
+            />
+          </div>
+          {/* Période toujours visible : raccourcis + plage de dates (pattern TicketFilterBar) */}
+          <div className="flex items-center gap-1 flex-wrap">
+            {QUICK_RANGES.map(({ value, label }) => (
+              <button
+                key={value}
+                onClick={() => applyQuickRange(quickRange === value ? '' : value)}
+                className={`px-2.5 py-2 rounded-xl text-[11px] font-bold border transition-all cursor-pointer ${
+                  quickRange === value
+                    ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30'
+                    : 'border-outline-variant/30 text-on-surface-variant hover:text-on-surface hover:border-outline-variant/50'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+            <DateRangePicker
+              value={{
+                from: startDate ? new Date(startDate) : null,
+                to: endDate ? new Date(endDate) : null,
+              }}
+              onChange={({ from, to }) => {
+                setStartDate(from ? from.toISOString().slice(0, 10) : '');
+                setEndDate(to ? to.toISOString().slice(0, 10) : '');
+                setQuickRange('');
+              }}
+              presets={false}
             />
           </div>
           <button
@@ -256,8 +316,37 @@ export default function AuditLogs({ embedded = false } = {}) {
               <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
             )}
           </button>
-        </div>
-      )}
+          {/* Export des résultats filtrés (CSV / XLSX) */}
+          <div className="relative">
+            <button
+              onClick={() => setShowExport((v) => !v)}
+              disabled={!!exporting}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-outline-variant/30 text-xs font-semibold text-on-surface-variant hover:text-on-surface hover:border-outline-variant/50 transition-all cursor-pointer disabled:opacity-50"
+            >
+              <Download className="w-3.5 h-3.5" />
+              {exporting ? 'Export…' : 'Export'}
+            </button>
+            {showExport && (
+              <>
+                <div className="fixed inset-0 z-20" onClick={() => setShowExport(false)} />
+                <div className="absolute right-0 mt-1 z-30 min-w-[150px] rounded-xl border border-outline-variant/30 bg-surface shadow-lg overflow-hidden">
+                  <button
+                    onClick={() => { setShowExport(false); exportLogs('csv'); }}
+                    className="w-full text-left px-3 py-2 text-xs font-semibold hover:bg-surface-container-high transition-colors"
+                  >
+                    CSV
+                  </button>
+                  <button
+                    onClick={() => { setShowExport(false); exportLogs('xlsx'); }}
+                    className="w-full text-left px-3 py-2 text-xs font-semibold hover:bg-surface-container-high transition-colors"
+                  >
+                    Excel (.xlsx)
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+      </div>
       <AnimatePresence>
         {showFilters && (
           <motion.div
@@ -268,22 +357,6 @@ export default function AuditLogs({ embedded = false } = {}) {
             className="overflow-hidden rounded-xl border border-outline-variant/20 bg-surface-container-low/40 mb-4 shrink-0"
           >
             <div className="px-4 py-3 space-y-3">
-              {/* Périodes rapides */}
-              <div className="flex items-center gap-1.5 flex-wrap">
-                <span className="text-[11px] font-bold text-on-surface-variant uppercase tracking-wider mr-1">Période :</span>
-                {QUICK_RANGES.map(({ value, label }) => (
-                  <button key={value} onClick={() => applyQuickRange(quickRange === value ? '' : value)}
-                    className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-all cursor-pointer ${
-                      quickRange === value
-                        ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30'
-                        : 'border-outline-variant/30 text-on-surface-variant hover:text-on-surface hover:border-outline-variant/50'
-                    }`}>
-                    {label}
-                  </button>
-                ))}
-                <span className="text-[10px] text-on-surface-variant/50 ml-1">(ou dates personnalisées ci-dessous)</span>
-              </div>
-
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
                 <label className="field-label">
                   <span>Domaine</span>
@@ -341,13 +414,16 @@ export default function AuditLogs({ embedded = false } = {}) {
 
                 <label className="field-label">
                   <span>Acteur</span>
-                  <input
-                    type="text"
+                  <select
                     value={actorFilter}
                     onChange={(e) => setActorFilter(e.target.value)}
-                    placeholder="Email de l'acteur..."
                     className="input-katalyst"
-                  />
+                  >
+                    <option value="">Tous les acteurs</option>
+                    {Array.from(new Set([actorFilter, ...actors.map((a) => a.actor)].filter(Boolean))).map((a) => (
+                      <option key={a} value={a}>{a}</option>
+                    ))}
+                  </select>
                 </label>
 
                 <label className="field-label">
@@ -360,22 +436,6 @@ export default function AuditLogs({ embedded = false } = {}) {
                     <option value="desc">Plus récents d'abord</option>
                     <option value="asc">Plus anciens d'abord</option>
                   </select>
-                </label>
-
-                <label className="field-label">
-                  <span>Période</span>
-                  <DateRangePicker
-                    value={{
-                      from: startDate ? new Date(startDate) : null,
-                      to: endDate ? new Date(endDate) : null,
-                    }}
-                    onChange={({ from, to }) => {
-                      setStartDate(from ? from.toISOString().slice(0, 10) : '');
-                      setEndDate(to ? to.toISOString().slice(0, 10) : '');
-                      setQuickRange('');
-                    }}
-                    presets={false}
-                  />
                 </label>
               </div>
 
