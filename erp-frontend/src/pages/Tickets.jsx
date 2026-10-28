@@ -2767,6 +2767,24 @@ export default function Tickets() {
               Les tickets ici ne sont plus visibles dans les vues principales et exclus des exports/statistiques. Restaurez-les ou supprimez-les définitivement.
             </p>
             <div className="flex items-center gap-2">
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                <input
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Rechercher dans la corbeille..."
+                  className="flex-1 min-w-0 rounded-lg border border-border/40 bg-background pl-8 pr-3 py-1.5 text-sm text-on-surface placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                />
+                {searchQuery && (
+                  <button
+                    onClick={() => setSearchQuery("")}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    aria-label="Effacer la recherche"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
               <button onClick={() => setTrashPage((p) => Math.max(1, p - 1))}
                 disabled={trashPage <= 1}
                 className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-border/30 text-xs font-semibold text-muted-foreground hover:text-foreground hover:bg-surface-muted transition-all disabled:opacity-40 disabled:cursor-not-allowed">
@@ -2816,7 +2834,25 @@ export default function Tickets() {
         ) : showRejected ? (
           /* ── SUGGESTIONS REJETÉES (décisions négatives de la Hotline) ── */
           <motion.div key="rejected" {...VIEW_TRANSITION} className="flex-1 min-h-0 flex flex-col gap-3 px-4 sm:px-6 lg:px-8 py-3">
-            <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div className="flex items-center gap-2">
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                <input
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Rechercher dans les rejetés..."
+                  className="flex-1 min-w-0 rounded-lg border border-border/40 bg-background pl-8 pr-3 py-1.5 text-sm text-on-surface placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                />
+                {searchQuery && (
+                  <button
+                    onClick={() => setSearchQuery("")}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    aria-label="Effacer la recherche"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
               <h3 className="text-sm font-bold text-on-surface flex items-center gap-2">
                 <Ban className="w-4 h-4 text-red-500" />
                 Suggestions rejetées — Page {rejectedPage} · {rejectedTotal} élément(s)
