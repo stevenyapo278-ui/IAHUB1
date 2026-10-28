@@ -1,5 +1,6 @@
 const {
   detectLocationFromSender,
+  resolveLocationFromRequesterLinks,
   extractSignatureZone,
   isAppLikeLocation,
   normalizeLocationText,
@@ -82,5 +83,33 @@ describe('normalizeLocationText', () => {
   test('minuscules, sans accents, ponctuation normalisée', () => {
     expect(normalizeLocationText('Siège > MONOP COCODY')).toBe('siege monop cocody');
     expect(normalizeLocationText('Supermarché Marcory')).toBe('supermarche marcory');
+  });
+});
+
+describe('resolveLocationFromRequesterLinks — lien demandeur↔lieu (vue Lieu)', () => {
+  const link = (id, name, completename) => ({ locationId: id, location: { id, name, completename } });
+
+  test('un seul lieu associé au demandeur → retenu', () => {
+    expect(resolveLocationFromRequesterLinks([link(2, 'MARCORY', 'SUPERMARCHÉ MARCORY')]))
+      .toEqual({ locationId: 2, locationName: 'MARCORY', matchedOn: 'requester_link' });
+  });
+
+  test('retient le name court et fallback sur completename', () => {
+    expect(resolveLocationFromRequesterLinks([link(5, null, 'AGENCE YAMOUSSOUKRO')]).locationName)
+      .toBe('AGENCE YAMOUSSOUKRO');
+  });
+
+  test('plusieurs lieux distincts → null (ambiguïté, on ne devine pas)', () => {
+    const links = [link(1, 'COCODY', 'SIÈGE > COCODY'), link(2, 'MARCORY', 'SUPERMARCHÉ MARCORY')];
+    expect(resolveLocationFromRequesterLinks(links)).toBeNull();
+  });
+
+  test('aucun lien → null', () => {
+    expect(resolveLocationFromRequesterLinks([])).toBeNull();
+    expect(resolveLocationFromRequesterLinks()).toBeNull();
+  });
+
+  test('liens invalides (sans location chargée) → null', () => {
+    expect(resolveLocationFromRequesterLinks([{ locationId: 3 }, { locationId: 4, location: null }])).toBeNull();
   });
 });

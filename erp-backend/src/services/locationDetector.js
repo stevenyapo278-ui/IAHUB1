@@ -115,8 +115,28 @@ function detectLocationFromSender({ fromEmail, fromName, signatureText, location
   return { locationId: best.locationId, locationName: best.locationName, matchedOn: 'signature_email' };
 }
 
+/**
+ * Retient le lieu unique associé au demandeur (table RequesterLocation, saisie
+ * manuellement dans la vue Lieu ou créée après une détection réussie).
+ * Plusieurs lieux distincts → null : l'ambiguïté ne se devine jamais.
+ * @param {Array<{locationId:number, location?:{id:number, name:string, completename:string}}>} links
+ * @returns {{locationId:number, locationName:string, matchedOn:string}|null}
+ */
+function resolveLocationFromRequesterLinks(links = []) {
+  const distinct = new Map();
+  for (const link of links) {
+    const loc = link && link.location;
+    if (!loc || !loc.id) continue;
+    if (!distinct.has(loc.id)) distinct.set(loc.id, loc);
+  }
+  if (distinct.size !== 1) return null;
+  const loc = distinct.values().next().value;
+  return { locationId: loc.id, locationName: loc.name || loc.completename, matchedOn: 'requester_link' };
+}
+
 module.exports = {
   detectLocationFromSender,
+  resolveLocationFromRequesterLinks,
   extractSignatureZone,
   normalizeLocationText,
   isAppLikeLocation,

@@ -41,7 +41,7 @@ const { generateEmailSummary } = require('./emailSummaryGenerator');
 const { resolveSenderIdentity, ROLE_LABELS } = require('./senderIdentity');
 const { loadConversationItems, stripHtml } = require('./conversationContext');
 const { applyRulesToEmail } = require('./inboxRuleEngine');
-const { detectLocationFromSender, extractSignatureZone } = require('./locationDetector');
+const { detectLocationFromSender, extractSignatureZone, resolveLocationFromRequesterLinks } = require('./locationDetector');
 const { formatTicketTitle, UNDETERMINED } = require('../utils/ticketTitle');
 
 const MAX_RETRIES = 3;const RETRY_DELAYS_MS = [180000, 600000, 1800000]; // 3min, 10min, 30min
@@ -932,10 +932,12 @@ async function processMessage(message, account) {
     }
 
     // ── Résolution STRICTE du lieu ──────────────────────────────────────────
-    // Règle : le lieu provient UNIQUEMENT d'une correspondance entre la signature /
-    // l'adresse email de l'expéditeur et la table Location. Aucune correspondance →
-    // "INDÉTERMINÉ" (jamais le nom d'une application ou d'un logiciel, jamais une
-    // invention de l'IA, et plus aucun fallback sur l'historique du demandeur).
+    // Règle : le lieu provient UNIQUEMENT de sources validées en base, dans cet ordre :
+    // 1) correspondance entre la signature / l'adresse email de l'expéditeur et la
+    //    table Location ; 2) lien demandeur↔lieu (RequesterLocation, saisi dans la
+    //    vue Lieu) ; 3) suggestion IA re-validée contre la table Location.
+    // Aucune correspondance → "INDÉTERMINÉ" (jamais le nom d'une application ou
+    // d'un logiciel, jamais une invention de l'IA).
     let locationId = null;
     let resolvedLocationName = null;
 
@@ -955,7 +957,29 @@ async function processMessage(message, account) {
       console.error('[emailPipeline] Détection lieu échouée:', err.message);
     }
 
-    // 2) Suggestion IA (déjà validée contre la base par le validateur) → re-vérification exacte
+    // 2) Lien demandeur↔lieu (RequesterLocation) : association de la vue Lieu.
+    // Un seul lieu actif associé à l'email → retenu ; plusieurs → ambigu, on continue.
+    if (!locationId && fromEmail) {
+      try {
+        const requesterEmail = fromEmail.toLowerCase().trim();
+        const links = await prisma.requesterLocation.findMany({
+          where: { email: requesterEmail, location: { isActive: true } },
+          select: { locationId: true, location: { select: { id: true, name: true, completename: true } } },
+        });
+        const fromLink = resolveLocationFromRequesterLinks(links);
+        if (fromLink) {
+          locationId = fromLink.locationId;
+          resolvedLocationName = fromLink.locationName;
+          console.log(`[emailPipeline] Lieu résolu via lien demandeur (vue Lieu) : "${resolvedLocationName}" pour ${requesterEmail}`);
+        } else if (links.length > 0) {
+          console.log(`[emailPipeline] Lieu demandeur ambigu (${links.length} liens) pour ${requesterEmail} → suite (IA)`);
+        }
+      } catch (err) {
+        console.error('[emailPipeline] Lieu demandeur échoué:', err.message);
+      }
+    }
+
+    // 3) Suggestion IA (déjà validée contre la base par le validateur) → re-vérification exacte
     if (!locationId && analysis.location) {
       const loc = await prisma.location.findFirst({
         where: { completename: analysis.location },
@@ -970,13 +994,13 @@ async function processMessage(message, account) {
       }
     }
 
-    // 3) Aucune correspondance → INDÉTERMINÉ (affiché tel quel sur le ticket)
+    // 4) Aucune correspondance → INDÉTERMINÉ (affiché tel quel sur le ticket)
     if (!locationId) {
       resolvedLocationName = UNDETERMINED;
-      console.log(`[emailPipeline] Aucun lieu correspondant (signature/email/IA) → INDÉTERMINÉ pour ${fromEmail}`);
+      console.log(`[emailPipeline] Aucun lieu correspondant (signature/email/lien demandeur/IA) → INDÉTERMINÉ pour ${fromEmail}`);
     }
 
-    // 3. Créer/mettre à jour l'association RequesterLocation si on a résolu un lieu
+    // 5) Créer/mettre à jour l'association RequesterLocation si on a résolu un lieu
     if (locationId && fromEmail) {
       await prisma.requesterLocation.upsert({
         where: { email_locationId: { email: fromEmail.toLowerCase().trim(), locationId: locationId } },

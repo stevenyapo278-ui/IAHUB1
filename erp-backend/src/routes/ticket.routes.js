@@ -19,6 +19,7 @@ const { escalateTicket } = require('../services/escalationService');
 const { mergeTickets } = require('../services/ticketMergeService');
 const { normalizeLinkType, normalizeLinkEndpoints, normalizeParentChildType, resolveChildrenIds } = require('../utils/ticketLinks');
 const { formatTicketTitle, UNDETERMINED } = require('../utils/ticketTitle');
+const { resolveLocationFromRequesterLinks } = require('../services/locationDetector');
 const { sanitizeTicketHtml } = require('../utils/security');
 const { loadCidMap, resolveHtml } = require('../services/emailHtml');
 const multer = require('multer');
@@ -1585,6 +1586,31 @@ router.post(
       finalLocationName = loc.completename || loc.name;
     }
 
+    // Fallback : aucun lieu fourni → lieu du demandeur (lien RequesterLocation de la
+    // vue Lieu). Un seul lieu actif associé à son email → retenu ; plusieurs → rien.
+    if (!finalLocationId && finalRequesterId) {
+      try {
+        const requester = await prisma.user.findUnique({
+          where: { id: finalRequesterId },
+          select: { email: true },
+        });
+        const requesterEmail = requester?.email ? String(requester.email).toLowerCase().trim() : '';
+        if (requesterEmail) {
+          const links = await prisma.requesterLocation.findMany({
+            where: { email: requesterEmail, location: { isActive: true } },
+            select: { locationId: true, location: { select: { id: true, name: true, completename: true } } },
+          });
+          const fromLink = resolveLocationFromRequesterLinks(links);
+          if (fromLink) {
+            finalLocationId = fromLink.locationId;
+            finalLocationName = fromLink.locationName;
+          }
+        }
+      } catch (err) {
+        console.error('[tickets] Lieu du demandeur introuvable:', err.message);
+      }
+    }
+
     // ── Email source (création depuis la boîte mail) ─────────────────────────
     // L'Inbox transmet l'id de l'IncomingEmail + l'identifiant de conversation
     // Outlook. Sans eux, findExistingTicket ne retrouve jamais ce ticket sur la
@@ -1603,7 +1629,8 @@ router.post(
       data: {
 
         // Titre toujours EN MAJUSCULES (règle stricte sur les noms de tickets)
-        title: formatTicketTitle(title),
+        // Partie LIEU alignée sur le lieu résolu (formulaire ou lien du demandeur)
+        title: formatTicketTitle(title, finalLocationName),
         content: sanitizeTicketHtml(content),
         priority: priority || 'P3',
         category: category || null,
