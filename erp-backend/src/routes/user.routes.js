@@ -416,7 +416,12 @@ router.post(
 
     const { email, password, fullName, role, roles, teamId } = req.body;
     const targetRole = role || 'REQUESTER';
-    const targetRoles = roles && Array.isArray(roles) && roles.length ? roles : [targetRole];
+    // Cohérence role ∈ roles : une liste qui ne contient pas le rôle principal est
+    // rejetée au profit de [targetRole] (l'UI envoyait roles: ['REQUESTER'] quel que
+    // soit le rôle choisi à la création → rétrogradation silencieuse à la 1re édition).
+    const targetRoles = roles && Array.isArray(roles) && roles.length && roles.includes(targetRole)
+      ? roles
+      : [targetRole];
 
     if (!canAssignRole(req.user.role, targetRole)) {
       return res.status(403).json({ error: `Vous ne pouvez pas créer un compte avec le rôle ${targetRole}` });
@@ -473,7 +478,7 @@ router.patch(
 
     const { email, fullName, role, roles, teamId, isActive, receiveDraftAlerts, password } = req.body;
 
-    const target = await prisma.user.findUnique({ where: { id: Number(req.params.id) }, select: { role: true } });
+    const target = await prisma.user.findUnique({ where: { id: Number(req.params.id) }, select: { role: true, roles: true } });
     if (!target) return res.status(404).json({ error: 'Utilisateur introuvable' });
     if (!canActOnTarget(req.user.role, target.role)) {
       return res.status(403).json({ error: 'Vous ne pouvez pas modifier un compte administrateur ou super-administrateur' });
@@ -495,7 +500,21 @@ router.patch(
     if (roles !== undefined) {
       if (!Array.isArray(roles) || roles.length === 0) return res.status(400).json({ error: 'roles doit être un tableau non vide' });
       data.roles = roles;
-      if (!roles.includes(data.role || target.role)) data.role = roles[0];
+    }
+    // Cohérence role ∈ roles : quand le rôle principal change, le nouveau rôle doit être
+    // détenu et l'ancien SORT de la liste. Sans ça, deux effets de bord :
+      //   - l'ancienne liste (périmée côté UI) écrasait le rôle choisi (data.role = roles[0]) ;
+    //   - la session de la cible ne basculait pas : auth.js conserve le rôle réclamé par
+    //     le JWT tant qu'il fait partie des rôles possédés (jusqu'à reconnexion).
+    if (data.role !== undefined && data.role !== target.role) {
+      const base = data.roles && data.roles.length
+        ? data.roles
+        : (target.roles && target.roles.length ? target.roles : [target.role]);
+      data.roles = [data.role, ...base.filter((r) => r !== target.role && r !== data.role)];
+    }
+    // Invariant final : le rôle principal fait toujours partie des rôles détenus
+    if (data.roles !== undefined && !data.roles.includes(data.role !== undefined ? data.role : target.role)) {
+      data.role = data.roles[0];
     }
     if (teamId !== undefined) data.teamId = teamId;
     if (isActive !== undefined) data.isActive = isActive;
@@ -510,9 +529,9 @@ router.patch(
         data,
         select: userSelect,
       });
-      if (role !== undefined && role !== target.role) {
+      if (data.role !== undefined && data.role !== target.role) {
         // « Le groupe suit le rôle » + rafraîchissement instantané de la session (menus + permissions)
-        await syncRolePermissionGroup(user.id, role);
+        await syncRolePermissionGroup(user.id, data.role);
         emitUserUpdated(user.id);
       }
       invalidateUserCaches();

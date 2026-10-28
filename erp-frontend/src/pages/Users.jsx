@@ -226,7 +226,7 @@ export default function Users() {
   async function handleCreate(e) {
     e.preventDefault(); setError(''); setSubmitting(true);
     try {
-      await api.post('/users', { ...form, teamId: form.teamId ? Number(form.teamId) : null });
+      await api.post('/users', { ...form, roles: [form.role], teamId: form.teamId ? Number(form.teamId) : null });
       toast.success('Utilisateur créé'); setForm(emptyForm); setCreateModal(false); load();
     } catch (err) { setError(err.response?.data?.error || 'Erreur lors de la création'); }
     finally { setSubmitting(false); }
@@ -646,7 +646,7 @@ export default function Users() {
                     <div className="grid grid-cols-2 gap-3">
                       <label className="flex flex-col gap-1.5">
                         <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Rôle</span>
-                        <select value={form.role} onChange={e => setForm({ ...form, role: e.target.value })}
+                        <select value={form.role} onChange={e => setForm({ ...form, role: e.target.value, roles: [e.target.value] })}
                           className="bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2.5 text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all cursor-pointer">
                           {ROLES.map(r => <option key={r} value={r}>{ROLE_CONFIG[r]?.label || r}</option>)}
                         </select>
@@ -710,7 +710,14 @@ export default function Users() {
                   <div className="grid grid-cols-2 gap-3">
                     <label className="flex flex-col gap-1.5">
                       <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Rôle</span>
-                      <select value={editForm.role} onChange={e => setEditForm({ ...editForm, role: e.target.value })}
+                      <select value={editForm.role} onChange={e => {
+                          // role ET roles évoluent ensemble : le backend exige role ∈ roles,
+                          // sinon il annule le changement (ancienne liste périmée).
+                          const nextRole = e.target.value;
+                          const base = editForm.roles && editForm.roles.length ? editForm.roles : [editForm.role];
+                          const nextRoles = [nextRole, ...base.filter(r => r !== editForm.role && r !== nextRole)];
+                          setEditForm({ ...editForm, role: nextRole, roles: nextRoles });
+                        }}
                         className="bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2.5 text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all cursor-pointer">
                         {Array.from(new Set([...ROLES, editForm.role])).map(r => (
                           <option key={r} value={r}>{ROLE_CONFIG[r]?.label || r}</option>

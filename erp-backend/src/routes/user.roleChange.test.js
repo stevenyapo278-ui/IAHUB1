@@ -113,8 +113,8 @@ function makeRes() {
 }
 
 let nextId = 100;
-function seedUser({ role, email = `user${Math.random()}@prosuma.ci`, isActive = true, authProvider = 'local', permissionGroups = [] }) {
-  const u = { id: ++nextId, email, fullName: `User ${nextId}`, role, isActive, authProvider, permissionGroups, teamId: null };
+function seedUser({ role, roles, email = `user${Math.random()}@prosuma.ci`, isActive = true, authProvider = 'local', permissionGroups = [] }) {
+  const u = { id: ++nextId, email, fullName: `User ${nextId}`, role, roles: Array.isArray(roles) && roles.length ? roles : [role], isActive, authProvider, permissionGroups, teamId: null };
   db.users.push(u);
   return u;
 }
@@ -223,5 +223,68 @@ describe('PATCH /users/:id — changement de rôle de bout en bout', () => {
 
     expect(res.statusCode).toBe(200);
     expect(db.users.find((u) => u.id === target.id).role).toBe('TECHNICIAN');
+  });
+
+  test('Payload réel de l\'UI { role, roles périmées } : le rôle choisi gagne, roles est réaligné', async () => {
+    const admin = seedUser({ role: 'SUPERADMIN' });
+    // Exactement ce que Users.jsx envoyait avant la correction : le nouveau rôle
+    // dans `role`, l'ancienne liste dans `roles` → le backend annulait le changement.
+    const target = seedUser({ role: 'REQUESTER', roles: ['REQUESTER'] });
+
+    const res = makeRes();
+    await patchHandler(makeReq({
+      user: admin,
+      params: { id: String(target.id) },
+      body: { role: 'TECHNICIAN', roles: ['REQUESTER'] },
+    }), res);
+
+    expect(res.statusCode).toBe(200);
+    const inDb = db.users.find((u) => u.id === target.id);
+    // Le rôle principal n'est PLUS écrasé par roles[0]…
+    expect(inDb.role).toBe('TECHNICIAN');
+    // …et roles est réaligné : nouveau rôle détenu, ancien retiré (session JWT bascule
+    // immédiatement — auth.js n'accepte plus l'ancien rôle réclamé par le token).
+    expect(inDb.roles).toEqual(['TECHNICIAN']);
+    expect(inDb.roles).toContain(inDb.role); // invariant role ∈ roles
+    expect(inDb.permissionGroups.map((g) => g.name)).toEqual(['Techniciens']);
+    expect(emitUserUpdated).toHaveBeenCalledWith(target.id);
+  });
+
+  test('Utilisateur multi-rôles : le rôle principal change, les rôles restants sont conservés', async () => {
+    const admin = seedUser({ role: 'SUPERADMIN' });
+    const target = seedUser({ role: 'REQUESTER', roles: ['REQUESTER', 'HOTLINE'] });
+
+    const res = makeRes();
+    await patchHandler(makeReq({
+      user: admin,
+      params: { id: String(target.id) },
+      body: { role: 'HOTLINE', roles: ['REQUESTER', 'HOTLINE'] },
+    }), res);
+
+    expect(res.statusCode).toBe(200);
+    const inDb = db.users.find((u) => u.id === target.id);
+    expect(inDb.role).toBe('HOTLINE');
+    expect(inDb.roles).toContain('HOTLINE');
+    expect(inDb.roles).toContain(inDb.role); // invariant role ∈ roles
+    expect(inDb.permissionGroups.map((g) => g.name)).toEqual(['Équipe Hotline']);
+  });
+
+  test('roles sans le rôle principal → invariant : role = roles[0] et groupe aligné', async () => {
+    const admin = seedUser({ role: 'SUPERADMIN' });
+    const target = seedUser({ role: 'REQUESTER', roles: ['REQUESTER'] });
+
+    const res = makeRes();
+    await patchHandler(makeReq({
+      user: admin,
+      params: { id: String(target.id) },
+      body: { roles: ['HOTLINE'] }, // pas de champ `role`
+    }), res);
+
+    expect(res.statusCode).toBe(200);
+    const inDb = db.users.find((u) => u.id === target.id);
+    expect(inDb.role).toBe('HOTLINE');
+    expect(inDb.roles).toEqual(['HOTLINE']);
+    expect(inDb.permissionGroups.map((g) => g.name)).toEqual(['Équipe Hotline']);
+    expect(emitUserUpdated).toHaveBeenCalledWith(target.id);
   });
 });
