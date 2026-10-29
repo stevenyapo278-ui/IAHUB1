@@ -707,17 +707,17 @@ export default function EmailNotificationsTab() {
             >
               <div className="flex items-center justify-between gap-md flex-wrap md:flex-nowrap">
                 <span className="font-body-sm text-body-sm text-on-surface-variant font-medium">
-                  Envoyer un récapitulatif de test maintenant.
+                  Déclencher l'envoi du récapitulatif maintenant, sans attendre l'heure configurée. Le mail part aux destinataires ci-dessus et aux emails de groupe des équipes concernées.
                 </span>
                 <motion.button
                   type="button"
                   onClick={testDailySummary}
-                  disabled={testingSummary || (settings.dailySummaryRecipients || []).length === 0}
+                  disabled={testingSummary}
                   whileHover={{ scale: 1.03 }}
                   whileTap={{ scale: 0.96 }}
                   className="px-4 py-2 border border-outline-variant/60 text-on-surface hover:bg-surface-container-high rounded-xl font-semibold text-body-sm transition-all disabled:opacity-50 shrink-0 shadow-sm"
                 >
-                  {testingSummary ? 'Envoi...' : 'Tester maintenant'}
+                  {testingSummary ? 'Envoi...' : 'Envoyer maintenant'}
                 </motion.button>
               </div>
               <AnimatePresence>
@@ -727,11 +727,15 @@ export default function EmailNotificationsTab() {
                     initial={{ opacity: 0, height: 0 }}
                     animate={{ opacity: 1, height: 'auto' }}
                     exit={{ opacity: 0, height: 0 }}
-                    className="p-md rounded-xl border border-emerald-500/20 bg-emerald-500/5 text-emerald-600 dark:text-emerald-400 font-body-sm mt-2 overflow-hidden"
+                    className={`p-md rounded-xl border font-body-sm mt-2 overflow-hidden ${
+                      summaryTestResult.sent
+                        ? 'border-emerald-500/20 bg-emerald-500/5 text-emerald-600 dark:text-emerald-400'
+                        : 'border-amber-500/20 bg-amber-500/5 text-amber-600 dark:text-amber-400'
+                    }`}
                   >
                     {summaryTestResult.sent
                       ? `Envoyé avec succès : ${summaryTestResult.ticketCount} ticket(s) à ${summaryTestResult.recipientCount} destinataire(s).`
-                      : summaryTestResult.reason}
+                      : `Rien n'a été envoyé : ${summaryTestResult.reason}`}
                   </motion.div>
                 )}
               </AnimatePresence>
