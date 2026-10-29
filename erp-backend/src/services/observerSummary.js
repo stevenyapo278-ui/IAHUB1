@@ -99,7 +99,11 @@ async function sendObserverSummary() {
       `;
     }).join('');
 
-    const bodyHtml = buildEmailLayout(`
+    const bodyHtml = buildEmailLayout({
+      headerTitle: 'Récapitulatif des tickets ouverts',
+      headerSubtitle: `${ticketCount} ticket${ticketCount > 1 ? 's' : ''} ouvert${ticketCount > 1 ? 's' : ''}`,
+      signature,
+      children: `
       <p style="margin:0 0 16px;font-size:14px;color:#1a1a2e;">
         Bonjour <strong>${observer.name || ''}</strong>,
       </p>
@@ -123,9 +127,8 @@ async function sendObserverSummary() {
       </table>
       <a href="${frontendUrl}/portal" style="display:inline-block;padding:12px 24px;background:#0067ff;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:600;font-size:14px;">
         Accéder au portail
-      </a>
-      ${signature || ''}
-    `, `Récapitulatif tickets ouverts`);
+      </a>`,
+    });
 
     try {
       await sendEmail({ to: observer.email, subject, bodyHtml, saveAsMessage: false });
