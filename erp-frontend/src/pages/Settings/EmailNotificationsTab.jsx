@@ -3,8 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import api from '../../api/client';
 import {
   Mail, UserCheck, AlertTriangle, Clock, RefreshCw, CheckCircle2,
-  TrendingUp, Shield, Send, Bell, Volume2, MousePointer2, FlaskConical, Eye,
-  ChevronRight,
+  TrendingUp, Shield, Send, Bell, Volume2, MousePointer2, FlaskConical,
 } from 'lucide-react';
 import {
   isSoundsEnabled,
@@ -21,12 +20,12 @@ import {
   requestBrowserNotifPermission,
 } from '../../utils/browserNotification';
 import Toggle from '../../components/Toggle';
-import { SettingRow, inputClass, itemVariants, SectionModal } from './SettingsComponents';
+import { inputClass, itemVariants } from './SettingsComponents';
 import AckSignatureCard from './AckSignatureCard';
 import EmailTemplatesSection from './EmailTemplatesSection';
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// TOGGLES EMAILS PAR TYPE (déjà existants)
+// TOGGLES EMAILS PAR TYPE
 // templateKeys : clés du registre /api/email-templates — le sujet affiché est alors
 // celui réellement rendu (surcharge incluse). testKey : type envoyé par
 // POST /system-settings/test-email.
@@ -45,6 +44,143 @@ const EMAIL_TOGGLES = [
   { key: 'emailApprovalEnabled', label: 'Approbation ticket', description: 'Notification envoyée au demandeur quand son ticket est approuvé par la Hotline.', icon: Send, category: 'Manuelles (actions utilisateur)', subjects: ['[Ticket #ID] Approuvé — Titre du ticket'], templateKeys: ['approval'], testKey: 'approval' },
   { key: 'needsHumanReviewNotificationEnabled', label: 'Révision humaine', description: "Email envoyé quand un email entrant nécessite une révision humaine (confiance IA faible, spam ambigu, etc.).", icon: AlertTriangle, category: 'Automatiques (pipeline email)', subjects: ['[Révision requise] Objet du mail'], templateKeys: ['needs_human_review'], testKey: 'needs_human_review' },
 ];
+
+const SECTIONS = [
+  { id: 'content', symbol: 'mail', title: 'Contenu des emails', desc: "Accusé de réception, signature commune et gabarits éditables envoyés aux demandeurs et aux équipes." },
+  { id: 'types', symbol: 'toggle_on', title: 'Emails par type', desc: "Choisissez les emails automatiques effectivement envoyés selon leur événement déclencheur." },
+  { id: 'digests', symbol: 'forward_to_inbox', title: 'Récapitulatifs & alertes', desc: 'Envois planifiés aux équipes et aux observateurs, plus les alertes internes.' },
+  { id: 'local', symbol: 'notifications', title: 'Notifications locales', desc: 'Notifications de bureau et sons joués dans ce navigateur.' },
+];
+
+// ── Cartes / composants partagés de la page ─────────────────────────────────
+
+const ACCENTS = {
+  primary: 'bg-primary/10 border-primary/20 text-primary',
+  violet: 'bg-violet-500/10 border-violet-500/20 text-violet-500 dark:text-violet-400',
+  amber: 'bg-amber-500/10 border-amber-500/20 text-amber-600 dark:text-amber-400',
+};
+
+// Panneau de réglage : en-tête (icône, titre, description, toggle facultatif) + corps.
+function Panel({ symbol, icon: Icon, title, description, toggle, accent = 'primary', children }) {
+  return (
+    <motion.section variants={itemVariants} className="bento-card overflow-hidden flex flex-col">
+      <div className="flex items-start justify-between gap-3 p-lg pb-md">
+        <div className="flex items-start gap-3 min-w-0">
+          <div className={`p-2.5 rounded-xl border shrink-0 ${ACCENTS[accent]}`}>
+            {symbol
+              ? <span className="material-symbols-outlined text-xl">{symbol}</span>
+              : Icon && <Icon className="w-5 h-5" />}
+          </div>
+          <div className="min-w-0">
+            <h3 className="font-headline-sm text-headline-sm text-on-surface font-semibold break-words">{title}</h3>
+            {description && (
+              <p className="font-body-sm text-body-sm text-on-surface-variant mt-1 break-words">{description}</p>
+            )}
+          </div>
+        </div>
+        {toggle && <div className="shrink-0 pt-0.5">{toggle}</div>}
+      </div>
+      {children && (
+        <div className="px-lg pb-lg pt-md border-t border-outline-variant/30 flex flex-col gap-sm">
+          {children}
+        </div>
+      )}
+    </motion.section>
+  );
+}
+
+// Ligne « libellé + contrôle » utilisée pour les heures, jours et volumes.
+function FieldRow({ label, hint, children }) {
+  return (
+    <div className="flex items-center justify-between gap-4">
+      <div className="min-w-0">
+        <div className="font-body-sm text-body-sm text-on-surface font-semibold">{label}</div>
+        {hint && <p className="text-xs text-on-surface-variant mt-0.5">{hint}</p>}
+      </div>
+      <div className="shrink-0">{children}</div>
+    </div>
+  );
+}
+
+// Gestion d'une liste d'adresses : saisie + ajout (Entrée), puis pastilles supprimables.
+function RecipientField({ label, values, inputValue, setInputValue, onAdd, onRemove, placeholder = 'adresse@exemple.com', disabled, emptyHint }) {
+  return (
+    <div className="flex flex-col gap-2">
+      {label && (
+        <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">{label}</span>
+      )}
+      <div className="flex items-center gap-2">
+        <input
+          type="email"
+          value={inputValue}
+          onChange={(e) => setInputValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              onAdd();
+            }
+          }}
+          placeholder={placeholder}
+          disabled={disabled}
+          className={`${inputClass} flex-1 min-w-0`}
+        />
+        <motion.button
+          type="button"
+          onClick={onAdd}
+          disabled={disabled || !inputValue.trim()}
+          whileHover={{ scale: 1.03 }}
+          whileTap={{ scale: 0.96 }}
+          className="px-4 py-2 btn-gradient font-semibold rounded-xl shadow-md shadow-primary/10 hover:shadow-lg transition-all duration-300 text-body-sm disabled:opacity-50 shrink-0"
+        >
+          Ajouter
+        </motion.button>
+      </div>
+      {values.length > 0 ? (
+        <div className="flex flex-wrap gap-2 mt-1">
+          {values.map((email) => (
+            <span
+              key={email}
+              className="inline-flex items-center gap-1.5 px-3 py-1 bg-surface-container-high border border-outline-variant/60 rounded-full text-on-surface text-xs font-semibold shadow-sm"
+            >
+              {email}
+              <button
+                type="button"
+                onClick={() => onRemove(email)}
+                disabled={disabled}
+                aria-label={`Retirer ${email}`}
+                className="text-on-surface-variant hover:text-error transition-colors flex items-center disabled:opacity-50"
+              >
+                <span className="material-symbols-outlined text-[14px]">close</span>
+              </button>
+            </span>
+          ))}
+        </div>
+      ) : (
+        emptyHint && <p className="text-xs text-on-surface-variant/70">{emptyHint}</p>
+      )}
+    </div>
+  );
+}
+
+// Bandeau de résultat d'envoi (récapitulatif manuel, test de gabarit).
+function ResultBanner({ tone = 'success', children }) {
+  const tones = {
+    success: 'border-emerald-500/20 bg-emerald-500/5 text-emerald-600 dark:text-emerald-400',
+    warning: 'border-amber-500/20 bg-amber-500/5 text-amber-600 dark:text-amber-400',
+    error: 'border-red-500/20 bg-red-500/5 text-red-500',
+  };
+  return (
+    <motion.div
+      initial={{ opacity: 0, height: 0 }}
+      animate={{ opacity: 1, height: 'auto' }}
+      exit={{ opacity: 0, height: 0 }}
+      transition={{ duration: 0.25 }}
+      className={`p-md rounded-xl border font-body-sm overflow-hidden ${tones[tone]}`}
+    >
+      {children}
+    </motion.div>
+  );
+}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // COMPOSANT PRINCIPAL
@@ -83,8 +219,8 @@ export default function EmailNotificationsTab() {
   // ── Gabarits éditables (Contenu des emails) ──
   const [templates, setTemplates] = useState(null);
 
-  // ── Rubrique ouverte en modale (page résumé → modale de section) ──
-  const [openSection, setOpenSection] = useState(null);
+  // ── Section affichée dans la sous-navigation ──
+  const [activeSection, setActiveSection] = useState('content');
 
   function loadTemplates() {
     return api.get('/email-templates')
@@ -146,9 +282,7 @@ export default function EmailNotificationsTab() {
   function addFailureRecipient() {
     const value = failureRecipientInput.trim();
     if (!value) return;
-    const current = settings.emailFailureNotificationRecipients && settings.emailFailureNotificationRecipients.length > 0
-      ? settings.emailFailureNotificationRecipients
-      : (settings.emailFailureNotificationEmail ? [settings.emailFailureNotificationEmail] : []);
+    const current = failureRecipients;
     if (!current.includes(value)) {
       updateSetting('emailFailureNotificationRecipients', [...current, value]);
     }
@@ -156,10 +290,7 @@ export default function EmailNotificationsTab() {
   }
 
   function removeFailureRecipient(email) {
-    const current = settings.emailFailureNotificationRecipients && settings.emailFailureNotificationRecipients.length > 0
-      ? settings.emailFailureNotificationRecipients
-      : (settings.emailFailureNotificationEmail ? [settings.emailFailureNotificationEmail] : []);
-    updateSetting('emailFailureNotificationRecipients', current.filter((e) => e !== email));
+    updateSetting('emailFailureNotificationRecipients', failureRecipients.filter((e) => e !== email));
   }
 
   // ── Notification révision humaine ──
@@ -184,7 +315,8 @@ export default function EmailNotificationsTab() {
       const { data } = await api.post('/system-settings/daily-summary/test');
       setSummaryTestResult(data);
     } catch (err) {
-      console.error("Erreur test récap:", err);
+      console.error('Erreur test récap:', err);
+      setSummaryTestResult({ sent: false, reason: err.response?.data?.error || "Erreur lors de l'envoi" });
     } finally {
       setTestingSummary(false);
     }
@@ -235,7 +367,7 @@ export default function EmailNotificationsTab() {
   const categories = [...new Set(EMAIL_TOGGLES.map((t) => t.category))];
 
   // Sujets affichés sur chaque toggle : ceux réellement rendus par le backend (surcharge
-  // incluse) quand des gabarits existent, sinon le exemple statique par défaut.
+  // incluse) quand des gabarits existent, sinon l'exemple statique par défaut.
   function subjectsForToggle(toggle) {
     if (!templates || !toggle.templateKeys?.length) return toggle.subjects;
     const items = toggle.templateKeys.map((k) => templates.find((t) => t.key === k)).filter(Boolean);
@@ -245,7 +377,30 @@ export default function EmailNotificationsTab() {
       .filter(Boolean);
   }
 
-  // Bandeau d'erreur réutilisé sur la page ET dans la modale ouverte.
+  const failureRecipients = settings.emailFailureNotificationRecipients && settings.emailFailureNotificationRecipients.length > 0
+    ? settings.emailFailureNotificationRecipients
+    : (settings.emailFailureNotificationEmail ? [settings.emailFailureNotificationEmail] : []);
+
+  // Compteurs affichés dans la sous-navigation (état réel des réglages).
+  const enabledCount = EMAIL_TOGGLES.filter((t) => settings[t.key] ?? true).length;
+  const activeAdditional = [
+    settings.ticketCreationEmailEnabled,
+    settings.needsHumanReviewNotificationEnabled,
+    settings.dailySummaryEnabled,
+    settings.observerSummaryEnabled,
+  ].filter(Boolean).length + (failureRecipients.length > 0 ? 1 : 0);
+  const activeLocal = [browserNotif, soundsEnabled].filter(Boolean).length;
+
+  const sectionStats = {
+    content: templates ? `${templates.length} gabarits` : '…',
+    types: `${enabledCount}/${EMAIL_TOGGLES.length} actifs`,
+    digests: `${activeAdditional}/5 rubriques`,
+    local: `${activeLocal}/2 actives`,
+  };
+
+  const active = SECTIONS.find((s) => s.id === activeSection) || SECTIONS[0];
+
+  // Bandeau d'erreur commun.
   const errorBanner = (
     <AnimatePresence>
       {error && (
@@ -263,704 +418,466 @@ export default function EmailNotificationsTab() {
     </AnimatePresence>
   );
 
-  // Cartes résumé de la page : chaque rubrique s'ouvre dans sa modale.
-  const enabledCount = EMAIL_TOGGLES.filter((t) => settings[t.key] ?? true).length;
-  const failureRecipientCount = settings.emailFailureNotificationRecipients?.length
-    || (settings.emailFailureNotificationEmail ? 1 : 0);
-  const activeAdditional = [
-    settings.ticketCreationEmailEnabled,
-    settings.needsHumanReviewNotificationEnabled,
-    settings.dailySummaryEnabled,
-    settings.observerSummaryEnabled,
-  ].filter(Boolean).length + (failureRecipientCount > 0 ? 1 : 0);
-  const activeLocal = [browserNotif, soundsEnabled].filter(Boolean).length;
-
-  const sections = [
-    { id: 'content', icon: 'mail', title: 'Contenu des emails', desc: "Personnalisez le message, l'objet et la signature de chaque email envoyé, puis éditez les gabarits.", stat: templates ? `${templates.length} gabarits éditables` : 'Chargement des gabarits…' },
-    { id: 'toggles', icon: 'toggle_on', title: 'Activer / Désactiver par type', desc: "Choisissez quels emails automatiques sont envoyés selon leur événement déclencheur.", stat: `${enabledCount}/${EMAIL_TOGGLES.length} types activés` },
-    { id: 'additional', icon: 'forward_to_inbox', title: 'Emails additionnels', desc: 'Création de ticket, révision humaine, récapitulatifs quotidien et observateurs, échec IA.', stat: `${activeAdditional}/5 rubriques actives` },
-    { id: 'local', icon: 'notifications', title: 'Notifications locales', desc: 'Notifications navigateur (bureau) et sons de notification.', stat: `${activeLocal}/2 actives` },
-  ];
-  const active = sections.find((s) => s.id === openSection);
-
   return (
-    <motion.div
-      initial="hidden"
-      animate="visible"
-      variants={{ visible: { transition: { staggerChildren: 0.04 } } }}
-      className="space-y-xl"
-    >
-      {errorBanner}
+    <div className="flex flex-col lg:flex-row gap-lg items-start">
+      {/* ═══════════════════════════════════════════════════════════════════ */}
+      {/* SOUS-NAVIGATION (colonne collante sur desktop, pastilles sur mobile) */}
+      {/* ═══════════════════════════════════════════════════════════════════ */}
+      <nav className="w-full lg:w-64 shrink-0 lg:sticky lg:top-6">
+        <div className="rounded-2xl border border-outline-variant/40 bg-surface-container-lowest p-1.5 flex lg:flex-col gap-1 overflow-x-auto no-scrollbar">
+          {SECTIONS.map((s) => {
+            const isActive = s.id === activeSection;
+            return (
+              <button
+                key={s.id}
+                type="button"
+                onClick={() => setActiveSection(s.id)}
+                aria-current={isActive ? 'page' : undefined}
+                className={`flex items-center gap-2.5 rounded-xl px-3 py-2 text-left transition-all whitespace-nowrap border ${
+                  isActive
+                    ? 'bg-primary/10 border-primary/25 text-primary'
+                    : 'border-transparent text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface'
+                }`}
+              >
+                <span className={`material-symbols-outlined text-lg shrink-0 ${isActive ? '' : 'opacity-70'}`}>{s.symbol}</span>
+                <span className="flex-1 text-[13px] font-semibold">{s.title}</span>
+                <span
+                  className={`hidden lg:inline-block text-[10px] font-bold px-1.5 py-0.5 rounded-full border ${
+                    isActive
+                      ? 'border-primary/25 bg-primary/10 text-primary'
+                      : 'border-outline-variant/40 bg-surface-container-high text-on-surface-variant'
+                  }`}
+                >
+                  {sectionStats[s.id]}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        <div className="hidden lg:flex items-center gap-2 px-3 pt-3 text-[11px] text-on-surface-variant/70">
+          <AnimatePresence mode="wait">
+            {saving ? (
+              <motion.span
+                key="saving"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="flex items-center gap-1.5 text-primary font-semibold"
+              >
+                <RefreshCw className="w-3 h-3 animate-spin" />
+                Enregistrement…
+              </motion.span>
+            ) : (
+              <motion.span key="idle" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                Chaque modification est enregistrée automatiquement.
+              </motion.span>
+            )}
+          </AnimatePresence>
+        </div>
+      </nav>
 
       {/* ═══════════════════════════════════════════════════════════════════ */}
-      {/* PAGE RÉSUMÉ : 4 cartes, chacune ouvre sa rubrique en modale        */}
+      {/* CONTENU DE LA SECTION ACTIVE                                       */}
       {/* ═══════════════════════════════════════════════════════════════════ */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-lg">
-        {sections.map((s) => (
-          <motion.button
-            key={s.id}
-            type="button"
-            variants={itemVariants}
-            whileHover={{ y: -2, borderColor: 'var(--color-outline-variant)' }}
-            whileTap={{ scale: 0.99 }}
-            onClick={() => setOpenSection(s.id)}
-            className="bento-card text-left p-lg flex items-start gap-4 cursor-pointer"
-          >
-            <div className="p-2.5 rounded-xl bg-primary/10 border border-primary/20 text-primary shrink-0">
-              <span className="material-symbols-outlined text-2xl">{s.icon}</span>
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center justify-between gap-2">
-                <span className="font-headline-sm text-headline-sm text-on-surface font-semibold">{s.title}</span>
-                <ChevronRight className="w-4 h-4 text-on-surface-variant shrink-0" />
-              </div>
-              <p className="font-body-sm text-body-sm text-on-surface-variant mt-1.5">{s.desc}</p>
-              <div className="mt-2.5 text-xs font-semibold text-primary">{s.stat}</div>
-            </div>
-          </motion.button>
-        ))}
-      </div>
-
-      {/* ═══════════════════════════════════════════════════════════════════ */}
-      {/* MODALE : SECTION 1 — CONTENU DES EMAILS (accusé, signature, gabarits) */}
-      {/* ═══════════════════════════════════════════════════════════════════ */}
-      <SectionModal
-        open={openSection !== null}
-        onClose={() => setOpenSection(null)}
-        title={active?.title}
-        description={active?.desc}
-        icon={active?.icon}
-      >
+      <div className="flex-1 min-w-0 w-full space-y-md">
         {errorBanner}
 
-        {openSection === 'content' && (
-        <div className="space-y-md">
-        <AckSignatureCard
-          settings={settings}
-          updateSetting={updateSetting}
-          saving={saving}
-          setError={setError}
-          onSettingsUpdated={setSettings}
-        />
-
-        {/* Champ email de test global */}
-        <motion.div variants={itemVariants} className="bento-card flex flex-col sm:flex-row sm:items-center gap-3 p-lg">
-          <div className="flex items-center gap-2 shrink-0">
-            <FlaskConical className="w-4 h-4 text-primary" />
-            <span className="text-sm font-semibold text-on-surface">Tester un template</span>
+        <div className="flex items-start gap-3">
+          <div className="p-2.5 rounded-xl bg-primary/10 border border-primary/20 text-primary shrink-0">
+            <span className="material-symbols-outlined text-xl">{active.symbol}</span>
           </div>
-          <div className="flex items-center gap-2 flex-1 min-w-0">
-            <input
-              type="email"
-              value={testEmailInput}
-              onChange={(e) => setTestEmailInput(e.target.value)}
-              placeholder="email@exemple.com — adresse de test"
-              className={`${inputClass} flex-1`}
-            />
-            <span className="text-xs text-on-surface-variant/60 shrink-0 hidden sm:block">Puis cliquez sur "Tester" à droite du gabarit ou du toggle souhaité.</span>
+          <div className="min-w-0">
+            <h2 className="text-base font-bold text-on-surface">{active.title}</h2>
+            <p className="text-xs text-on-surface-variant mt-0.5 leading-relaxed">{active.desc}</p>
           </div>
-        </motion.div>
-
-        <EmailTemplatesSection
-          templates={templates}
-          settings={settings}
-          testEmailInput={testEmailInput}
-          reloadTemplates={loadTemplates}
-          setError={setError}
-        />
         </div>
-        )}
 
-      {/* ═══════════════════════════════════════════════════════════════════════ */}
-      {/* MODALE : SECTION 2 — EMAILS PAR TYPE                                    */}
-      {/* ═══════════════════════════════════════════════════════════════════════ */}
-        {openSection === 'toggles' && (
-        <div className="space-y-md">
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={activeSection}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+            transition={{ duration: 0.2 }}
+            className="space-y-md"
+          >
+            {/* ── 1. CONTENU DES EMAILS : accusé, signature, gabarits ── */}
+            {activeSection === 'content' && (
+              <>
+                <AckSignatureCard
+                  settings={settings}
+                  updateSetting={updateSetting}
+                  saving={saving}
+                  setError={setError}
+                  onSettingsUpdated={setSettings}
+                />
 
-        {categories.map((category) => (
-        <div key={category} className="space-y-3">
-          <h3 className="text-xs font-bold uppercase tracking-wider text-on-surface-variant/60 px-1">
-            {category}
-          </h3>
-          <div className="space-y-2">
-            {EMAIL_TOGGLES.filter((t) => t.category === category).map((toggle) => (
-              <motion.div
-                key={toggle.key}
-                variants={itemVariants}
-                whileHover={{ y: -1, borderColor: 'var(--color-outline-variant)' }}
-                className="bento-card flex flex-col sm:flex-row sm:items-center justify-between gap-4 sm:gap-lg p-lg"
-              >
-                <div className="min-w-0 flex-1 flex items-center gap-4">
-                  {toggle.icon && (
-                    <div className="p-2 rounded-xl bg-primary/10 border border-primary/20 text-primary shrink-0">
-                      <toggle.icon className="w-5 h-5" />
-                    </div>
-                  )}
-                  <div className="min-w-0 flex-1">
-                    <div className="font-headline-sm text-headline-sm text-on-surface font-semibold break-words">{toggle.label}</div>
-                    <p className="font-body-sm text-body-sm text-on-surface-variant mt-1.5 break-words">{toggle.description}</p>
-                    {toggle.subjects && (
-                      <div className="mt-2 space-y-1">
-                        {subjectsForToggle(toggle).map((subject, i) => (
-                          <div key={i} className="flex items-start gap-1.5 text-xs text-on-surface-variant/70 font-mono">
-                            <span className="shrink-0 mt-0.5">✉</span>
-                            <span className="break-all">{subject}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
+                <div className="bento-card p-lg flex flex-col sm:flex-row sm:items-center gap-3">
+                  <div className="flex items-center gap-2 shrink-0">
+                    <FlaskConical className="w-4 h-4 text-primary" />
+                    <span className="text-sm font-semibold text-on-surface">Adresse de test</span>
+                  </div>
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-2 flex-1 min-w-0">
+                    <input
+                      type="email"
+                      value={testEmailInput}
+                      onChange={(e) => setTestEmailInput(e.target.value)}
+                      placeholder="email@exemple.com"
+                      className={`${inputClass} flex-1 min-w-0`}
+                    />
+                    <span className="text-xs text-on-surface-variant/70 shrink-0">
+                      Puis « Tester » à droite du gabarit voulu.
+                    </span>
                   </div>
                 </div>
-                <div className="shrink-0 flex items-center gap-2">
-                  {toggle.testKey && (
-                    <motion.button
-                      type="button"
-                      onClick={() => testEmailTemplate(toggle.testKey)}
-                      disabled={testingEmailType !== null || !testEmailInput.trim()}
-                      whileHover={{ scale: 1.03 }}
-                      whileTap={{ scale: 0.96 }}
-                      className="px-3 py-1.5 border border-outline-variant/60 text-on-surface hover:bg-surface-container-high rounded-xl font-semibold text-xs transition-all disabled:opacity-50 shrink-0 shadow-sm flex items-center gap-1.5"
-                      title="Envoyer un email de test avec ce template"
-                    >
-                      <FlaskConical className="w-3.5 h-3.5" />
-                      {testingEmailType === toggle.testKey ? 'Envoi...' : 'Tester'}
-                    </motion.button>
+
+                <EmailTemplatesSection
+                  templates={templates}
+                  settings={settings}
+                  testEmailInput={testEmailInput}
+                  reloadTemplates={loadTemplates}
+                  setError={setError}
+                />
+              </>
+            )}
+
+            {/* ── 2. EMAILS PAR TYPE ── */}
+            {activeSection === 'types' && (
+              <div className="space-y-lg">
+                {categories.map((category) => (
+                  <div key={category} className="space-y-3">
+                    <div className="flex items-center gap-3">
+                      <h3 className="text-xs font-bold uppercase tracking-wider text-on-surface-variant/60 px-1">
+                        {category}
+                      </h3>
+                      <div className="flex-1 h-px bg-outline-variant/30" />
+                      <span className="text-[11px] font-semibold text-on-surface-variant/60">
+                        {EMAIL_TOGGLES.filter((t) => t.category === category && (settings[t.key] ?? true)).length}
+                        {' / '}
+                        {EMAIL_TOGGLES.filter((t) => t.category === category).length} actifs
+                      </span>
+                    </div>
+                    <div className="space-y-2">
+                      {EMAIL_TOGGLES.filter((t) => t.category === category).map((toggle) => (
+                        <div
+                          key={toggle.key}
+                          className="bento-card flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-lg p-lg"
+                        >
+                          <div className="min-w-0 flex-1 flex items-start gap-4">
+                            <div className="p-2 rounded-xl bg-primary/10 border border-primary/20 text-primary shrink-0">
+                              <toggle.icon className="w-5 h-5" />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="font-headline-sm text-headline-sm text-on-surface font-semibold break-words">{toggle.label}</div>
+                              <p className="font-body-sm text-body-sm text-on-surface-variant mt-1.5 break-words">{toggle.description}</p>
+                              {toggle.subjects && (
+                                <div className="mt-2 space-y-1">
+                                  {subjectsForToggle(toggle).map((subject, i) => (
+                                    <div key={i} className="flex items-start gap-1.5 text-xs text-on-surface-variant/70 font-mono">
+                                      <Mail className="w-3 h-3 shrink-0 mt-0.5 opacity-60" />
+                                      <span className="break-all">{subject}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                          <div className="shrink-0 flex items-center gap-2">
+                            {toggle.testKey && (
+                              <button
+                                type="button"
+                                onClick={() => testEmailTemplate(toggle.testKey)}
+                                disabled={testingEmailType !== null || !testEmailInput.trim()}
+                                className="px-3 py-1.5 border border-outline-variant/60 text-on-surface hover:bg-surface-container-high rounded-xl font-semibold text-xs transition-all disabled:opacity-50 shrink-0 shadow-sm flex items-center gap-1.5"
+                                title="Envoyer un email de test avec ce template"
+                              >
+                                <FlaskConical className="w-3.5 h-3.5" />
+                                {testingEmailType === toggle.testKey ? 'Envoi...' : 'Tester'}
+                              </button>
+                            )}
+                            <Toggle checked={settings[toggle.key] ?? true} onChange={(v) => updateSetting(toggle.key, v)} disabled={saving} />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+
+                <AnimatePresence>
+                  {testEmailResult && (
+                    <ResultBanner key="email-test-result" tone={testEmailResult.sent ? 'success' : 'error'}>
+                      {testEmailResult.sent
+                        ? `Email de test envoyé avec succès à ${testEmailInput.trim()}`
+                        : `Échec de l'envoi : ${testEmailResult.error}`}
+                    </ResultBanner>
                   )}
-                  <Toggle checked={settings[toggle.key] ?? true} onChange={(v) => updateSetting(toggle.key, v)} disabled={saving} />
-                </div>
-              </motion.div>
-        ))}
-        </div>
-      </div>
-      ))}
-
-      {/* Résultat du test email */}
-      <AnimatePresence>
-        {testEmailResult && (
-          <motion.div
-            key="email-test-result"
-            initial={{ opacity: 0, height: 0, y: -8 }}
-            animate={{ opacity: 1, height: 'auto', y: 0 }}
-            exit={{ opacity: 0, height: 0, y: -8 }}
-            transition={{ duration: 0.3 }}
-            className={`p-md rounded-xl border overflow-hidden font-body-sm ${
-              testEmailResult.sent
-                ? 'border-emerald-500/20 bg-emerald-500/5 text-emerald-600 dark:text-emerald-400'
-                : 'border-red-500/20 bg-red-500/5 text-red-500'
-            }`}
-          >
-            {testEmailResult.sent
-              ? `Email de test envoyé avec succès à ${testEmailInput.trim()}`
-              : `Échec de l'envoi : ${testEmailResult.error}`}
-          </motion.div>
-        )}
-      </AnimatePresence>
-        </div>
-        )}
-
-      {/* ═══════════════════════════════════════════════════════════════════════ */}
-      {/* MODALE : SECTION 3 — RÉCAPITULATIF QUOTIDIEN & NOTIFICATIONS EMAIL      */}
-      {/* ═══════════════════════════════════════════════════════════════════════ */}
-        {openSection === 'additional' && (
-        <div className="space-y-md">
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-lg">
-          <div className="space-y-md">
-            {/* Notification à chaque création de ticket par un demandeur */}
-            <SettingRow
-              title="Notification création de ticket"
-              description="Envoie un email aux boîtes configurées dès qu'un demandeur crée un ticket (formulaire, portail, chatbot)."
-              icon={Mail}
-              checked={settings.ticketCreationEmailEnabled ?? false}
-              onChange={(v) => updateSetting('ticketCreationEmailEnabled', v)}
-              disabled={saving}
-            />
-
-            <motion.div
-              variants={itemVariants}
-              className="bento-card flex flex-col gap-sm p-lg"
-            >
-              <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">Boîtes mail à notifier</span>
-              <div className="flex items-center gap-sm">
-                <input
-                  type="email"
-                  value={ticketCreationRecipientInput}
-                  onChange={(e) => setTicketCreationRecipientInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      addTicketCreationRecipient();
-                    }
-                  }}
-                  placeholder="adresse@exemple.com"
-                  disabled={saving}
-                  className={`${inputClass} flex-1`}
-                />
-                <motion.button
-                  type="button"
-                  onClick={addTicketCreationRecipient}
-                  disabled={saving}
-                  whileHover={{ scale: 1.03 }}
-                  whileTap={{ scale: 0.96 }}
-                  className="px-4 py-2 btn-gradient font-semibold rounded-xl shadow-md shadow-primary/10 hover:shadow-lg transition-all duration-300 text-body-sm disabled:opacity-50 shrink-0"
-                >
-                  Ajouter
-                </motion.button>
+                </AnimatePresence>
               </div>
-              {(settings.ticketCreationEmailRecipients || []).length > 0 && (
-                <motion.div
-                  initial="hidden"
-                  animate="visible"
-                  variants={{ visible: { transition: { staggerChildren: 0.03 } } }}
-                  className="flex flex-wrap gap-2 mt-2"
-                >
-                  {settings.ticketCreationEmailRecipients.map((email) => (
-                    <motion.span
-                      key={email}
-                      variants={itemVariants}
-                      layout
-                      className="inline-flex items-center gap-1.5 px-3 py-1 bg-surface-container-high border border-outline-variant/60 rounded-full text-on-surface text-xs font-semibold shadow-sm"
-                    >
-                      {email}
-                      <motion.button
-                        onClick={() => removeTicketCreationRecipient(email)}
-                        disabled={saving}
-                        whileHover={{ scale: 1.2 }}
-                        whileTap={{ scale: 0.9 }}
-                        className="text-on-surface-variant hover:text-error transition-colors flex items-center"
-                      >
-                        <span className="material-symbols-outlined text-[14px]">close</span>
-                      </motion.button>
-                    </motion.span>
-                  ))}
-                </motion.div>
-              )}
-              {(settings.ticketCreationEmailRecipients || []).length === 0 && (
-                <p className="text-xs text-on-surface-variant/70 mt-1">Aucune boîte configurée — la notification restera inactive même si le toggle est activé.</p>
-              )}
-            </motion.div>
+            )}
 
-            {/* Notification révision humaine */}
-            <SettingRow
-              title="Notification révision humaine"
-              description="Envoie un email aux boîtes configurées quand un email entrant nécessite une révision humaine (confiance IA faible, spam ambigu, etc.)."
-              icon={AlertTriangle}
-              checked={settings.needsHumanReviewNotificationEnabled ?? true}
-              onChange={(v) => updateSetting('needsHumanReviewNotificationEnabled', v)}
-              disabled={saving}
-            />
-
-            <motion.div
-              variants={itemVariants}
-              className="bento-card flex flex-col gap-sm p-lg"
-            >
-              <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">Boîtes mail à notifier</span>
-              <div className="flex items-center gap-sm">
-                <input
-                  type="email"
-                  value={needsReviewRecipientInput}
-                  onChange={(e) => setNeedsReviewRecipientInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      addNeedsReviewRecipient();
-                    }
-                  }}
-                  placeholder="adresse@exemple.com"
-                  disabled={saving}
-                  className={`${inputClass} flex-1`}
-                />
-                <motion.button
-                  type="button"
-                  onClick={addNeedsReviewRecipient}
-                  disabled={saving}
-                  whileHover={{ scale: 1.03 }}
-                  whileTap={{ scale: 0.96 }}
-                  className="px-4 py-2 btn-gradient font-semibold rounded-xl shadow-md shadow-primary/10 hover:shadow-lg transition-all duration-300 text-body-sm disabled:opacity-50 shrink-0"
-                >
-                  Ajouter
-                </motion.button>
-              </div>
-              {(settings.needsHumanReviewRecipients || []).length > 0 && (
-                <motion.div
-                  initial="hidden"
-                  animate="visible"
-                  variants={{ visible: { transition: { staggerChildren: 0.03 } } }}
-                  className="flex flex-wrap gap-2 mt-2"
-                >
-                  {settings.needsHumanReviewRecipients.map((email) => (
-                    <motion.span
-                      key={email}
-                      variants={itemVariants}
-                      layout
-                      className="inline-flex items-center gap-1.5 px-3 py-1 bg-surface-container-high border border-outline-variant/60 rounded-full text-on-surface text-xs font-semibold shadow-sm"
-                    >
-                      {email}
-                      <motion.button
-                        onClick={() => removeNeedsReviewRecipient(email)}
-                        disabled={saving}
-                        whileHover={{ scale: 1.2 }}
-                        whileTap={{ scale: 0.9 }}
-                        className="text-on-surface-variant hover:text-error transition-colors flex items-center"
-                      >
-                        <span className="material-symbols-outlined text-[14px]">close</span>
-                      </motion.button>
-                    </motion.span>
-                  ))}
-                </motion.div>
-              )}
-              {(settings.needsHumanReviewRecipients || []).length === 0 && (
-                <p className="text-xs text-on-surface-variant/70 mt-1">Aucune boîte configurée — la notification restera inactive même si le toggle est activé.</p>
-              )}
-            </motion.div>
-
-            <SettingRow
-              title="Récapitulatif quotidien"
-              description="Envoie automatiquement un email listant tous les tickets ouverts aux adresses configurées."
-              icon={Mail}
-              checked={settings.dailySummaryEnabled}
-              onChange={(v) => updateSetting('dailySummaryEnabled', v)}
-              disabled={saving}
-            />
-
-            <motion.div
-              variants={itemVariants}
-              whileHover={{ y: -1, borderColor: 'var(--color-outline-variant)' }}
-              className="bento-card flex items-center justify-between gap-lg p-lg"
-            >
-              <div>
-                <div className="font-headline-sm text-headline-sm text-on-surface font-semibold">Heure d'envoi</div>
-                <p className="font-body-sm text-body-sm text-on-surface-variant mt-1.5 font-medium">Heure locale du serveur.</p>
-              </div>
-              <input
-                type="time"
-                value={settings.dailySummaryTime}
-                onChange={(e) => updateSetting('dailySummaryTime', e.target.value)}
-                disabled={saving || !settings.dailySummaryEnabled}
-                className={`${inputClass} disabled:opacity-50`}
-              />
-            </motion.div>
-
-            <motion.div
-              variants={itemVariants}
-              className="bento-card flex flex-col gap-sm p-lg"
-            >
-              <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">Destinataires</span>
-              <div className="flex items-center gap-sm">
-                <input
-                  type="email"
-                  value={summaryRecipientInput}
-                  onChange={(e) => setSummaryRecipientInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      addSummaryRecipient();
-                    }
-                  }}
-                  placeholder="adresse@exemple.com"
-                  disabled={saving}
-                  className={`${inputClass} flex-1`}
-                />
-                <motion.button
-                  type="button"
-                  onClick={addSummaryRecipient}
-                  disabled={saving}
-                  whileHover={{ scale: 1.03 }}
-                  whileTap={{ scale: 0.96 }}
-                  className="px-4 py-2 btn-gradient font-semibold rounded-xl shadow-md shadow-primary/10 hover:shadow-lg transition-all duration-300 text-body-sm disabled:opacity-50 shrink-0"
-                >
-                  Ajouter
-                </motion.button>
-              </div>
-              {(settings.dailySummaryRecipients || []).length > 0 && (
-                <motion.div
-                  initial="hidden"
-                  animate="visible"
-                  variants={{ visible: { transition: { staggerChildren: 0.03 } } }}
-                  className="flex flex-wrap gap-2 mt-2"
-                >
-                  {settings.dailySummaryRecipients.map((email) => (
-                    <motion.span
-                      key={email}
-                      variants={itemVariants}
-                      layout
-                      className="inline-flex items-center gap-1.5 px-3 py-1 bg-surface-container-high border border-outline-variant/60 rounded-full text-on-surface text-xs font-semibold shadow-sm"
-                    >
-                      {email}
-                      <motion.button
-                        onClick={() => removeSummaryRecipient(email)}
-                        disabled={saving}
-                        whileHover={{ scale: 1.2 }}
-                        whileTap={{ scale: 0.9 }}
-                        className="text-on-surface-variant hover:text-error transition-colors flex items-center"
-                      >
-                        <span className="material-symbols-outlined text-[14px]">close</span>
-                      </motion.button>
-                    </motion.span>
-                  ))}
-                </motion.div>
-              )}
-            </motion.div>
-
-            <motion.div
-              variants={itemVariants}
-              className="bento-card flex flex-col gap-sm p-lg"
-            >
-              <div className="flex items-center justify-between gap-md flex-wrap md:flex-nowrap">
-                <span className="font-body-sm text-body-sm text-on-surface-variant font-medium">
-                  Déclencher l'envoi du récapitulatif maintenant, sans attendre l'heure configurée. Le mail part aux destinataires ci-dessus et aux emails de groupe des équipes concernées.
-                </span>
-                <motion.button
-                  type="button"
-                  onClick={testDailySummary}
-                  disabled={testingSummary}
-                  whileHover={{ scale: 1.03 }}
-                  whileTap={{ scale: 0.96 }}
-                  className="px-4 py-2 border border-outline-variant/60 text-on-surface hover:bg-surface-container-high rounded-xl font-semibold text-body-sm transition-all disabled:opacity-50 shrink-0 shadow-sm"
-                >
-                  {testingSummary ? 'Envoi...' : 'Envoyer maintenant'}
-                </motion.button>
-              </div>
-              <AnimatePresence>
-                {summaryTestResult && (
-                  <motion.div
-                    key="summary-test-result"
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                    exit={{ opacity: 0, height: 0 }}
-                    className={`p-md rounded-xl border font-body-sm mt-2 overflow-hidden ${
-                      summaryTestResult.sent
-                        ? 'border-emerald-500/20 bg-emerald-500/5 text-emerald-600 dark:text-emerald-400'
-                        : 'border-amber-500/20 bg-amber-500/5 text-amber-600 dark:text-amber-400'
-                    }`}
-                  >
-                    {summaryTestResult.sent
-                      ? `Envoyé avec succès : ${summaryTestResult.ticketCount} ticket(s) à ${summaryTestResult.recipientCount} destinataire(s).`
-                      : `Rien n'a été envoyé : ${summaryTestResult.reason}`}
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </motion.div>
-          </div>
-
-          <div className="space-y-md">
-            {/* Récapitulatif observateurs */}
-            <motion.div variants={itemVariants} className="bento-card p-lg">
-              <div className="flex items-center gap-3 mb-4">
-                <div className="w-10 h-10 rounded-xl bg-violet-500/10 flex items-center justify-center">
-                  <Eye className="w-5 h-5 text-violet-600 dark:text-violet-400" />
-                </div>
-                <div>
-                  <h3 className="font-headline-sm text-headline-sm text-on-surface font-bold">Récapitulatif observateurs</h3>
-                  <p className="font-body-xs text-body-xs text-on-surface-variant">Envoie un résumé des tickets ouverts à chaque observateur.</p>
-                </div>
-              </div>
-
-              <SettingRow
-                title="Activer le récapitulatif"
-                description="Envoyez automatiquement la liste des tickets ouverts aux observateurs."
-                icon={Mail}
-                checked={settings.observerSummaryEnabled}
-                onChange={(v) => updateSetting('observerSummaryEnabled', v)}
-                disabled={saving}
-              />
-
-              <motion.div variants={itemVariants} className="bento-card flex items-center justify-between gap-lg p-lg">
-                <div>
-                  <div className="font-headline-sm text-headline-sm text-on-surface font-semibold">Jour d'envoi</div>
-                  <p className="font-body-sm text-body-sm text-on-surface-variant mt-1.5 font-medium">Jour de la semaine.</p>
-                </div>
-                <select
-                  value={settings.observerSummaryDay ?? 1}
-                  onChange={(e) => updateSetting('observerSummaryDay', Number(e.target.value))}
-                  disabled={saving || !settings.observerSummaryEnabled}
-                  className={`${inputClass} disabled:opacity-50`}
-                >
-                  <option value={0}>Dimanche</option>
-                  <option value={1}>Lundi</option>
-                  <option value={2}>Mardi</option>
-                  <option value={3}>Mercredi</option>
-                  <option value={4}>Jeudi</option>
-                  <option value={5}>Vendredi</option>
-                  <option value={6}>Samedi</option>
-                </select>
-              </motion.div>
-
-              <motion.div variants={itemVariants} className="bento-card flex items-center justify-between gap-lg p-lg">
-                <div>
-                  <div className="font-headline-sm text-headline-sm text-on-surface font-semibold">Heure d'envoi</div>
-                  <p className="font-body-sm text-body-sm text-on-surface-variant mt-1.5 font-medium">Heure locale du serveur.</p>
-                </div>
-                <input
-                  type="time"
-                  value={settings.observerSummaryTime || '09:00'}
-                  onChange={(e) => updateSetting('observerSummaryTime', e.target.value)}
-                  disabled={saving || !settings.observerSummaryEnabled}
-                  className={`${inputClass} disabled:opacity-50`}
-                />
-              </motion.div>
-            </motion.div>
-
-            {/* Notification email en cas d'échec de traitement */}
-            <motion.div
-              variants={itemVariants}
-              className="bento-card flex flex-col gap-sm p-lg"
-            >
-              <div className="min-w-0 flex-1">
-                <div className="font-headline-sm text-headline-sm text-on-surface font-semibold break-words">Email(s) en cas d'échec IA</div>
-                <p className="font-body-sm text-body-sm text-on-surface-variant mt-1.5 break-words">
-                  Adresses email notifiées quand un email entrant n'a pas pu être traité par l'IA (quota dépassé, erreur provider, etc.).
-                </p>
-              </div>
-
-              <div className="flex items-center gap-sm mt-2">
-                <input
-                  type="email"
-                  value={failureRecipientInput}
-                  onChange={(e) => setFailureRecipientInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      addFailureRecipient();
-                    }
-                  }}
-                  placeholder="adresse@exemple.com"
-                  disabled={saving}
-                  className={`${inputClass} flex-1`}
-                />
-                <motion.button
-                  type="button"
-                  onClick={addFailureRecipient}
-                  disabled={saving}
-                  whileHover={{ scale: 1.03 }}
-                  whileTap={{ scale: 0.96 }}
-                  className="px-4 py-2 btn-gradient font-semibold rounded-xl shadow-md shadow-primary/10 hover:shadow-lg transition-all duration-300 text-body-sm disabled:opacity-50 shrink-0"
-                >
-                  Ajouter
-                </motion.button>
-              </div>
-
-              {((settings.emailFailureNotificationRecipients && settings.emailFailureNotificationRecipients.length > 0)
-                ? settings.emailFailureNotificationRecipients
-                : (settings.emailFailureNotificationEmail ? [settings.emailFailureNotificationEmail] : [])).length > 0 && (
-                <motion.div
-                  initial="hidden"
-                  animate="visible"
-                  variants={{ visible: { transition: { staggerChildren: 0.03 } } }}
-                  className="flex flex-wrap gap-2 mt-2"
-                >
-                  {((settings.emailFailureNotificationRecipients && settings.emailFailureNotificationRecipients.length > 0)
-                    ? settings.emailFailureNotificationRecipients
-                    : (settings.emailFailureNotificationEmail ? [settings.emailFailureNotificationEmail] : [])).map((email) => (
-                    <motion.span
-                      key={email}
-                      variants={itemVariants}
-                      layout
-                      className="inline-flex items-center gap-1.5 px-3 py-1 bg-surface-container-high border border-outline-variant/60 rounded-full text-on-surface text-xs font-semibold shadow-sm"
-                    >
-                      {email}
-                      <motion.button
-                        onClick={() => removeFailureRecipient(email)}
-                        disabled={saving}
-                        whileHover={{ scale: 1.2 }}
-                        whileTap={{ scale: 0.9 }}
-                        className="text-on-surface-variant hover:text-error transition-colors flex items-center"
-                      >
-                        <span className="material-symbols-outlined text-[14px]">close</span>
-                      </motion.button>
-                    </motion.span>
-                  ))}
-                </motion.div>
-              )}
-            </motion.div>
-          </div>
-        </div>
-        </div>
-        )}
-
-      {/* ═══════════════════════════════════════════════════════════════════════ */}
-      {/* MODALE : SECTION 4 — NOTIFICATIONS LOCALES (navigateur + sons)         */}
-      {/* ═══════════════════════════════════════════════════════════════════════ */}
-        {openSection === 'local' && (
-        <div className="space-y-md">
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-lg">
-          <div className="space-y-md">
-            <SettingRow
-              title="Notifications navigateur"
-              description="Affiche une notification bureau lors des nouveaux tickets, assignations et mises à jour."
-              icon={Bell}
-              checked={browserNotif}
-              onChange={async (v) => {
-                if (v) {
-                  const perm = await requestBrowserNotifPermission();
-                  if (perm !== 'granted') {
-                    if (typeof window !== 'undefined' && Notification.permission === 'denied') {
-                      alert('Notifications bloquées par le navigateur. Réactivez-les dans les paramètres du site.');
-                      return;
-                    }
+            {/* ── 3. RÉCAPITULATIFS & ALERTES ── */}
+            {activeSection === 'digests' && (
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-lg items-start">
+                {/* Récapitulatif quotidien */}
+                <Panel
+                  symbol="mail"
+                  title="Récapitulatif quotidien"
+                  description="Liste de tous les tickets ouverts, envoyée aux adresses ci-dessous et aux emails de groupe des équipes."
+                  toggle={
+                    <Toggle
+                      checked={settings.dailySummaryEnabled}
+                      onChange={(v) => updateSetting('dailySummaryEnabled', v)}
+                      disabled={saving}
+                      label="Activer le récapitulatif quotidien"
+                    />
                   }
-                }
-                setBrowserNotif(v);
-                setBrowserNotifEnabled(v);
-              }}
-            />
-            {browserNotif && typeof window !== 'undefined' && Notification.permission === 'denied' && (
-              <div className="bento-card p-md flex items-start gap-3" style={{ borderLeft: '3px solid #ef4444' }}>
-                <span className="material-symbols-outlined text-red-500 shrink-0" style={{ fontSize: '20px', fontVariationSettings: "'FILL' 1" }}>block</span>
-                <div>
-                  <p className="text-[13px] font-semibold text-on-surface">Notifications bloquées</p>
-                  <p className="text-[12px] text-on-surface-variant mt-0.5">
-                    Le navigateur refuse les notifications. Cliquez sur l'icône 🔒 dans la barre d'adresse et autorisez les notifications.
+                >
+                  <FieldRow label="Heure d'envoi" hint="Heure locale du serveur.">
+                    <input
+                      type="time"
+                      value={settings.dailySummaryTime}
+                      onChange={(e) => updateSetting('dailySummaryTime', e.target.value)}
+                      disabled={saving || !settings.dailySummaryEnabled}
+                      className={`${inputClass} disabled:opacity-50`}
+                    />
+                  </FieldRow>
+                  <RecipientField
+                    label="Destinataires"
+                    values={settings.dailySummaryRecipients || []}
+                    inputValue={summaryRecipientInput}
+                    setInputValue={setSummaryRecipientInput}
+                    onAdd={addSummaryRecipient}
+                    onRemove={removeSummaryRecipient}
+                    disabled={saving}
+                    emptyHint="Aucune adresse — seuls les emails de groupe des équipes seront utilisés."
+                  />
+                  <div className="flex items-center justify-between gap-3 flex-wrap mt-1">
+                    <p className="text-xs text-on-surface-variant flex-1 min-w-[12rem]">
+                      Déclenche l'envoi immédiatement, sans attendre l'heure configurée.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={testDailySummary}
+                      disabled={testingSummary}
+                      className="px-4 py-2 border border-outline-variant/60 text-on-surface hover:bg-surface-container-high rounded-xl font-semibold text-body-sm transition-all disabled:opacity-50 shrink-0 shadow-sm flex items-center gap-2"
+                    >
+                      <Send className="w-4 h-4" />
+                      {testingSummary ? 'Envoi...' : 'Envoyer maintenant'}
+                    </button>
+                  </div>
+                  <AnimatePresence>
+                    {summaryTestResult && (
+                      <ResultBanner key="summary-test-result" tone={summaryTestResult.sent ? 'success' : 'warning'}>
+                        {summaryTestResult.sent
+                          ? `Envoyé avec succès : ${summaryTestResult.ticketCount} ticket(s) à ${summaryTestResult.recipientCount} destinataire(s).`
+                          : `Rien n'a été envoyé : ${summaryTestResult.reason}`}
+                      </ResultBanner>
+                    )}
+                  </AnimatePresence>
+                </Panel>
+
+                {/* Récapitulatif observateurs */}
+                <Panel
+                  symbol="visibility"
+                  accent="violet"
+                  title="Récapitulatif observateurs"
+                  description="Un email personnalisé par observateur, listant uniquement les tickets ouverts qu'il suit."
+                  toggle={
+                    <Toggle
+                      checked={settings.observerSummaryEnabled}
+                      onChange={(v) => updateSetting('observerSummaryEnabled', v)}
+                      disabled={saving}
+                      label="Activer le récapitulatif observateurs"
+                    />
+                  }
+                >
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-sm">
+                    <FieldRow label="Jour d'envoi">
+                      <select
+                        value={settings.observerSummaryDay ?? 1}
+                        onChange={(e) => updateSetting('observerSummaryDay', Number(e.target.value))}
+                        disabled={saving || !settings.observerSummaryEnabled}
+                        className={`${inputClass} disabled:opacity-50`}
+                      >
+                        <option value={0}>Dimanche</option>
+                        <option value={1}>Lundi</option>
+                        <option value={2}>Mardi</option>
+                        <option value={3}>Mercredi</option>
+                        <option value={4}>Jeudi</option>
+                        <option value={5}>Vendredi</option>
+                        <option value={6}>Samedi</option>
+                      </select>
+                    </FieldRow>
+                    <FieldRow label="Heure d'envoi">
+                      <input
+                        type="time"
+                        value={settings.observerSummaryTime || '09:00'}
+                        onChange={(e) => updateSetting('observerSummaryTime', e.target.value)}
+                        disabled={saving || !settings.observerSummaryEnabled}
+                        className={`${inputClass} disabled:opacity-50`}
+                      />
+                    </FieldRow>
+                  </div>
+                  <p className="text-xs text-on-surface-variant/70">
+                    Heure locale du serveur. Les observateurs sans adresse email sur leur compte sont ignorés.
                   </p>
-                </div>
+                </Panel>
+
+                {/* Notification création de ticket */}
+                <Panel
+                  icon={Mail}
+                  title="Notification création de ticket"
+                  description="Prévient les boîtes configurées dès qu'un demandeur crée un ticket (formulaire, portail, chatbot)."
+                  toggle={
+                    <Toggle
+                      checked={settings.ticketCreationEmailEnabled ?? false}
+                      onChange={(v) => updateSetting('ticketCreationEmailEnabled', v)}
+                      disabled={saving}
+                      label="Activer la notification de création de ticket"
+                    />
+                  }
+                >
+                  <RecipientField
+                    values={settings.ticketCreationEmailRecipients || []}
+                    inputValue={ticketCreationRecipientInput}
+                    setInputValue={setTicketCreationRecipientInput}
+                    onAdd={addTicketCreationRecipient}
+                    onRemove={removeTicketCreationRecipient}
+                    disabled={saving}
+                    emptyHint="Aucune boîte configurée — la notification reste inactive même si le toggle est activé."
+                  />
+                </Panel>
+
+                {/* Notification révision humaine */}
+                <Panel
+                  icon={AlertTriangle}
+                  title="Notification révision humaine"
+                  description="Prévient les boîtes configurées quand un email entrant nécessite une révision humaine (confiance IA faible, spam ambigu…)."
+                  toggle={
+                    <Toggle
+                      checked={settings.needsHumanReviewNotificationEnabled ?? true}
+                      onChange={(v) => updateSetting('needsHumanReviewNotificationEnabled', v)}
+                      disabled={saving}
+                      label="Activer la notification de révision humaine"
+                    />
+                  }
+                >
+                  <RecipientField
+                    values={settings.needsHumanReviewRecipients || []}
+                    inputValue={needsReviewRecipientInput}
+                    setInputValue={setNeedsReviewRecipientInput}
+                    onAdd={addNeedsReviewRecipient}
+                    onRemove={removeNeedsReviewRecipient}
+                    disabled={saving}
+                    emptyHint="Aucune boîte configurée — la notification reste inactive même si le toggle est activé."
+                  />
+                </Panel>
+
+                {/* Échec de traitement IA */}
+                <Panel
+                  icon={AlertTriangle}
+                  accent="amber"
+                  title="Alerte échec IA"
+                  description="Adresses notifiées quand un email entrant n'a pas pu être traité par l'IA (quota dépassé, erreur provider…)."
+                >
+                  <RecipientField
+                    values={failureRecipients}
+                    inputValue={failureRecipientInput}
+                    setInputValue={setFailureRecipientInput}
+                    onAdd={addFailureRecipient}
+                    onRemove={removeFailureRecipient}
+                    disabled={saving}
+                    emptyHint="Aucune adresse — aucun mail ne partira en cas d'échec."
+                  />
+                </Panel>
               </div>
             )}
-          </div>
 
-          <div className="space-y-md">
-            <SettingRow
-              title="Sons de notification"
-              description="Joue des sons Apple style lors des nouveaux tickets, assignations et mises à jour."
-              icon={Volume2}
-              checked={soundsEnabled}
-              onChange={toggleSounds}
-            />
-            {soundsEnabled && (
-              <motion.div
-                variants={itemVariants}
-                whileHover={{ y: -1, borderColor: 'var(--color-outline-variant)' }}
-                className="bento-card flex items-center justify-between gap-lg p-lg"
-              >
-                <div>
-                  <div className="font-headline-sm text-headline-sm text-on-surface font-semibold">Volume</div>
-                  <p className="font-body-sm text-body-sm text-on-surface-variant mt-1.5 font-medium">
-                    Intensité des sons de notification.
+            {/* ── 4. NOTIFICATIONS LOCALES ── */}
+            {activeSection === 'local' && (
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-lg items-start">
+                <div className="space-y-md">
+                  <Panel
+                    icon={Bell}
+                    title="Notifications navigateur"
+                    description="Affiche une notification de bureau lors des nouveaux tickets, assignations et mises à jour."
+                    toggle={
+                      <Toggle
+                        checked={browserNotif}
+                        onChange={async (v) => {
+                          if (v) {
+                            const perm = await requestBrowserNotifPermission();
+                            if (perm !== 'granted') {
+                              if (typeof window !== 'undefined' && Notification.permission === 'denied') {
+                                alert('Notifications bloquées par le navigateur. Réactivez-les dans les paramètres du site.');
+                                return;
+                              }
+                            }
+                          }
+                          setBrowserNotif(v);
+                          setBrowserNotifEnabled(v);
+                        }}
+                        label="Activer les notifications navigateur"
+                      />
+                    }
+                  >
+                    {browserNotif && typeof window !== 'undefined' && Notification.permission === 'denied' && (
+                      <div className="flex items-start gap-3 rounded-xl border border-red-500/20 bg-red-500/5 p-md">
+                        <span className="material-symbols-outlined text-red-500 shrink-0 text-xl">block</span>
+                        <div>
+                          <p className="text-[13px] font-semibold text-on-surface">Notifications bloquées</p>
+                          <p className="text-[12px] text-on-surface-variant mt-0.5">
+                            Le navigateur refuse les notifications. Cliquez sur l'icône 🔒 dans la barre d'adresse et autorisez-les.
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                  </Panel>
+
+                  <Panel
+                    icon={Volume2}
+                    title="Sons de notification"
+                    description="Joue des sons lors des nouveaux tickets, assignations et mises à jour."
+                    toggle={
+                      <Toggle checked={soundsEnabled} onChange={toggleSounds} label="Activer les sons de notification" />
+                    }
+                  >
+                    <FieldRow label="Volume" hint="Intensité des sons de notification.">
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="range"
+                          min={0}
+                          max={100}
+                          value={Math.round(soundsVolume * 100)}
+                          onChange={(e) => changeSoundsVolume(Number(e.target.value) / 100)}
+                          disabled={!soundsEnabled}
+                          className="w-24 accent-primary disabled:opacity-40"
+                        />
+                        <span className="font-body-sm text-body-sm text-on-surface-variant font-medium w-8 text-right">
+                          {Math.round(soundsVolume * 100)}%
+                        </span>
+                      </div>
+                    </FieldRow>
+                  </Panel>
+                </div>
+
+                <Panel
+                  icon={MousePointer2}
+                  title="Sons d'interaction"
+                  description="Petits sons à chaque clic, validation ou action utilisateur."
+                  toggle={
+                    <Toggle checked={soundsInteraction} onChange={toggleInteractionSounds} label="Activer les sons d'interaction" />
+                  }
+                >
+                  <p className="text-xs text-on-surface-variant/70">
+                    Réglage propre à ce navigateur : il n'affecte pas les autres utilisateurs.
                   </p>
-                </div>
-                <div className="flex items-center gap-sm">
-                  <input
-                    type="range"
-                    min={0}
-                    max={100}
-                    value={Math.round(soundsVolume * 100)}
-                    onChange={(e) => changeSoundsVolume(Number(e.target.value) / 100)}
-                    className="w-24 accent-primary"
-                  />
-                  <span className="font-body-sm text-body-sm text-on-surface-variant font-medium w-8 text-right">{Math.round(soundsVolume * 100)}%</span>
-                </div>
-              </motion.div>
+                </Panel>
+              </div>
             )}
-            <SettingRow
-              title="Sons d'interaction"
-              description="Petits sons à chaque clic, validation ou action utilisateur."
-              icon={MousePointer2}
-              checked={soundsInteraction}
-              onChange={toggleInteractionSounds}
-            />
-          </div>
-        </div>
-        </div>
-        )}
-      </SectionModal>
-    </motion.div>
+          </motion.div>
+        </AnimatePresence>
+      </div>
+    </div>
   );
 }
