@@ -193,14 +193,16 @@ export default function AckSignatureCard({ settings, updateSetting, saving, setE
   return (
     <motion.div variants={itemVariants} className="bento-card p-lg space-y-md">
       <div className="bento-card-header px-0 py-0 pb-md border-b border-outline-variant/40">
-        <h3 className="font-headline-sm text-headline-sm text-on-surface font-semibold mb-1">Accusé de réception et signature</h3>
-        <p className="font-body-sm text-body-sm text-on-surface-variant">
-          Message et signature envoyés automatiquement au demandeur lors de la réception de sa demande.
-          Placeholders : <code className="bg-surface-container-high px-1 rounded font-mono text-[11px]">{'{ticketId}'}</code>,{' '}
-          <code className="bg-surface-container-high px-1 rounded font-mono text-[11px]">{'{subject}'}</code>,{' '}
-          <code className="bg-surface-container-high px-1 rounded font-mono text-[11px]">{'{toName}'}</code>.
-          Sans <code className="bg-surface-container-high px-1 rounded font-mono text-[11px]">{'{ticketId}'}</code> dans le message, aucun numéro de ticket n'est affiché dans l'email.
-        </p>
+        <div className="w-full text-left">
+          <h3 className="font-headline-sm text-headline-sm text-on-surface font-semibold mb-1">Accusé de réception et signature</h3>
+          <p className="font-body-sm text-body-sm text-on-surface-variant">
+            Message et signature envoyés automatiquement au demandeur lors de la réception de sa demande.
+            Placeholders : <code className="bg-surface-container-high px-1 rounded font-mono text-[11px]">{'{ticketId}'}</code>,{' '}
+            <code className="bg-surface-container-high px-1 rounded font-mono text-[11px]">{'{subject}'}</code>,{' '}
+            <code className="bg-surface-container-high px-1 rounded font-mono text-[11px]">{'{toName}'}</code>.
+            Sans <code className="bg-surface-container-high px-1 rounded font-mono text-[11px]">{'{ticketId}'}</code> dans le message, aucun numéro de ticket n'est affiché dans l'email.
+          </p>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-lg">

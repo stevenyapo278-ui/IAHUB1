@@ -423,8 +423,8 @@ export default function EmailNotificationsTab() {
       {/* ═══════════════════════════════════════════════════════════════════ */}
       {/* SOUS-NAVIGATION (colonne collante sur desktop, pastilles sur mobile) */}
       {/* ═══════════════════════════════════════════════════════════════════ */}
-      <nav className="w-full lg:w-64 shrink-0 lg:sticky lg:top-6">
-        <div className="rounded-2xl border border-outline-variant/40 bg-surface-container-lowest p-1.5 flex lg:flex-col gap-1 overflow-x-auto no-scrollbar">
+      <nav className="w-full lg:w-72 shrink-0 lg:sticky lg:top-6">
+        <div className="rounded-2xl border border-outline-variant/40 bg-surface-container-lowest p-1.5 flex lg:flex-col gap-1 overflow-x-auto lg:overflow-visible [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {SECTIONS.map((s) => {
             const isActive = s.id === activeSection;
             return (
@@ -433,22 +433,22 @@ export default function EmailNotificationsTab() {
                 type="button"
                 onClick={() => setActiveSection(s.id)}
                 aria-current={isActive ? 'page' : undefined}
-                className={`flex items-center gap-2.5 rounded-xl px-3 py-2 text-left transition-all whitespace-nowrap border ${
+                className={`flex items-center gap-2.5 rounded-xl px-3 py-2 text-left transition-all border shrink-0 lg:shrink lg:w-full ${
                   isActive
                     ? 'bg-primary/10 border-primary/25 text-primary'
                     : 'border-transparent text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface'
                 }`}
               >
                 <span className={`material-symbols-outlined text-lg shrink-0 ${isActive ? '' : 'opacity-70'}`}>{s.symbol}</span>
-                <span className="flex-1 text-[13px] font-semibold">{s.title}</span>
-                <span
-                  className={`hidden lg:inline-block text-[10px] font-bold px-1.5 py-0.5 rounded-full border ${
-                    isActive
-                      ? 'border-primary/25 bg-primary/10 text-primary'
-                      : 'border-outline-variant/40 bg-surface-container-high text-on-surface-variant'
-                  }`}
-                >
-                  {sectionStats[s.id]}
+                <span className="min-w-0 flex-1 flex flex-col">
+                  <span className="text-[13px] font-semibold leading-tight whitespace-nowrap lg:whitespace-normal">{s.title}</span>
+                  <span
+                    className={`hidden lg:block text-[10px] font-semibold mt-0.5 ${
+                      isActive ? 'text-primary/80' : 'text-on-surface-variant/70'
+                    }`}
+                  >
+                    {sectionStats[s.id]}
+                  </span>
                 </span>
               </button>
             );
@@ -492,15 +492,19 @@ export default function EmailNotificationsTab() {
           </div>
         </div>
 
-        <AnimatePresence mode="wait">
-          <motion.div
-            key={activeSection}
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -4 }}
-            transition={{ duration: 0.2 }}
-            className="space-y-md"
-          >
+        {/* Racine d'animation locale : les cartes (AckSignatureCard, EmailTemplatesSection,
+            Panel...) portent des `variants` sans initial/animate et héritent donc du parent le
+            plus proche. Sans cette racine, l'AnimatePresence de la page Paramètres leur transmet
+            un état « hidden » qu'elles ne quittent jamais et tout reste invisible (opacity 0).
+            Même rôle que la racine de SectionModal. Pas d'AnimatePresence ici : imbriqué dans
+            celui de la page Paramètres (mode « wait »), il bloquait la commutation de section. */}
+        <motion.div
+          key={activeSection}
+          initial={false}
+          animate="visible"
+          variants={{ visible: { transition: { staggerChildren: 0.04 } } }}
+          className="space-y-md"
+        >
             {/* ── 1. CONTENU DES EMAILS : accusé, signature, gabarits ── */}
             {activeSection === 'content' && (
               <>
@@ -875,8 +879,7 @@ export default function EmailNotificationsTab() {
                 </Panel>
               </div>
             )}
-          </motion.div>
-        </AnimatePresence>
+        </motion.div>
       </div>
     </div>
   );
