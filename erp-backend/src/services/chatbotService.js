@@ -1979,7 +1979,11 @@ async function executeTool(toolName, args, user, { confirmed = false } = {}, ctx
       const seenMailSources = new Set();
       return header + results.map((r, idx) => {
         const m = r.metadata || {};
-        const src = r.sourceType === 'INCOMING_EMAIL' ? 'Email entrant' : 'Message du fil';
+        const src = r.sourceType === 'INCOMING_EMAIL'
+          ? 'Email entrant'
+          : r.sourceType === 'ATTACHMENT'
+            ? `Pièce jointe${m.filename ? ` « ${m.filename} »` : ''}`
+            : 'Message du fil';
         const dir = m.direction ? ` [${m.direction}]` : '';
         const from = m.fromEmail || '—';
         const subj = m.subject || 'Sans objet';

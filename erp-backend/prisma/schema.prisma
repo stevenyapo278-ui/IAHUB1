@@ -598,11 +598,19 @@ model TicketAttachment {
   incomingEmailId Int?
   contentHash     String? // hash sha256 du contenu binaire, pour détecter les logos/signatures dupliqués entre messages d'un même ticket
   localFilepath   String? // chemin fichier local si stocké sur disque (attente approbation)
+  // Texte extrait de la pièce jointe (PDF/DOCX/XLSX/CSV/texte, ou OCR Vision pour les images)
+  // puis découpé et indexé dans EmailRagChunk (sourceType = 'ATTACHMENT')
+  extractedText   String? @db.Text
+  // PENDING | PROCESSING | DONE | EMPTY | SKIPPED | ERROR
+  extractionStatus String  @default("PENDING")
+  extractionError  String? @db.Text
+  extractedAt      DateTime?
   uploadedBy      User?                 @relation("TicketAttachmentUploader", fields: [uploadedById], references: [id], onDelete: SetNull)
   uploadedById    Int? // auteur de l'upload (null pour les PJ reçues par email)
   createdAt       DateTime              @default(now())
 
   @@index([incomingEmailId])
+  @@index([extractionStatus])
 }
 
 model Followup {

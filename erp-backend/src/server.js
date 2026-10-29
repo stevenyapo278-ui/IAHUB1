@@ -194,6 +194,26 @@ async function backfillEmailRagJob() {
 }
 scheduleSync('backfill RAG mails', backfillEmailRagJob, () => 30 * 60); // toutes les 30 min
 
+// ── Backfill extraction / indexation des pièces jointes ────────────────
+// Les PJ reçues par mail ou jointes manuellement sont extraites (texte ou OCR
+// Vision) puis indexées en pgvector. Ce rattrapage couvre l'historique déjà
+// stocké sur disque et les fichiers dont l'extraction a été interrompue.
+// Lot volontairement petit : une image = un appel Vision, un chunk = un Embedding.
+async function backfillAttachmentIndexJob() {
+  const { backfillAttachmentIndex } = require('./services/attachmentIndexer');
+  const stats = await backfillAttachmentIndex({ batchSize: 5 });
+  if (stats.done || stats.skipped || stats.errors) {
+    console.log(
+      `[server] Backfill PJ : ${stats.done} indexée(s) (${stats.chunks} chunk(s)), ` +
+      `${stats.skipped} ignorée(s), ${stats.errors} échec(s)`
+    );
+  }
+  if (stats.waitingProvider > 0) {
+    console.warn('[server] Backfill PJ : aucun fournisseur Vision actif — images en attente');
+  }
+}
+scheduleSync('backfill indexation PJ', backfillAttachmentIndexJob, () => 10 * 60); // toutes les 10 min
+
 // Annuaire Active Directory : reflète les utilisateurs AD dans IA Hub toutes les
 // 10 minutes (création des nouveaux, maj nom complet, désactivation des partants).
 // Ne démarre que si le compte de service LDAP est configuré (.env).

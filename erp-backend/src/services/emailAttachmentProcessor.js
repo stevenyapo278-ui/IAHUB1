@@ -69,7 +69,7 @@ async function saveAttachmentLocally({ ticketId, filename, mimeType, contentByte
   const filepath = path.join(ATTACHMENTS_DIR, safeName);
   const buffer = Buffer.from(contentBytes, 'base64');
   fs.writeFileSync(filepath, buffer);
-  return prisma.ticketAttachment.create({
+  const created = await prisma.ticketAttachment.create({
     data: {
       ticketId,
       filename,
@@ -80,6 +80,16 @@ async function saveAttachmentLocally({ ticketId, filename, mimeType, contentByte
       localFilepath: filepath,
     },
   });
+  // Extraction du texte + OCR Vision puis indexation RAG de la PJ (fire-and-forget) :
+  // le contenu des fichiers joints devient interrogeable comme celui du mail.
+  // require paresseux : évite un cycle d'imports au chargement du module.
+  setImmediate(() => {
+    const { indexTicketAttachment } = require('./attachmentIndexer');
+    indexTicketAttachment(created.id).catch((err) =>
+      console.warn(`[emailAttachmentProcessor] indexation PJ ${created.id} échouée:`, err.message)
+    );
+  });
+  return created;
 }
 
 async function processIncomingAttachments({ account, graphMessageId, incomingEmailId, ticketId, simulatedAttachments, bodyText }) {

@@ -1434,6 +1434,10 @@ router.delete('/:id/attachments/:attachmentId', async (req, res) => {
         : path.join(process.cwd(), attachment.localFilepath);
       try { fs.unlinkSync(localPath); } catch {}
     }
+    // Retirer aussi les chunks RAG issus de la PJ : sinon son contenu resterait
+    // interrogeable par le chatbot après suppression.
+    const { deleteAttachmentChunks } = require('../services/attachmentIndexer');
+    await deleteAttachmentChunks(attachment.id).catch(() => {});
     await prisma.ticketAttachment.delete({ where: { id: attachment.id } });
     return res.json({ ok: true });
   } catch (err) {
@@ -2909,6 +2913,11 @@ router.post('/:id/attachments', ticketAttachmentUpload.array('files', 10), async
       },
     });
     created.push(attachment);
+    // Extraction du texte / OCR Vision + indexation RAG (fire-and-forget)
+    const { indexTicketAttachment } = require('../services/attachmentIndexer');
+    indexTicketAttachment(attachment.id).catch((err) =>
+      console.warn(`[ticket.routes] indexation PJ ${attachment.id} échouée:`, err.message)
+    );
   }
 
   await logEvent(ticketId, 'FOLLOWUP_ADDED', req.user.email || String(req.user.sub), { attachmentCount: created.length }).catch(() => {});
