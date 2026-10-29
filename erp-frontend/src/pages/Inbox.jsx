@@ -14,6 +14,7 @@ import { useFilterParam, useFilterParams } from '../hooks/useFilterParam';
 import { sanitizeHtml } from '../utils/sanitize';
 import DateRangePicker from '../components/ui/date-range-picker';
 import ConfirmDialog from '../components/ConfirmDialog';
+import AttachmentIndexBadge from '../components/AttachmentIndexBadge';
 import ThreadItem from '../components/inbox/ThreadItem';
 import MessageCard from '../components/inbox/MessageCard';
 import {
@@ -1488,6 +1489,12 @@ export default function Inbox() {
                           <span key={a.id} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-outline-variant/40 bg-surface-container text-[11px] font-medium text-on-surface">
                             <FileText className="w-3 h-3 text-sky-400 shrink-0" />
                             <span className="max-w-[180px] truncate">{a.filename}</span>
+                            {/* Statut de l'extraction du contenu (indexation RAG) */}
+                            <AttachmentIndexBadge
+                              status={a.extractionStatus}
+                              compact
+                              className="shrink-0"
+                            />
                           </span>
                         ))}
                       </div>

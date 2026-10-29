@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 import api from '../../api/client';
 import { SettingRow, IntervalRow, inputClass, itemVariants } from './SettingsComponents';
+import AttachmentIndexingCard from './AttachmentIndexingCard';
 
 // La section « Signatures & Accusé de réception » vit désormais dans AckSignatureCard.jsx,
 // affichée depuis l'onglet Notifications (Paramètres > Notifications > Contenu des emails).
@@ -312,6 +313,11 @@ export default function AutomationTab() {
           </div>
         </div>
       </div>
+
+      {/* ═══════════════════════════════════════════════════════════════════════ */}
+      {/* SECTION 3 bis : INDEXATION DES PIÈCES JOINTES */}
+      {/* ═══════════════════════════════════════════════════════════════════════ */}
+      <AttachmentIndexingCard />
 
       {/* ═══════════════════════════════════════════════════════════════════════ */}
       {/* SECTION 4 : RAPPELS TECHICIENS */}

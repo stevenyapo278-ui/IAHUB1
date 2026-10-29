@@ -1997,16 +1997,22 @@ async function executeTool(toolName, args, user, { confirmed = false } = {}, ctx
         // fournir une dizaine de chunks sur le même objet. On ne déclare qu'une
         // source par (ticket ou objet) pour éviter 5 puces identiques.
         if (ctx.collectSource) {
-          const key = m.ticketId || m.erpTicketId
-            ? `t:${m.ticketId ?? m.erpTicketId}:${subj}`
-            : `s:${subj || r.sourceId}`;
+          // Une pièce jointe est une source distincte du mail qui la porte : on
+          // l'identifie par son nom de fichier pour que l'UI affiche un trombone.
+          const isAttachment = r.sourceType === 'ATTACHMENT';
+          const key = isAttachment
+            ? `pj:${m.attachmentId ?? r.sourceId}`
+            : (m.ticketId || m.erpTicketId
+              ? `t:${m.ticketId ?? m.erpTicketId}:${subj}`
+              : `s:${subj || r.sourceId}`);
           if (!seenMailSources.has(key)) {
             seenMailSources.add(key);
             ctx.collectSource({
-              kind: 'email',
+              kind: isAttachment ? 'attachment' : 'email',
               id: r.sourceId ?? null,
               ticketId: m.ticketId ?? m.erpTicketId ?? null,
-              title: subj,
+              title: isAttachment ? (m.filename || 'Pièce jointe') : subj,
+              emailSubject: isAttachment ? subj : null,
               sender: from,
               date,
               score: r.combined_score ?? null,
@@ -3617,6 +3623,15 @@ function detectNewEntityReference(message, previousState) {
 // persistés dans ChatMessage.sources.
 function formatSourcesForClient(rawSources = []) {
   return (rawSources || []).slice(0, 8).map((s) => {
+    if (s.kind === 'attachment') {
+      return {
+        kind: 'attachment',
+        title: s.title || 'Pièce jointe',
+        subtitle: [s.emailSubject, s.sender, s.date].filter(Boolean).join(' · ') || 'Pièce jointe',
+        ticketId: s.ticketId ?? null,
+        href: s.ticketId ? `/tickets/${s.ticketId}` : null,
+      };
+    }
     if (s.kind === 'email') {
       const href = s.ticketId ? `/tickets/${s.ticketId}` : null;
       return {

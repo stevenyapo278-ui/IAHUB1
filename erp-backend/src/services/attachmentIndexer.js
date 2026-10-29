@@ -88,6 +88,21 @@ function buildAttachmentContent({ attachment, email, kind }) {
   return neutralizePromptTags(parts.join('\n\n'));
 }
 
+// Interrupteur global (Paramètres > Automatisation). Lit la base à chaque appel :
+// la bascule s'applique immédiatement, sans redémarrage du serveur. En cas d'erreur
+// de lecture, on reste activé (comportement historique).
+async function isAttachmentIndexEnabled() {
+  try {
+    const settings = await prisma.systemSettings.findUnique({
+      where: { id: 1 },
+      select: { attachmentIndexEnabled: true },
+    });
+    return settings?.attachmentIndexEnabled !== false;
+  } catch {
+    return true;
+  }
+}
+
 // Supprime les chunks RAG d'une pièce jointe (avant ré-indexation ou suppression).
 async function deleteAttachmentChunks(attachmentId) {
   await prisma.emailRagChunk.deleteMany({ where: { sourceType: 'ATTACHMENT', sourceId: attachmentId } });
@@ -145,6 +160,10 @@ async function indexAttachmentChunks(attachment, email, kind) {
  * Appelée en fire-and-forget après chaque upload/réception, et par le backfill.
  */
 async function indexTicketAttachment(attachmentId) {
+  // Indexation suspendue : on ne réserve pas la ligne, elle reste PENDING et sera
+  // reprise au prochain passage après réactivation.
+  if (!(await isAttachmentIndexEnabled())) return { status: 'DISABLED' };
+
   const claimed = await prisma.ticketAttachment.updateMany({
     where: { id: attachmentId, extractionStatus: 'PENDING' },
     data: { extractionStatus: 'PROCESSING' },
@@ -267,10 +286,55 @@ async function backfillAttachmentIndex({ batchSize = 5 } = {}) {
   return stats;
 }
 
+/**
+ * Compteurs affichés dans Paramètres > Automatisation > Indexation des pièces jointes.
+ * Seules les PJ disposant d'un fichier local sont comptées (les autres ne peuvent pas
+ * être extraites).
+ */
+async function getAttachmentIndexingStats() {
+  const where = { localFilepath: { not: null } };
+  const [groups, chunks, enabled] = await Promise.all([
+    prisma.ticketAttachment.groupBy({ by: ['extractionStatus'], where, _count: { _all: true } }),
+    prisma.emailRagChunk.count({ where: { sourceType: 'ATTACHMENT' } }),
+    isAttachmentIndexEnabled(),
+  ]);
+
+  const counts = { PENDING: 0, PROCESSING: 0, DONE: 0, EMPTY: 0, SKIPPED: 0, ERROR: 0 };
+  let total = 0;
+  for (const g of groups) {
+    const n = g._count?._all || 0;
+    if (counts[g.extractionStatus] !== undefined) counts[g.extractionStatus] = n;
+    total += n;
+  }
+
+  return { enabled, total, chunks, ...counts };
+}
+
+/**
+ * Relance l'extraction d'une pièce jointe (bouton « Réindexer ») : purge ses chunks,
+ * remet la ligne en attente puis l'extrait immédiatement. Utile pour une PJ passée
+ * SKIPPED/ERROR (fournisseur Vision configuré entre-temps, fichier recopié sur le volume).
+ */
+async function reindexAttachment(attachmentId) {
+  // Ne jamais vider le texte extrait existant si l'indexation est suspendue.
+  if (!(await isAttachmentIndexEnabled())) return { status: 'DISABLED' };
+
+  const reset = await prisma.ticketAttachment.updateMany({
+    where: { id: attachmentId },
+    data: { extractionStatus: 'PENDING', extractionError: null, extractedText: null, extractedAt: null },
+  });
+  if (!reset || reset.count === 0) return null;
+  await deleteAttachmentChunks(attachmentId);
+  return indexTicketAttachment(attachmentId);
+}
+
 module.exports = {
   indexTicketAttachment,
   backfillAttachmentIndex,
   deleteAttachmentChunks,
+  reindexAttachment,
+  getAttachmentIndexingStats,
+  isAttachmentIndexEnabled,
   buildAttachmentContent,
   neutralizePromptTags,
 };

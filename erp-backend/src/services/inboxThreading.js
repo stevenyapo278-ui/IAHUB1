@@ -98,7 +98,13 @@ function inboundToMessage(email) {
     ccRecipients: email.ccRecipients || [],
     isRead: email.isRead,
     attachments: Array.isArray(email.attachments)
-      ? email.attachments.map((a) => ({ id: a.id, filename: a.filename, mimeType: a.mimeType }))
+      ? email.attachments.map((a) => ({
+        id: a.id,
+        filename: a.filename,
+        mimeType: a.mimeType,
+        // Statut de l'extraction / OCR affiché sous forme de pastille sur la PJ.
+        extractionStatus: a.extractionStatus || null,
+      }))
       : [],
     error: email.error,
     errorDetail: email.errorDetail,
@@ -357,7 +363,12 @@ async function getThread(key, scope = null) {
   let emails;
   let sentMessages = [];
 
-  const attachmentSelect = { select: { id: true, filename: true, mimeType: true, localFilepath: true } };
+  const attachmentSelect = {
+    select: {
+      id: true, filename: true, mimeType: true, localFilepath: true,
+      extractionStatus: true,
+    },
+  };
 
   if (typeof key === 'string' && key.startsWith('single-')) {
     const id = Number(key.slice('single-'.length));

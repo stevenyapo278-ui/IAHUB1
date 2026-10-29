@@ -40,6 +40,8 @@ import { sanitizeHtml, richTextIsEmpty } from '../utils/sanitize';
 import { readFollowupDraft, writeFollowupDraft } from '../utils/followupDraft';
 import RichTextEditor from '../components/RichTextEditor';
 import FollowupTemplateDialog from '../components/FollowupTemplateDialog';
+import AttachmentIndexBadge, { isIndexingBusy, canReindex } from '../components/AttachmentIndexBadge';
+import ExtractedTextPanel from '../components/ExtractedTextPanel';
 
 function extractCleanTextAndImages(content) {
   if (!content || typeof content !== 'string') return { text: '', images: [] };
@@ -304,6 +306,12 @@ export default function TicketDetail() {
   const [showUnlinkConfirm, setShowUnlinkConfirm] = useState(false);
   const attachmentInputRef = useRef(null);
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
+  // Onglet de l'aperçu d'une pièce jointe : fichier d'origine ou texte extrait/OCR
+  const [previewTab, setPreviewTab] = useState('file');
+  const [reindexingAttachmentId, setReindexingAttachmentId] = useState(null);
+  // Rafraîchissement borné après upload : une extraction (OCR Vision) se termine
+  // en quelques secondes, mais on ne boucle pas indéfiniment si elle reste en attente.
+  const indexPollCountRef = useRef(0);
 
   const [adjacent, setAdjacent] = useState({ first: null, prev: null, next: null, last: null });
   const slideDirectionRef = useRef('next'); // 'next' = vers la droite→gauche, 'prev' = gauche→droite
@@ -549,7 +557,51 @@ export default function TicketDetail() {
   // pour que l'animation de sortie (AnimatePresence) puisse s'exécuter sur l'ancien contenu
   useEffect(() => {
     load();
+    indexPollCountRef.current = 0;
+    setPreviewTab('file');
   }, [id, load]);
+
+  // Tant qu'une pièce jointe est en attente d'extraction (text/OCR + embeddings),
+  // on rafraîchit le ticket quelques fois pour faire passer le badge à « Indexé ».
+  useEffect(() => {
+    const busy = (ticket?.attachments || []).some((a) => isIndexingBusy(a.extractionStatus));
+    if (!busy) { indexPollCountRef.current = 0; return undefined; }
+    if (indexPollCountRef.current >= 6) return undefined;
+    const timer = setTimeout(() => {
+      indexPollCountRef.current += 1;
+      load();
+    }, 4000);
+    return () => clearTimeout(timer);
+  }, [ticket?.attachments, load]);
+
+  // Relance l'extraction d'une PJ (Ignorée / Sans texte / Échec). L'extraction est
+  // faite côté serveur avant la réponse : quelques secondes possibles pour un OCR.
+  async function reindexAttachment(attachment) {
+    if (!attachment || reindexingAttachmentId) return;
+    setReindexingAttachmentId(attachment.id);
+    try {
+      const { data } = await api.post(`/tickets/${id}/attachments/${attachment.id}/reindex`);
+      const updated = data.attachment;
+      if (updated) {
+        setTicket((prev) => prev && ({
+          ...prev,
+          attachments: (prev.attachments || []).map((a) => (a.id === updated.id ? { ...a, ...updated } : a)),
+        }));
+        setLightboxSrc((prev) => (prev && prev.attachment?.id === updated.id
+          ? { ...prev, attachment: { ...prev.attachment, ...updated } }
+          : prev));
+      }
+      const status = data.result?.status;
+      if (status === 'DONE') toast.success('Pièce jointe indexée');
+      else if (status === 'SKIPPED' || status === 'EMPTY') toast.info('Aucun texte exploitable dans ce fichier');
+      else if (status === 'ERROR') toast.error(data.result?.reason || "L'extraction a échoué");
+      else toast.info(data.result?.reason || 'Extraction relancée');
+    } catch (err) {
+      toast.error(err.response?.data?.error || "Impossible de relancer l'extraction");
+    } finally {
+      setReindexingAttachmentId(null);
+    }
+  }
 
   // ── Technicien suggéré (IA de triage) ────────────────────────────────────────
   // Même endpoint que le centre de validation (permission tickets.approve côté serveur) :
@@ -734,6 +786,7 @@ export default function TicketDetail() {
 
   // Prévisualisation générique — Excel lisible (tableau) au lieu de caractères brouillés
   async function openAttachment(attachment) {
+    setPreviewTab('file');
     try {
       const { data } = await api.get(`/tickets/${id}/attachments/${attachment.id}/file`, { responseType: 'blob' });
       const mime = (attachment.mimeType || data.type || '').toLowerCase();
@@ -2422,6 +2475,16 @@ export default function TicketDetail() {
                               </span>
                             )}
                           </button>
+                          {/* Statut de l'extraction/OCR du contenu de l'image */}
+                          <div className="absolute bottom-1 left-1 z-10">
+                            <AttachmentIndexBadge
+                              status={a.extractionStatus}
+                              error={a.extractionError}
+                              compact
+                              onReindex={() => reindexAttachment(a)}
+                              reindexing={reindexingAttachmentId === a.id}
+                            />
+                          </div>
                           {canRemoveAttachment(a) && (
                             <button
                               type="button"
@@ -2475,6 +2538,12 @@ export default function TicketDetail() {
                             <span className="block text-[11px] font-medium text-on-surface-variant truncate">
                               {a.mimeType || kind.toUpperCase()} {a.size ? `· ${formatBytes(a.size)}` : ''} {fromEmail ? '· email' : ''}
                             </span>
+                            {/* Contenu indexé pour le chatbot (texte du document ou OCR) */}
+                            <AttachmentIndexBadge
+                              status={a.extractionStatus}
+                              error={a.extractionError}
+                              className="mt-1"
+                            />
                           </span>
                           <span className="w-7 h-7 rounded-lg bg-primary/10 group-hover:bg-primary text-primary group-hover:text-white flex items-center justify-center shrink-0 transition-colors">
                             <Eye className="w-3.5 h-3.5" />
@@ -4884,6 +4953,9 @@ export default function TicketDetail() {
         const isAudio = kind === 'audio';
         const isExcel = !isString && !!lightboxSrc.isExcel && Array.isArray(lightboxSrc.sheetData);
         const isWord = !isString && !!lightboxSrc.isWord && !!lightboxSrc.wordHtml;
+        // Onglet « Texte extrait » : ce que le chatbot a réellement lu du fichier
+        const showExtractedText = !!attachment && previewTab === 'text';
+        const darkChrome = (isImage || isVideo) && !showExtractedText;
         const close = () => {
           if (!isString && lightboxSrc?.src) try { URL.revokeObjectURL(lightboxSrc.src); } catch {}
           setLightboxSrc(null);
@@ -4900,11 +4972,11 @@ export default function TicketDetail() {
             autoFocus
           >
             <div
-              className={`relative flex flex-col w-full max-w-5xl max-h-[90vh] rounded-2xl overflow-hidden shadow-2xl border ${isImage || isVideo ? 'bg-black border-white/10' : 'bg-surface border-outline-variant/30'}`}
+              className={`relative flex flex-col w-full max-w-5xl max-h-[90vh] rounded-2xl overflow-hidden shadow-2xl border ${darkChrome ? 'bg-black border-white/10' : 'bg-surface border-outline-variant/30'}`}
               onClick={(e) => e.stopPropagation()}
             >
               {/* Header */}
-              <div className={`flex items-center gap-3 px-4 py-3 border-b shrink-0 ${isImage || isVideo ? 'bg-black/60 border-white/10' : 'bg-surface-container-low border-outline-variant/30'}`}>
+              <div className={`flex items-center gap-3 px-4 py-3 border-b shrink-0 ${darkChrome ? 'bg-black/60 border-white/10' : 'bg-surface-container-low border-outline-variant/30'}`}>
                 <span className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border shadow-sm ${
                   isImage ? 'bg-emerald-500/20 border-emerald-500/30 text-emerald-400' :
                   isPdf ? 'bg-red-500/15 border-red-500/20 text-red-500' :
@@ -4918,29 +4990,68 @@ export default function TicketDetail() {
                   {isImage ? <ImageIcon className="w-5 h-5" /> : isPdf ? <FileText className="w-5 h-5" /> : isExcel ? <FileText className="w-5 h-5" /> : isWord ? <FileText className="w-5 h-5" /> : isVideo ? <Video className="w-5 h-5" /> : isAudio ? <Music className="w-5 h-5" /> : isText ? <FileText className="w-5 h-5" /> : <FileIcon className="w-5 h-5" />}
                 </span>
                 <div className="min-w-0 flex-1">
-                  <p className={`text-sm font-bold truncate ${isImage || isVideo ? 'text-white' : 'text-on-surface'}`}>{filename || 'Aperçu'}</p>
-                  <p className={`text-xs truncate ${isImage || isVideo ? 'text-white/60' : 'text-on-surface-variant'}`}>{mime || kind.toUpperCase()} {attachment?.size ? `· ${formatBytes(attachment.size)}` : ''}</p>
+                  <p className={`text-sm font-bold truncate ${darkChrome ? 'text-white' : 'text-on-surface'}`}>{filename || 'Aperçu'}</p>
+                  <p className={`text-xs truncate ${darkChrome ? 'text-white/60' : 'text-on-surface-variant'}`}>{mime || kind.toUpperCase()} {attachment?.size ? `· ${formatBytes(attachment.size)}` : ''}</p>
                 </div>
                 <div className="flex items-center gap-1.5 shrink-0">
+                  {/* Bascule fichier d'origine / texte extrait (OCR compris) */}
+                  {attachment && (
+                    <div className={`flex items-center gap-0.5 p-0.5 rounded-xl border ${darkChrome ? 'bg-white/10 border-white/15' : 'bg-surface border-outline-variant/40'}`}>
+                      <button
+                        type="button"
+                        onClick={() => setPreviewTab('file')}
+                        title="Fichier d'origine"
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-colors cursor-pointer ${previewTab === 'file' ? 'bg-primary text-on-primary shadow-sm' : (darkChrome ? 'text-white/70 hover:text-white' : 'text-on-surface-variant hover:text-on-surface')}`}
+                      >
+                        Fichier
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPreviewTab('text')}
+                        title="Texte extrait / OCR envoyé au chatbot"
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-colors cursor-pointer ${previewTab === 'text' ? 'bg-primary text-on-primary shadow-sm' : (darkChrome ? 'text-white/70 hover:text-white' : 'text-on-surface-variant hover:text-on-surface')}`}
+                      >
+                        Texte extrait
+                      </button>
+                    </div>
+                  )}
+                  {attachment && canReindex(attachment.extractionStatus) && (
+                    <button
+                      type="button"
+                      onClick={() => reindexAttachment(attachment)}
+                      disabled={reindexingAttachmentId === attachment.id}
+                      title="Relancer l'extraction de cette pièce jointe"
+                      className={`p-2 rounded-xl border transition-all cursor-pointer disabled:opacity-50 ${darkChrome ? 'bg-white/10 hover:bg-white/20 text-white border-white/15' : 'bg-surface hover:bg-surface-container border-outline-variant/40 text-on-surface-variant hover:text-primary'}`}
+                    >
+                      <RefreshCw className={`w-4 h-4 ${reindexingAttachmentId === attachment.id ? 'animate-spin' : ''}`} />
+                    </button>
+                  )}
                   {src && (
-                    <button type="button" onClick={openInNewTab} title="Ouvrir dans un nouvel onglet" className={`p-2 rounded-xl border transition-all cursor-pointer ${isImage || isVideo ? 'bg-white/10 hover:bg-white/20 text-white border-white/15' : 'bg-surface hover:bg-surface-container border-outline-variant/40 text-on-surface-variant hover:text-on-surface'}`}>
+                    <button type="button" onClick={openInNewTab} title="Ouvrir dans un nouvel onglet" className={`p-2 rounded-xl border transition-all cursor-pointer ${darkChrome ? 'bg-white/10 hover:bg-white/20 text-white border-white/15' : 'bg-surface hover:bg-surface-container border-outline-variant/40 text-on-surface-variant hover:text-on-surface'}`}>
                       <Eye className="w-4 h-4" />
                     </button>
                   )}
                   {attachment && (
-                    <button type="button" onClick={() => downloadAttachment(attachment)} title="Télécharger" className={`p-2 rounded-xl border transition-all cursor-pointer ${isImage || isVideo ? 'bg-white/10 hover:bg-white/20 text-white border-white/15' : 'bg-primary text-on-primary hover:opacity-90 border-primary shadow-sm'}`}>
+                    <button type="button" onClick={() => downloadAttachment(attachment)} title="Télécharger" className={`p-2 rounded-xl border transition-all cursor-pointer ${darkChrome ? 'bg-white/10 hover:bg-white/20 text-white border-white/15' : 'bg-primary text-on-primary hover:opacity-90 border-primary shadow-sm'}`}>
                       <Download className="w-4 h-4" />
                     </button>
                   )}
-                  <button type="button" onClick={close} className={`p-2 rounded-xl border transition-all cursor-pointer ${isImage || isVideo ? 'bg-white/10 hover:bg-white/20 text-white border-white/15' : 'bg-surface hover:bg-surface-container border-outline-variant/40 text-on-surface-variant hover:text-on-surface'}`}>
+                  <button type="button" onClick={close} className={`p-2 rounded-xl border transition-all cursor-pointer ${darkChrome ? 'bg-white/10 hover:bg-white/20 text-white border-white/15' : 'bg-surface hover:bg-surface-container border-outline-variant/40 text-on-surface-variant hover:text-on-surface'}`}>
                     <X className="w-4 h-4" />
                   </button>
                 </div>
               </div>
 
               {/* Contenu */}
-              <div className={`flex-1 overflow-auto flex items-center justify-center ${isImage || isVideo ? 'bg-black p-4' : 'bg-surface p-0'} min-h-[280px]`}>
-                {isImage ? (
+              <div className={`flex-1 overflow-auto flex items-center justify-center ${darkChrome ? 'bg-black p-4' : 'bg-surface p-0'} min-h-[280px]`}>
+                {showExtractedText ? (
+                  <ExtractedTextPanel
+                    ticketId={id}
+                    attachment={attachment}
+                    onReindex={() => reindexAttachment(attachment)}
+                    reindexing={reindexingAttachmentId === attachment.id}
+                  />
+                ) : isImage ? (
                   <img src={src} alt={filename || 'Aperçu'} className="max-w-full max-h-[70vh] object-contain rounded-xl shadow-2xl" />
                 ) : isPdf ? (
                   <iframe src={src} title={filename} className="w-full h-[72vh] min-h-[420px] bg-white rounded-b-2xl" />
@@ -5022,7 +5133,7 @@ export default function TicketDetail() {
 
               {/* Footer filename */}
               {filename && !isText && (
-                <div className={`px-4 py-2 border-t text-xs font-mono truncate text-center shrink-0 ${isImage || isVideo ? 'bg-black/40 border-white/10 text-white/60' : 'bg-surface-container-low border-outline-variant/30 text-on-surface-variant'}`}>
+                <div className={`px-4 py-2 border-t text-xs font-mono truncate text-center shrink-0 ${darkChrome ? 'bg-black/40 border-white/10 text-white/60' : 'bg-surface-container-low border-outline-variant/30 text-on-surface-variant'}`}>
                   {filename}
                 </div>
               )}

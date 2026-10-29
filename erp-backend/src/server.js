@@ -200,7 +200,9 @@ scheduleSync('backfill RAG mails', backfillEmailRagJob, () => 30 * 60); // toute
 // stocké sur disque et les fichiers dont l'extraction a été interrompue.
 // Lot volontairement petit : une image = un appel Vision, un chunk = un Embedding.
 async function backfillAttachmentIndexJob() {
-  const { backfillAttachmentIndex } = require('./services/attachmentIndexer');
+  const { backfillAttachmentIndex, isAttachmentIndexEnabled } = require('./services/attachmentIndexer');
+  // Indexation suspendue depuis Paramètres > Automatisation : on ne consomme ni Vision ni Embedding.
+  if (!(await isAttachmentIndexEnabled())) return;
   const stats = await backfillAttachmentIndex({ batchSize: 5 });
   if (stats.done || stats.skipped || stats.errors) {
     console.log(

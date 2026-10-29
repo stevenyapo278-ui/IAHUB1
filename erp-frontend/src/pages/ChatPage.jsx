@@ -713,12 +713,12 @@ export default function ChatPage() {
                                 to={s.href}
                                 className="inline-flex items-center gap-1 rounded-full bg-primary/10 text-primary px-2 py-0.5 text-[10px] font-medium hover:bg-primary/20 transition-colors"
                               >
-                                <span className="material-symbols-outlined text-[10px]">{s.kind === 'email' ? 'mail' : 'school'}</span>
+                                <span className="material-symbols-outlined text-[10px]">{{ email: 'mail', attachment: 'attach_file' }[s.kind] || 'school'}</span>
                                 {s.title}
                               </Link>
                             ) : (
-                              <span key={si} className="inline-flex items-center gap-1 rounded-full bg-outline-variant/30 px-2 py-0.5 text-[10px] text-on-surface-variant">
-                                <span className="material-symbols-outlined text-[10px]">{s.kind === 'email' ? 'mail' : 'school'}</span>
+                              <span key={si} title={s.subtitle || undefined} className="inline-flex items-center gap-1 rounded-full bg-outline-variant/30 px-2 py-0.5 text-[10px] text-on-surface-variant">
+                                <span className="material-symbols-outlined text-[10px]">{{ email: 'mail', attachment: 'attach_file' }[s.kind] || 'school'}</span>
                                 {s.title}
                               </span>
                             )

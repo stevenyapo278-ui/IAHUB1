@@ -26,6 +26,24 @@ const multer = require('multer');
 const { validateUpload, safeFilename: makeSafeFilename } = require('../utils/security');
 
 const MAX_ATTACHMENT_SIZE = 200 * 1024 * 1024; // 200 Mo max par pièce jointe
+
+// Champs de pièce jointe exposés à l'interface : le texte extrait (jusqu'à 20 000
+// caractères par fichier) n'est JAMAIS renvoyé dans la liste du ticket — il est chargé
+// à la demande via GET /:id/attachments/:attachmentId/text.
+const ATTACHMENT_LIST_SELECT = {
+  id: true,
+  ticketId: true,
+  filename: true,
+  mimeType: true,
+  source: true,
+  incomingEmailId: true,
+  uploadedById: true,
+  contentHash: true,
+  createdAt: true,
+  extractionStatus: true,
+  extractionError: true,
+  extractedAt: true,
+};
 const upload = multer({ limits: { fileSize: MAX_ATTACHMENT_SIZE } });
 const router = express.Router();
 router.use(authenticate);
@@ -1320,7 +1338,7 @@ router.get('/:id', async (req, res) => {
       approvedBy: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
       followups: { include: { author: { select: { id: true, fullName: true, avatarUrl: true } } }, orderBy: { createdAt: 'asc' } },
       messages: { orderBy: { timestamp: 'asc' } },
-      attachments: true,
+      attachments: { select: ATTACHMENT_LIST_SELECT },
       aiSuggestions: { orderBy: { createdAt: 'desc' } },
       linksA: { include: { ticketB: { select: { id: true, title: true, status: true, priority: true } } }, orderBy: { createdAt: 'asc' } },
       linksB: { include: { ticketA: { select: { id: true, title: true, status: true, priority: true } } }, orderBy: { createdAt: 'asc' } },
@@ -1397,6 +1415,70 @@ router.get('/:id/attachments/:attachmentId/file', async (req, res) => {
     console.error('[ticket.routes] Erreur téléchargement pièce jointe:', err);
     return res.status(500).json({ error: 'Erreur lors du téléchargement' });
   }
+});
+
+// Texte extrait (ou OCR Vision) d'une pièce jointe — affiché dans l'aperçu
+// (onglet « Texte extrait »). Mêmes règles d'accès que le téléchargement du fichier.
+router.get('/:id/attachments/:attachmentId/text', async (req, res) => {
+  const attachment = await prisma.ticketAttachment.findFirst({
+    where: { id: Number(req.params.attachmentId), ticketId: Number(req.params.id) },
+    select: {
+      id: true, filename: true, extractionStatus: true, extractionError: true,
+      extractedAt: true, extractedText: true,
+    },
+  });
+  if (!attachment) return res.status(404).json({ error: 'Pièce jointe introuvable' });
+
+  if (isRequesterOnly(req.user)) {
+    const ownerTicket = await prisma.ticket.findFirst({ where: { id: Number(req.params.id), requesterId: req.user.sub }, select: { id: true } });
+    const isObserver = ownerTicket ? null : await prisma.ticket.findFirst({ where: { id: Number(req.params.id), observers: { some: { id: req.user.sub } } }, select: { id: true } });
+    if (!ownerTicket && !isObserver) return res.status(404).json({ error: 'Pièce jointe introuvable' });
+  }
+
+  return res.json({
+    id: attachment.id,
+    filename: attachment.filename,
+    extractionStatus: attachment.extractionStatus,
+    extractionError: attachment.extractionError,
+    extractedAt: attachment.extractedAt,
+    extractedText: attachment.extractedText || null,
+  });
+});
+
+// Relance l'extraction / l'OCR d'une pièce jointe (statut Ignorée ou Échec).
+// Même autorisation que la suppression : tickets.manage, ou l'assigné pour sa propre PJ.
+router.post('/:id/attachments/:attachmentId/reindex', async (req, res) => {
+  const ticketId = Number(req.params.id);
+  const attachment = await prisma.ticketAttachment.findFirst({
+    where: { id: Number(req.params.attachmentId), ticketId },
+    select: { id: true, uploadedById: true },
+  });
+  if (!attachment) return res.status(404).json({ error: 'Pièce jointe introuvable' });
+
+  let authorized = hasPermission(req.user, 'tickets.manage');
+  if (!authorized && attachment.uploadedById != null) {
+    const assigned = await prisma.ticket.findFirst({
+      where: { id: ticketId, OR: [{ assignedToId: req.user.sub }, { assignees: { some: { id: req.user.sub } } }] },
+      select: { id: true },
+    });
+    authorized = !!assigned && attachment.uploadedById === req.user.sub;
+  }
+  if (!authorized) {
+    return res.status(403).json({ error: "Vous ne pouvez relancer l'extraction que des pièces jointes que vous avez vous-même jointes." });
+  }
+
+  const { isAttachmentIndexEnabled, reindexAttachment } = require('../services/attachmentIndexer');
+  if (!(await isAttachmentIndexEnabled())) {
+    return res.status(409).json({ error: "L'indexation des pièces jointes est suspendue (Paramètres > Automatisation)." });
+  }
+
+  // Extraction immédiate (OCR Vision compris) : l'opération peut prendre quelques secondes.
+  const result = await reindexAttachment(attachment.id);
+  const updated = await prisma.ticketAttachment.findUnique({
+    where: { id: attachment.id },
+    select: ATTACHMENT_LIST_SELECT,
+  });
+  return res.json({ result, attachment: updated });
 });
 
 // Suppression d'une pièce jointe. Autorisation :
@@ -2921,7 +3003,7 @@ router.post('/:id/attachments', ticketAttachmentUpload.array('files', 10), async
   }
 
   await logEvent(ticketId, 'FOLLOWUP_ADDED', req.user.email || String(req.user.sub), { attachmentCount: created.length }).catch(() => {});
-  const updated = await prisma.ticket.findUnique({ where: { id: ticketId }, include: { attachments: true } });
+  const updated = await prisma.ticket.findUnique({ where: { id: ticketId }, include: { attachments: { select: ATTACHMENT_LIST_SELECT } } });
   return res.json({ attachments: updated.attachments });
 });
 

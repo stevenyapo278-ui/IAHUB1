@@ -8,8 +8,10 @@ jest.mock('../prismaClient', () => ({
     findUnique: jest.fn(),
     update: jest.fn(),
     findMany: jest.fn(),
+    groupBy: jest.fn(),
   },
-  emailRagChunk: { deleteMany: jest.fn(), create: jest.fn() },
+  emailRagChunk: { deleteMany: jest.fn(), create: jest.fn(), count: jest.fn() },
+  systemSettings: { findUnique: jest.fn() },
   $executeRawUnsafe: jest.fn(),
 }));
 jest.mock('../utils/embeddings', () => ({
@@ -30,7 +32,13 @@ const prisma = require('../prismaClient');
 const { extractText, isTextExtractable } = require('../utils/documentExtract');
 const { analyzeImageAttachments, getActiveProviders } = require('./mailAnalyzer');
 const { generateEmbedding } = require('../utils/embeddings');
-const { indexTicketAttachment, backfillAttachmentIndex, neutralizePromptTags } = require('./attachmentIndexer');
+const {
+  indexTicketAttachment,
+  backfillAttachmentIndex,
+  reindexAttachment,
+  getAttachmentIndexingStats,
+  neutralizePromptTags,
+} = require('./attachmentIndexer');
 
 let tmpDir;
 let fileCounter = 0;
@@ -52,6 +60,8 @@ afterAll(() => {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  // Interrupteur global : activé par défaut dans les tests
+  prisma.systemSettings.findUnique.mockResolvedValue({ attachmentIndexEnabled: true });
   prisma.ticketAttachment.updateMany.mockResolvedValue({ count: 1 });
   prisma.emailRagChunk.deleteMany.mockResolvedValue({ count: 0 });
   prisma.emailRagChunk.create.mockResolvedValue({});
@@ -161,6 +171,16 @@ describe('indexTicketAttachment', () => {
     );
   });
 
+  it("ne fait rien quand l'indexation est suspendue dans les paramètres", async () => {
+    prisma.systemSettings.findUnique.mockResolvedValue({ attachmentIndexEnabled: false });
+
+    const result = await indexTicketAttachment(48);
+
+    expect(result).toEqual({ status: 'DISABLED' });
+    expect(prisma.ticketAttachment.updateMany).not.toHaveBeenCalled();
+    expect(extractText).not.toHaveBeenCalled();
+  });
+
   it('ignore une pièce jointe déjà traitée ou en cours', async () => {
     prisma.ticketAttachment.updateMany.mockResolvedValue({ count: 0 });
 
@@ -182,6 +202,51 @@ describe('indexTicketAttachment', () => {
 
     expect(result.status).toBe('SKIPPED');
     expect(extractText).not.toHaveBeenCalled();
+  });
+});
+
+describe('reindexAttachment', () => {
+  it('remet la PJ en attente, purge ses chunks et relance l\'extraction', async () => {
+    const localFilepath = makeFile('pdf');
+    const attachment = {
+      id: 60, ticketId: 12, filename: 'scan.pdf', mimeType: 'application/pdf',
+      localFilepath, incomingEmailId: null, createdAt: new Date(), incomingEmail: null,
+    };
+    prisma.ticketAttachment.findUnique.mockResolvedValue(attachment);
+    prisma.ticketAttachment.update.mockImplementation(({ data }) => ({ ...attachment, ...data }));
+    isTextExtractable.mockReturnValue(true);
+    extractText.mockResolvedValue('Contenu du scan');
+
+    const result = await reindexAttachment(60);
+
+    expect(prisma.ticketAttachment.updateMany).toHaveBeenNthCalledWith(1, {
+      where: { id: 60 },
+      data: { extractionStatus: 'PENDING', extractionError: null, extractedText: null, extractedAt: null },
+    });
+    expect(prisma.emailRagChunk.deleteMany).toHaveBeenCalledWith({ where: { sourceType: 'ATTACHMENT', sourceId: 60 } });
+    expect(result.status).toBe('DONE');
+  });
+
+  it('renvoie null si la pièce jointe n\'existe pas', async () => {
+    prisma.ticketAttachment.updateMany.mockResolvedValue({ count: 0 });
+    expect(await reindexAttachment(999)).toBeNull();
+  });
+});
+
+describe('getAttachmentIndexingStats', () => {
+  it('agrège les statuts et expose l\'interrupteur', async () => {
+    prisma.ticketAttachment.groupBy.mockResolvedValue([
+      { extractionStatus: 'DONE', _count: { _all: 7 } },
+      { extractionStatus: 'PENDING', _count: { _all: 2 } },
+      { extractionStatus: 'ERROR', _count: { _all: 1 } },
+    ]);
+    prisma.emailRagChunk.count.mockResolvedValue(9);
+
+    const stats = await getAttachmentIndexingStats();
+
+    expect(stats).toMatchObject({
+      enabled: true, total: 10, chunks: 9, DONE: 7, PENDING: 2, ERROR: 1, SKIPPED: 0, EMPTY: 0,
+    });
   });
 });
 

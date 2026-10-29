@@ -254,6 +254,8 @@ app.use('/api', outlookOAuthRoutes);
 app.use('/api/inbox', inboxRoutes);
 app.use('/api', ticketIntelligenceRoutes);
 app.use('/api/system-settings', apiCache(30), systemSettingsRoutes);
+// Pilotage de l'indexation des pièces jointes : pas de cache (compteurs + déclenchement manuel).
+app.use('/api/attachment-indexing', require('./routes/attachmentindexing.routes'));
 app.use('/api/advanced-settings', advancedSettingsRoutes);
 app.use('/api/prompt-templates', promptTemplateRoutes);
 app.use('/api/email-templates', emailTemplateRoutes);
