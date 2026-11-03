@@ -21,7 +21,7 @@ export function ChristmasPreferencesPanel() {
   const { prefs, setFontFamily, setFontSize } = useUserPreferences();
 
   // Préférences Noël stockées dans localStorage (clé partagée avec AnimatedBackground et LayoutSettings)
-  const STORAGE_KEY = 'xmas_prefs';
+  const STORAGE_KEY = 'xmas_prefs_v2';
 
   const load = () => {
     if (typeof window === 'undefined') return DEFAULT_XMAS;

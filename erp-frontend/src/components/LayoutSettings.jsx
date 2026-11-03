@@ -435,7 +435,7 @@ function EffectsTab({ layoutSettings, setLayoutSettings }) {
   const [xmasPrefs, setXmasPrefs] = useState(() => {
     if (typeof window === 'undefined') return null;
     try {
-      const raw = localStorage.getItem('xmas_prefs');
+      const raw = localStorage.getItem('xmas_prefs_v2');
       if (raw) return { ...JSON.parse(raw), active: true };
     } catch { /* ignore */ }
     return null;
@@ -509,7 +509,7 @@ function EffectsTab({ layoutSettings, setLayoutSettings }) {
           <button
             onClick={() => {
               const next = !xmasActive;
-              localStorage.setItem('xmas_prefs', JSON.stringify({ active: next }));
+              localStorage.setItem('xmas_prefs_v2', JSON.stringify({ active: next }));
             }}
             className={`relative w-11 h-6 rounded-full transition-colors duration-300 cursor-pointer ${xmasActive ? 'bg-amber-400' : 'bg-surface-container'}`}
           >

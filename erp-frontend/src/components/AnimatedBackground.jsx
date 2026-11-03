@@ -6,7 +6,7 @@ export default function AnimatedBackground() {
   const xmasActive = useMemo(() => {
     if (typeof window === 'undefined') return false;
     try {
-      const raw = localStorage.getItem('xmas_prefs');
+      const raw = localStorage.getItem('xmas_prefs_v2');
       if (raw) {
         const parsed = JSON.parse(raw);
         return parsed.active ?? false;
