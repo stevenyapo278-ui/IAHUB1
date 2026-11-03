@@ -55,6 +55,7 @@ import FloatingDock from '../components/FloatingDock';
 import LayoutSettings from '../components/LayoutSettings';
 import CustomizerDrawer from '../components/CustomizerDrawer';
 import CursorGlow from '../components/CursorGlow';
+import AnimatedBackground from '../components/AnimatedBackground';
 import Tooltip from '../components/ui/tooltip';
 import { useNotifications } from '../context/NotificationContext';
 import { useUserPreferences } from '../context/UserPreferencesContext';
@@ -352,7 +353,8 @@ export default function MainLayout() {
   const PageIcon = currentPage.icon;
 
   return (
-    <div className="flex h-screen overflow-hidden" style={{ backgroundColor: 'var(--color-background)' }}>
+    <div className="flex h-screen overflow-hidden relative" style={{ backgroundColor: 'var(--color-background)' }}>
+      <AnimatedBackground />
       <a href="#main-content" className="skip-to-content">Aller au contenu principal</a>
       <CursorGlow />
       <GlobalSearch />
