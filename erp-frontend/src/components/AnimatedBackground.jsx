@@ -5,6 +5,9 @@ import ChristmasEffects from './ChristmasEffects';
 export default function AnimatedBackground() {
   const xmasActive = useMemo(() => {
     if (typeof window === 'undefined') return false;
+    // 1. Activation globale forcée via variable d'environnement (tous les utilisateurs)
+    if (import.meta.env.VITE_XMAS_ENABLED === 'true') return true;
+    // 2. Préférence individuelle stockée dans localStorage
     try {
       const raw = localStorage.getItem('xmas_prefs_v2');
       if (raw) {
