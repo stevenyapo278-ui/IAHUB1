@@ -453,7 +453,7 @@ function EffectsTab({ layoutSettings, setLayoutSettings }) {
     return (
       <div className="space-y-5">
         <div className="flex items-center gap-3">
-          <ChristmasTree className="w-5 h-5 text-amber-500" />
+          <TreePine className="w-5 h-5 text-amber-500" />
           <div>
             <h3 className="text-sm font-semibold" style={{ color: 'var(--color-on-surface)' }}>
               Noël
