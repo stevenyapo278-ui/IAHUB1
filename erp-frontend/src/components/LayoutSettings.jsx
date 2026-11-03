@@ -507,7 +507,10 @@ function EffectsTab({ layoutSettings, setLayoutSettings }) {
             </p>
           </div>
           <button
-            onClick={() => setXmasActive((v) => !v)}
+            onClick={() => {
+              const next = !xmasActive;
+              localStorage.setItem('xmas_prefs', JSON.stringify({ active: next }));
+            }}
             className={`relative w-11 h-6 rounded-full transition-colors duration-300 cursor-pointer ${xmasActive ? 'bg-amber-400' : 'bg-surface-container'}`}
           >
             <span
