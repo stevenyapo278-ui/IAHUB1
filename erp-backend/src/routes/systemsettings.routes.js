@@ -425,8 +425,9 @@ router.patch(
         update: { xmasForceEnabled },
         create: { id: 1, xmasForceEnabled },
       });
+      // req.user.sub = ID utilisateur dans le JWT (pas .id)
       await auditLog({
-        userId: req.user.id,
+        userId: req.user.sub,
         action: xmasForceEnabled ? 'XMAS_FORCE_ENABLED' : 'XMAS_FORCE_DISABLED',
         targetType: 'SystemSettings',
         targetId: '1',
@@ -434,6 +435,7 @@ router.patch(
       });
       return res.json({ xmasForceEnabled: settings.xmasForceEnabled });
     } catch (err) {
+      console.error('[xmas] PATCH /xmas error:', err.message);
       return res.status(500).json({ error: err.message });
     }
   }
