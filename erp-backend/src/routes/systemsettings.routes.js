@@ -409,8 +409,12 @@ router.get('/solved-auto-close/debug', requirePermission('automation.manage', ['
 // Réservé aux ADMIN et SUPERADMIN.
 router.patch(
   '/xmas',
-  requirePermission('automation.manage', ['ADMIN']),
   async (req, res) => {
+    // Réservé aux ADMIN et SUPERADMIN
+    if (!req.user) return res.status(401).json({ error: 'Authentification requise' });
+    if (!['ADMIN', 'SUPERADMIN'].includes(req.user.role)) {
+      return res.status(403).json({ error: 'Réservé aux administrateurs' });
+    }
     const { xmasForceEnabled } = req.body;
     if (typeof xmasForceEnabled !== 'boolean') {
       return res.status(400).json({ error: 'xmasForceEnabled doit être un booléen' });

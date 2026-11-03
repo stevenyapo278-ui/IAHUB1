@@ -49,38 +49,50 @@ export default function AnimatedBackground() {
   const isActive = adminForced === true || xmasPrefs.active;
 
   return (
-    <div className="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
-      {/* Effets Noël — actifs si l'admin force OU si l'utilisateur a activé */}
+    <>
+      {/* ── Effets Noël ─────────────────────────────────────────────────────────
+          Rendu EN DEHORS du wrapper -z-10 pour être visible par-dessus le fond
+          de page. z-index 1 = au-dessus du contenu, bien en dessous des modales
+          (z-index 50+) et du header (z-30). pointer-events-none = non-cliquable.  */}
       {isActive && (
-        <ChristmasEffects color={xmasPrefs.color} speed={xmasPrefs.speed} />
+        <div
+          className="pointer-events-none fixed inset-0 overflow-hidden"
+          style={{ zIndex: 1 }}
+        >
+          <ChristmasEffects color={xmasPrefs.color} speed={xmasPrefs.speed} />
+        </div>
       )}
 
-      <motion.div
-        animate={{ x: [0, 40, 0], y: [0, -30, 0] }}
-        transition={{ duration: 15, repeat: Infinity, ease: 'linear' }}
-        className="absolute -top-40 -right-40 h-[500px] w-[500px] rounded-full opacity-20"
-        style={{
-          background: 'radial-gradient(circle, var(--color-primary) 0%, transparent 70%)',
-          filter: 'blur(60px)',
-        }}
-      />
-      <motion.div
-        animate={{ x: [0, -50, 0], y: [0, 40, 0] }}
-        transition={{ duration: 12, repeat: Infinity, ease: 'linear' }}
-        className="absolute -bottom-40 -left-40 h-[400px] w-[400px] rounded-full opacity-15"
-        style={{
-          background: 'radial-gradient(circle, var(--color-secondary) 0%, transparent 70%)',
-          filter: 'blur(60px)',
-        }}
-      />
-      <div
-        className="absolute inset-0 opacity-[0.03]"
-        style={{
-          backgroundImage: 'radial-gradient(circle, currentColor 1px, transparent 1px)',
-          backgroundSize: '24px 24px',
-        }}
-      />
-    </div>
+      {/* ── Fond animé (dégradés subtils) — reste en arrière-plan ── */}
+      <div className="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
+        <motion.div
+          animate={{ x: [0, 40, 0], y: [0, -30, 0] }}
+          transition={{ duration: 15, repeat: Infinity, ease: 'linear' }}
+          className="absolute -top-40 -right-40 h-[500px] w-[500px] rounded-full opacity-20"
+          style={{
+            background: 'radial-gradient(circle, var(--color-primary) 0%, transparent 70%)',
+            filter: 'blur(60px)',
+          }}
+        />
+        <motion.div
+          animate={{ x: [0, -50, 0], y: [0, 40, 0] }}
+          transition={{ duration: 12, repeat: Infinity, ease: 'linear' }}
+          className="absolute -bottom-40 -left-40 h-[400px] w-[400px] rounded-full opacity-15"
+          style={{
+            background: 'radial-gradient(circle, var(--color-secondary) 0%, transparent 70%)',
+            filter: 'blur(60px)',
+          }}
+        />
+        <div
+          className="absolute inset-0 opacity-[0.03]"
+          style={{
+            backgroundImage: 'radial-gradient(circle, currentColor 1px, transparent 1px)',
+            backgroundSize: '24px 24px',
+          }}
+        />
+      </div>
+    </>
   );
 }
+
 
