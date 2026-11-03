@@ -403,4 +403,36 @@ router.get('/solved-auto-close/debug', requirePermission('automation.manage', ['
   }
 });
 
+// ── Thème saisonnier (Noël) ────────────────────────────────────────────────
+// PATCH /api/system-settings/xmas — force ou désactive le thème de Noël pour
+// TOUS les utilisateurs (indépendamment de leurs préférences personnelles).
+// Réservé aux ADMIN et SUPERADMIN.
+router.patch(
+  '/xmas',
+  requirePermission('automation.manage', ['ADMIN']),
+  async (req, res) => {
+    const { xmasForceEnabled } = req.body;
+    if (typeof xmasForceEnabled !== 'boolean') {
+      return res.status(400).json({ error: 'xmasForceEnabled doit être un booléen' });
+    }
+    try {
+      const settings = await prisma.systemSettings.upsert({
+        where: { id: 1 },
+        update: { xmasForceEnabled },
+        create: { id: 1, xmasForceEnabled },
+      });
+      await auditLog({
+        userId: req.user.id,
+        action: xmasForceEnabled ? 'XMAS_FORCE_ENABLED' : 'XMAS_FORCE_DISABLED',
+        targetType: 'SystemSettings',
+        targetId: '1',
+        details: { xmasForceEnabled },
+      });
+      return res.json({ xmasForceEnabled: settings.xmasForceEnabled });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  }
+);
+
 module.exports = router;

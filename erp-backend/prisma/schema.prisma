@@ -890,8 +890,15 @@ model SystemSettings {
   loginThemeFixedVariant    String   @default("classic")
   loginThemeEnabledVariants String[] @default(["classic", "split", "hero", "minimal"])
 
+  // ── Thème saisonnier ──────────────────────────────────────────────────────
+  // xmasForceEnabled = true → le thème de Noël (animations + neige) est activé
+  // pour TOUS les utilisateurs, indépendamment de leurs préférences personnelles.
+  // Configurable par l'admin via Paramètres > Apparence.
+  xmasForceEnabled Boolean @default(false)
+
   updatedAt DateTime @updatedAt
 }
+
 
 // Suivi de santé de chaque tâche automatique planifiée (pipeline email, relances...) —
 // permet de détecter et d'alerter en cas de panne silencieuse prolongée, au lieu de ne laisser

@@ -224,6 +224,20 @@ app.use('/uploads', express.static(path.join(process.cwd(), 'uploads'), {
 
 app.get('/health', (req, res) => res.json({ status: 'ok' }));
 app.get('/api/system/circuit-breakers', (req, res) => res.json(allBreakerStatuses()));
+
+// ── Endpoint public (sans auth) — expose uniquement les réglages visibles par tous ──
+// Utilisé au boot du frontend pour savoir si l'admin a forcé le thème de Noël.
+app.get('/api/system-settings/public', async (req, res) => {
+  try {
+    const settings = await prisma.systemSettings.findUnique({ where: { id: 1 } });
+    return res.json({
+      xmasForceEnabled: settings?.xmasForceEnabled ?? false,
+    });
+  } catch {
+    return res.json({ xmasForceEnabled: false });
+  }
+});
+
 // Monté avec app.use ET non app.get : le fichier exporte un express.Router()
 // dont la route est définie sur '/'. Passé en handler à app.get(), le router
 // reçoit l'URL complète ('/api/system/ai-usage') qui ne matche jamais '/', d'où

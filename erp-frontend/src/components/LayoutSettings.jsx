@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Palette,
@@ -19,12 +19,15 @@ import {
   Wind,
   Gift,
   TreePine,
+  Globe,
 } from 'lucide-react';
 import { useTheme, SKINS, LAYOUT_PRESETS } from '../context/ThemeContext';
 import { useUserPreferences } from '../context/UserPreferencesContext';
 import { FONT_STACKS, getFontFamily } from '../config/fonts';
 import ChristmasEffects from '../components/ChristmasEffects';
 import { useReducedMotion } from '../components/ChristmasEffects';
+import { useAuth } from '../context/AuthContext';
+import api from '../api/client';
 
 const TABS = [
   { id: 'skins', label: 'Skins', icon: Palette },
@@ -430,7 +433,7 @@ function EffectsTab({ layoutSettings, setLayoutSettings }) {
   const [speed, setSpeed] = useState(1);
   const reduced = useReducedMotion();
 
-  // On lit la cible stockée dans le UserPreferencesContext
+  // Préférences Noël personnelles (localStorage)
   const { prefs } = useUserPreferences();
   const [xmasPrefs, setXmasPrefs] = useState(() => {
     if (typeof window === 'undefined') return { active: false };
@@ -444,13 +447,40 @@ function EffectsTab({ layoutSettings, setLayoutSettings }) {
   // xmasActive est déduit de xmasPrefs directement (source unique de vérité)
   const xmasActive = !!xmasPrefs?.active;
 
-  // Fonction centralisée pour toggle Noël
+  // Réglage admin : forcer le thème pour tous les utilisateurs
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'ADMIN' || user?.role === 'SUPERADMIN';
+  const [adminForced, setAdminForced] = useState(null); // null = chargement
+  const [adminLoading, setAdminLoading] = useState(false);
+
+  useEffect(() => {
+    api.get('/system-settings/public')
+      .then((res) => setAdminForced(!!res.data.xmasForceEnabled))
+      .catch(() => setAdminForced(false));
+  }, []);
+
+  const toggleAdminForce = async () => {
+    if (!isAdmin || adminLoading) return;
+    const next = !adminForced;
+    setAdminLoading(true);
+    try {
+      await api.patch('/system-settings/xmas', { xmasForceEnabled: next });
+      setAdminForced(next);
+      // Recharge AnimatedBackground dans cet onglet
+      window.dispatchEvent(new Event('xmas-prefs-changed'));
+    } catch {
+      /* ignore — l'UI reste inchangée */
+    } finally {
+      setAdminLoading(false);
+    }
+  };
+
+  // Fonction centralisée pour toggle Noël personnel
   const toggleXmas = () => {
     const next = !xmasActive;
     const updated = { ...(xmasPrefs ?? {}), active: next };
     localStorage.setItem('xmas_prefs_v2', JSON.stringify(updated));
     setXmasPrefs(updated);
-    // Notifie AnimatedBackground dans le même onglet (storage event ne se déclenche pas sur le même onglet)
     window.dispatchEvent(new Event('xmas-prefs-changed'));
   };
 
@@ -489,6 +519,41 @@ function EffectsTab({ layoutSettings, setLayoutSettings }) {
           <TreePine className="w-3.5 h-3.5 text-amber-500" />
           Thème de Noël
         </label>
+
+        {/* ── Bloc admin : forcer pour tous ── visible uniquement ADMIN/SUPERADMIN */}
+        {isAdmin && (
+          <div
+            className="flex items-center justify-between p-3 rounded-xl border"
+            style={{
+              backgroundColor: adminForced ? 'rgba(251,191,36,0.06)' : 'var(--color-surface-container)',
+              borderColor: adminForced ? '#f59e0b' : 'var(--color-outline-variant)',
+            }}
+          >
+            <div className="flex items-center gap-2.5">
+              <Globe className="w-4 h-4 flex-shrink-0" style={{ color: adminForced ? '#f59e0b' : 'var(--color-on-surface-variant)' }} />
+              <div>
+                <p className="text-xs font-semibold" style={{ color: 'var(--color-on-surface)' }}>
+                  Forcer pour tous les utilisateurs
+                </p>
+                <p className="text-[10px]" style={{ color: 'var(--color-on-surface-variant)' }}>
+                  {adminForced
+                    ? '🎄 Activé globalement — tous les utilisateurs voient les animations.'
+                    : 'Chaque utilisateur peut activer/désactiver lui-même.'}
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={toggleAdminForce}
+              disabled={adminLoading || adminForced === null}
+              className={`relative w-11 h-6 rounded-full transition-colors duration-300 cursor-pointer disabled:opacity-50 ${adminForced ? 'bg-amber-400' : 'bg-surface-container-high'}`}
+              style={{ boxShadow: adminForced ? '0 0 10px rgba(251,191,36,0.5)' : 'none' }}
+            >
+              <span
+                className={`absolute top-1 left-1 w-5 h-5 rounded-full bg-white shadow transition-transform duration-300 ${adminForced ? 'translate-x-5' : 'translate-x-0'}`}
+              />
+            </button>
+          </div>
+        )}
 
         {/* Toggle principal */}
         <div
