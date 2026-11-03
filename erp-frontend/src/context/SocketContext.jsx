@@ -2,13 +2,17 @@ import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import io from 'socket.io-client';
 import { toast } from 'sonner';
-import { Ticket, Flame, UserCheck, RefreshCw, ExternalLink, Sparkles } from 'lucide-react';
 import { useAuth } from './AuthContext';
+import RealtimeToast from '../components/RealtimeToast';
 import { sendBrowserNotification, requestBrowserNotifPermission } from '../utils/browserNotification';
 import { playTicketCreated, playTicketAssigned, playTicketUpdated, playAlertP1 } from '../utils/sounds';
 import { wasRecentlyUpdatedByMe } from '../utils/recentlyUpdatedTickets';
 
 const SocketContext = createContext(null);
+
+// Fenêtre de regroupement des changements de statut : une rafale (sync GLPI,
+// import, clôture en lot) produit UN seul toast résumé au lieu d'un par ticket.
+const UPDATE_BATCH_MS = 1200;
 
 export function SocketProvider({ children }) {
   const { user } = useAuth();
@@ -27,7 +31,7 @@ export function SocketProvider({ children }) {
     }
 
     const token = localStorage.getItem('token');
-    
+
     const backendUrl = import.meta.env.VITE_API_URL
       ? import.meta.env.VITE_API_URL.replace(/\/api$/, '')
       : window.location.origin;
@@ -72,35 +76,15 @@ export function SocketProvider({ children }) {
         }
       );
       toast(
-        <div className="flex items-start gap-3 w-full min-w-0 pr-2 group cursor-pointer">
-          <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border ${
-            p1
-              ? 'bg-red-500/10 text-red-500 border-red-500/20 shadow-xs shadow-red-500/20'
-              : 'bg-primary/10 text-primary border-primary/20'
-          }`}>
-            {p1 ? <Flame className="w-4 h-4 animate-pulse text-red-500" /> : <Ticket className="w-4 h-4 text-primary" />}
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-1.5 min-w-0">
-              <span className={`text-xs font-bold ${p1 ? 'text-red-500' : 'text-on-surface'}`}>
-                {p1 ? '🚨 Incident critique' : 'Nouveau ticket'}
-              </span>
-              <span className={`px-1.5 py-0.2 rounded-md text-[10px] font-mono font-extrabold shrink-0 ${
-                p1 ? 'bg-red-500/15 text-red-500' : 'bg-primary/15 text-primary'
-              }`}>
-                #{ticket.id}
-              </span>
-            </div>
-            <p className="text-xs text-on-surface-variant font-medium truncate mt-0.5 max-w-[240px]">
-              {ticket.title}
-            </p>
-          </div>
-          <div className="shrink-0 text-on-surface-variant/40 group-hover:text-primary transition-colors self-center">
-            <ExternalLink className="w-3.5 h-3.5" />
-          </div>
-        </div>,
+        <RealtimeToast
+          tone={p1 ? 'p1' : 'created'}
+          title={p1 ? 'Incident critique' : 'Nouveau ticket'}
+          ticketId={ticket.id}
+          subtitle={ticket.title}
+        />,
         {
-          duration: 6000,
+          duration: p1 ? 6000 : 4500,
+          className: p1 ? 'rt-host--p1' : undefined,
           onClick: () => navigateRef.current(`/tickets/${ticket.id}`),
         }
       );
@@ -122,30 +106,15 @@ export function SocketProvider({ children }) {
         }
       );
       toast(
-        <div className="flex items-start gap-3 w-full min-w-0 pr-2 group cursor-pointer">
-          <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 bg-indigo-500/10 text-indigo-500 border border-indigo-500/20">
-            <UserCheck className="w-4 h-4 text-indigo-500" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-1.5 min-w-0">
-              <span className="text-xs font-bold text-on-surface">Ticket assigné à vous</span>
-              <span className="px-1.5 py-0.2 rounded-md text-[10px] font-mono font-extrabold bg-indigo-500/15 text-indigo-500 shrink-0">
-                #{data.ticketId}
-              </span>
-            </div>
-            <p className="text-xs text-on-surface-variant font-medium truncate mt-0.5 max-w-[240px]">
-              {data.title}
-            </p>
-            <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-indigo-600 dark:text-indigo-400 mt-1">
-              {methodLabel}
-            </span>
-          </div>
-          <div className="shrink-0 text-on-surface-variant/40 group-hover:text-indigo-500 transition-colors self-center">
-            <ExternalLink className="w-3.5 h-3.5" />
-          </div>
-        </div>,
+        <RealtimeToast
+          tone="assigned"
+          title="Ticket assigné à vous"
+          ticketId={data.ticketId}
+          subtitle={data.title}
+          meta={methodLabel}
+        />,
         {
-          duration: 8000,
+          duration: 5500,
           onClick: () => navigateRef.current(`/tickets/${data.ticketId}`),
         }
       );
@@ -156,6 +125,49 @@ export function SocketProvider({ children }) {
     // so ADMIN users who are also assigned receive the event TWICE.
     const recentUpdates = new Map(); // ticketId -> timestamp
     const UPDATE_DEDUP_MS = 3000;
+
+    // File d'attente regroupée : les changements de statut arrivant dans la
+    // même fenêtre sont fusionnés en un seul toast (« 4 tickets mis à jour »).
+    let pendingUpdates = [];
+    let updateFlushTimer = null;
+
+    const flushUpdates = () => {
+      updateFlushTimer = null;
+      const batch = pendingUpdates;
+      pendingUpdates = [];
+      if (batch.length === 0) return;
+
+      if (batch.length === 1) {
+        const { id, status } = batch[0];
+        toast(
+          <RealtimeToast
+            tone="updated"
+            title="Statut mis à jour"
+            ticketId={id}
+            subtitle={`Nouveau statut : ${status}`}
+          />,
+          {
+            duration: 3500,
+            onClick: () => navigateRef.current(`/tickets/${id}`),
+          }
+        );
+        return;
+      }
+
+      const preview = batch.slice(0, 3).map((u) => `#${u.id}`).join(' · ');
+      toast(
+        <RealtimeToast
+          tone="updated"
+          title={`${batch.length} tickets mis à jour`}
+          count={batch.length}
+          subtitle={`${preview}${batch.length > 3 ? ` +${batch.length - 3}` : ''}`}
+        />,
+        {
+          duration: 4000,
+          onClick: () => navigateRef.current('/tickets'),
+        }
+      );
+    };
 
     newSocket.on('ticket_updated', (data) => {
       // Signal pour les vues listes : tout changement (statut, assignation, contenu…) doit
@@ -184,35 +196,14 @@ export function SocketProvider({ children }) {
             onClick: () => navigateRef.current(`/tickets/${data.id}`),
           }
         );
-        toast(
-          <div className="flex items-start gap-3 w-full min-w-0 pr-2 group cursor-pointer">
-            <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 bg-amber-500/10 text-amber-500 border border-amber-500/20">
-              <RefreshCw className="w-4 h-4 text-amber-500" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-1.5 min-w-0">
-                <span className="text-xs font-bold text-on-surface">Statut mis à jour</span>
-                <span className="px-1.5 py-0.2 rounded-md text-[10px] font-mono font-extrabold bg-amber-500/15 text-amber-500 shrink-0">
-                  #{data.id}
-                </span>
-              </div>
-              <p className="text-xs text-on-surface-variant font-medium truncate mt-0.5">
-                Nouveau statut : <span className="font-bold text-on-surface">{data.status}</span>
-              </p>
-            </div>
-            <div className="shrink-0 text-on-surface-variant/40 group-hover:text-amber-500 transition-colors self-center">
-              <ExternalLink className="w-3.5 h-3.5" />
-            </div>
-          </div>,
-          {
-            duration: 4000,
-            onClick: () => navigateRef.current(`/tickets/${data.id}`),
-          }
-        );
+
+        pendingUpdates.push({ id: data.id, status: data.status });
+        if (updateFlushTimer) clearTimeout(updateFlushTimer);
+        updateFlushTimer = setTimeout(flushUpdates, UPDATE_BATCH_MS);
       }
     });
 
-    // ── Réponse sur ticket fermé ─────────────────────────────────────
+    // ── Réponse sur ticket fermé ───────────────────────────────────────
     newSocket.on('ticket_reply_suggestion', (data) => {
       playTicketAssigned();
       sendBrowserNotification(
@@ -224,27 +215,14 @@ export function SocketProvider({ children }) {
         }
       );
       toast(
-        <div className="flex items-start gap-3 w-full min-w-0 pr-2 group cursor-pointer">
-          <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 bg-violet-500/10 text-violet-500 border border-violet-500/20">
-            <RefreshCw className="w-4 h-4 text-violet-500" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-1.5 min-w-0">
-              <span className="text-xs font-bold text-on-surface">Réponse sur ticket fermé</span>
-              <span className="px-1.5 py-0.2 rounded-md text-[10px] font-mono font-extrabold bg-violet-500/15 text-violet-500 shrink-0">
-                #{data.ticketId}
-              </span>
-            </div>
-            <p className="text-xs text-on-surface-variant font-medium truncate mt-0.5 max-w-[240px]">
-              {data.sender} a répondu — ticket {data.status}
-            </p>
-          </div>
-          <div className="shrink-0 text-on-surface-variant/40 group-hover:text-violet-500 transition-colors self-center">
-            <ExternalLink className="w-3.5 h-3.5" />
-          </div>
-        </div>,
+        <RealtimeToast
+          tone="reply"
+          title="Réponse sur ticket fermé"
+          ticketId={data.ticketId}
+          subtitle={`${data.sender} a répondu — ticket ${data.status}`}
+        />,
         {
-          duration: 8000,
+          duration: 6000,
           onClick: () => navigateRef.current('/email-drafts?tab=replies&sub=closed'),
         }
       );
@@ -262,27 +240,14 @@ export function SocketProvider({ children }) {
         }
       );
       toast(
-        <div className="flex items-start gap-3 w-full min-w-0 pr-2 group cursor-pointer">
-          <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 bg-indigo-500/10 text-indigo-500 border border-indigo-500/20">
-            <Sparkles className="w-4 h-4 text-indigo-500" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-1.5 min-w-0">
-              <span className="text-xs font-bold text-on-surface">Nouvelle demande détectée</span>
-              <span className="px-1.5 py-0.2 rounded-md text-[10px] font-mono font-extrabold bg-indigo-500/15 text-indigo-500 shrink-0">
-                #{data.ticketId}
-              </span>
-            </div>
-            <p className="text-xs text-on-surface-variant font-medium truncate mt-0.5 max-w-[240px]">
-              {data.sender} a évoqué un autre besoin — ticket {data.status}
-            </p>
-          </div>
-          <div className="shrink-0 text-on-surface-variant/40 group-hover:text-indigo-500 transition-colors self-center">
-            <ExternalLink className="w-3.5 h-3.5" />
-          </div>
-        </div>,
+        <RealtimeToast
+          tone="newRequest"
+          title="Nouvelle demande détectée"
+          ticketId={data.ticketId}
+          subtitle={`${data.sender} a évoqué un autre besoin — ${data.status}`}
+        />,
         {
-          duration: 8000,
+          duration: 6000,
           onClick: () => navigateRef.current('/email-drafts?tab=replies&sub=open'),
         }
       );
@@ -291,6 +256,8 @@ export function SocketProvider({ children }) {
     setSocket(newSocket);
 
     return () => {
+      if (updateFlushTimer) clearTimeout(updateFlushTimer);
+      pendingUpdates = [];
       if (newSocket.connected || newSocket.connecting) {
         newSocket.removeAllListeners();
         newSocket.disconnect();

@@ -14,10 +14,17 @@ import {
   Moon,
   Zap,
   CaseSensitive,
+  Snowflake,
+  Star,
+  Wind,
+  Gift,
+  TreePine,
 } from 'lucide-react';
 import { useTheme, SKINS, LAYOUT_PRESETS } from '../context/ThemeContext';
 import { useUserPreferences } from '../context/UserPreferencesContext';
 import { FONT_STACKS, getFontFamily } from '../config/fonts';
+import ChristmasEffects from '../components/ChristmasEffects';
+import { useReducedMotion } from '../components/ChristmasEffects';
 
 const TABS = [
   { id: 'skins', label: 'Skins', icon: Palette },
@@ -419,6 +426,103 @@ function LayoutTab({ layoutSettings, setLayoutSettings, applyLayoutPreset }) {
 
 // ── Effects Tab ─────────────────────────────────────────────────────────────
 function EffectsTab({ layoutSettings, setLayoutSettings }) {
+  const [color, setColor] = useState('#0067ff');
+  const [speed, setSpeed] = useState(1);
+  const reduced = useReducedMotion();
+
+  // On lit la cible stockée dans le UserPreferencesContext
+  const { prefs } = useUserPreferences();
+  const [xmasPrefs, setXmasPrefs] = useState(() => {
+    if (typeof window === 'undefined') return null;
+    try {
+      const raw = localStorage.getItem('xmas_prefs');
+      if (raw) return { ...JSON.parse(raw), active: true };
+    } catch { /* ignore */ }
+    return null;
+  });
+
+  // On force l'état si l'utilisateur a déjà des préférences existantes
+  const [xmasActive, setXmasActive] = useState(!!xmasPrefs?.active);
+
+  // Quand le panneau est ouvert, on syncronise depuis localStorage
+  useState(() => {
+    if (xmasPrefs?.active) setXmasActive(true);
+  });
+
+  if (xmasActive && !reduced) {
+    return (
+      <div className="space-y-5">
+        <div className="flex items-center gap-3">
+          <ChristmasTree className="w-5 h-5 text-amber-500" />
+          <div>
+            <h3 className="text-sm font-semibold" style={{ color: 'var(--color-on-surface)' }}>
+              Noël
+            </h3>
+            <p className="text-[11px]" style={{ color: 'var(--color-on-surface-variant)' }}>
+              Décoratif : guirlandes, étoiles, ambiance nocturne
+            </p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="text-xs font-semibold block mb-1.5" style={{ color: 'var(--color-on-surface)' }}>
+              Couleur
+            </label>
+            <div className="flex gap-2">
+              {['#0067ff', '#f59e0b', '#dc2626', '#8b5cf6', '#16a34a', '#ec4899'].map((c) => (
+                <button
+                  key={c}
+                  onClick={() => setColor(c)}
+                  className={`w-7 h-7 rounded-full transition-transform hover:scale-110 cursor-pointer ${color === c ? 'ring-2 ring-offset-1 ring-on-surface' : ''}`}
+                  style={{ backgroundColor: c }}
+                />
+              ))}
+            </div>
+          </div>
+          <div>
+            <label className="text-xs font-semibold block mb-1.5" style={{ color: 'var(--color-on-surface)' }}>
+              Vitesse
+            </label>
+            <input
+              type="range"
+              min={0.3}
+              max={3}
+              step={0.1}
+              value={speed}
+              onChange={(e) => setSpeed(Number(e.target.value))}
+              className="w-full accent-primary"
+            />
+            <div className="flex justify-between text-[10px]" style={{ color: 'var(--color-on-surface-variant)' }}>
+              <span>Lent</span>
+              <span>Normal</span>
+              <span>Rapide</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between p-3 rounded-xl border border-border bg-surface-container">
+          <div>
+            <p className="text-sm font-semibold" style={{ color: 'var(--color-on-surface)' }}>
+              Activer la décoration de Noël
+            </p>
+            <p className="text-[10px]" style={{ color: 'var(--color-on-surface-variant)' }}>
+              Guirlandes lumineuses, ciel étoilé et ambiance nocturne.
+            </p>
+          </div>
+          <button
+            onClick={() => setXmasActive((v) => !v)}
+            className={`relative w-11 h-6 rounded-full transition-colors duration-300 cursor-pointer ${xmasActive ? 'bg-amber-400' : 'bg-surface-container'}`}
+          >
+            <span
+              className={`absolute top-1 left-1 w-5 h-5 rounded-full bg-white shadow transition-transform duration-300 ${xmasActive ? 'translate-x-5' : 'translate-x-0'}`}
+            />
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-5">
       <div className="space-y-3">

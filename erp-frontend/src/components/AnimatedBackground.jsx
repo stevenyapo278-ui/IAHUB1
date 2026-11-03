@@ -1,8 +1,26 @@
+import { useMemo } from 'react';
 import { motion } from 'framer-motion';
+import ChristmasEffects from './ChristmasEffects';
 
 export default function AnimatedBackground() {
+  const xmasActive = useMemo(() => {
+    if (typeof window === 'undefined') return false;
+    try {
+      const raw = localStorage.getItem('xmas_prefs');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        return parsed.active ?? false;
+      }
+    } catch { /* ignore */ }
+    return false;
+  }, []);
+
   return (
     <div className="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
+      {/* Effets Noël (si activés) : s'empilent au-dessus des motifs, mais en
+          dessous du contenu visible (z-index -10) */}
+      {xmasActive && <ChristmasEffects />}
+
       <motion.div
         animate={{
           x: [0, 40, 0],
