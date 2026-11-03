@@ -12,7 +12,7 @@ export default function AnimatedBackground() {
         return parsed.active ?? false;
       }
     } catch { /* ignore */ }
-    return false;
+    return true;
   }, []);
 
   return (

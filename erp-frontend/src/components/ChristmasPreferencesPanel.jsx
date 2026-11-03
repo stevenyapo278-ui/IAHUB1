@@ -227,7 +227,7 @@ export function ChristmasPreferencesPanel() {
 }
 
 const DEFAULT_XMAS = {
-  active: false,
+  active: true,
   color: '#0067ff',
   speed: 1,
   nightMode: false,
