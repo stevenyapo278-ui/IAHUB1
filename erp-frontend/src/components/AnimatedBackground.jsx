@@ -50,17 +50,11 @@ export default function AnimatedBackground() {
 
   return (
     <>
-      {/* ── Effets Noël ─────────────────────────────────────────────────────────
-          Rendu EN DEHORS du wrapper -z-10 pour être visible par-dessus le fond
-          de page. z-index 1 = au-dessus du contenu, bien en dessous des modales
-          (z-index 50+) et du header (z-30). pointer-events-none = non-cliquable.  */}
+      {/* ── Effets Noël — rendu directement (sans wrapper) pour que les z-index
+           internes (guirlande z-45, neige z-35) ne soient pas emprisonnés
+           dans un contexte d'empilement inférieur au header (z-30). */}
       {isActive && (
-        <div
-          className="pointer-events-none fixed inset-0 overflow-hidden"
-          style={{ zIndex: 1 }}
-        >
-          <ChristmasEffects color={xmasPrefs.color} speed={xmasPrefs.speed} />
-        </div>
+        <ChristmasEffects color={xmasPrefs.color} speed={xmasPrefs.speed} />
       )}
 
       {/* ── Fond animé (dégradés subtils) — reste en arrière-plan ── */}
