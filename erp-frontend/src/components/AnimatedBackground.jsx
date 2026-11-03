@@ -2,31 +2,36 @@ import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import ChristmasEffects from './ChristmasEffects';
 
-/** Lit l'état Noël depuis le localStorage */
-function readXmasActive() {
-  if (typeof window === 'undefined') return false;
+/** Lit les prefs Noël depuis le localStorage */
+function readXmasPrefs() {
+  if (typeof window === 'undefined') return { active: false, color: '#0067ff', speed: 1 };
   // Activation globale forcée via variable d'environnement (tous les utilisateurs)
-  if (import.meta.env.VITE_XMAS_ENABLED === 'true') return true;
+  if (import.meta.env.VITE_XMAS_ENABLED === 'true') {
+    return { active: true, color: '#0067ff', speed: 1 };
+  }
   // Préférence individuelle stockée dans localStorage
   try {
     const raw = localStorage.getItem('xmas_prefs_v2');
     if (raw) {
       const parsed = JSON.parse(raw);
-      return parsed.active ?? false;
+      return {
+        active: parsed.active ?? false,
+        color: parsed.color ?? '#0067ff',
+        speed: parsed.speed ?? 1,
+      };
     }
   } catch { /* ignore */ }
   // Par défaut : désactivé (opt-in, pas opt-out)
-  return false;
+  return { active: false, color: '#0067ff', speed: 1 };
 }
 
 export default function AnimatedBackground() {
-  const [xmasActive, setXmasActive] = useState(readXmasActive);
+  const [xmasPrefs, setXmasPrefs] = useState(readXmasPrefs);
 
   // Réagit aux changements du toggle (même onglet via CustomEvent, autres onglets via storage event)
   useEffect(() => {
-    const onStorage = () => setXmasActive(readXmasActive());
+    const onStorage = () => setXmasPrefs(readXmasPrefs());
     window.addEventListener('storage', onStorage);
-    // Écoute aussi un événement custom émis par le toggle dans le même onglet
     window.addEventListener('xmas-prefs-changed', onStorage);
     return () => {
       window.removeEventListener('storage', onStorage);
@@ -36,9 +41,10 @@ export default function AnimatedBackground() {
 
   return (
     <div className="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
-      {/* Effets Noël (si activés) : s'empilent au-dessus des motifs, mais en
-          dessous du contenu visible (z-index -10) */}
-      {xmasActive && <ChristmasEffects />}
+      {/* Effets Noël (si activés) : couleur et vitesse lues depuis les prefs */}
+      {xmasPrefs.active && (
+        <ChristmasEffects color={xmasPrefs.color} speed={xmasPrefs.speed} />
+      )}
 
       <motion.div
         animate={{
@@ -74,3 +80,4 @@ export default function AnimatedBackground() {
     </div>
   );
 }
+

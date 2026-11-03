@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { motion, useAnimationFrame, useMotionValue, useSpring } from 'framer-motion';
 import {
   Star, Gift, Snowflake, TreePine, CandyCane,
@@ -30,15 +30,19 @@ function useActiveSkinColors() {
   };
 }
 
-/** Décide si l'effet doit être actif (modal réduite, prefers-reduced-motion, etc.) */
+/** Retourne true si l'utilisateur préfère les animations réduites */
 function useReducedMotion() {
-  const [reduced, setReduced] = useState(false);
-  useAnimationFrame((_, delta) => {
-    // Ne pas recalculer à chaque frame si déjà résolu
-    if (typeof window === 'undefined') return;
-    const m = window.matchMedia('(prefers-reduced-motion: reduce)');
-    setReduced(m.matches);
-  });
+  const [reduced, setReduced] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  );
+
+  useEffect(() => {
+    const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const handler = (e) => setReduced(e.matches);
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, []);
+
   return reduced;
 }
 
