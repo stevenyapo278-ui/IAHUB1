@@ -433,97 +433,29 @@ function EffectsTab({ layoutSettings, setLayoutSettings }) {
   // On lit la cible stockée dans le UserPreferencesContext
   const { prefs } = useUserPreferences();
   const [xmasPrefs, setXmasPrefs] = useState(() => {
-    if (typeof window === 'undefined') return null;
+    if (typeof window === 'undefined') return { active: false };
     try {
       const raw = localStorage.getItem('xmas_prefs_v2');
-      if (raw) return { ...JSON.parse(raw), active: true };
+      if (raw) return JSON.parse(raw);
     } catch { /* ignore */ }
-    return null;
+    return { active: false };
   });
 
-  // xmasActive est déduit de xmasPrefs directement (pas de state séparé)
-  // C'est la source unique de vérité pour l'état Noël
+  // xmasActive est déduit de xmasPrefs directement (source unique de vérité)
   const xmasActive = !!xmasPrefs?.active;
 
-  if (xmasActive && !reduced) {
-    return (
-      <div className="space-y-5">
-        <div className="flex items-center gap-3">
-          <TreePine className="w-5 h-5 text-amber-500" />
-          <div>
-            <h3 className="text-sm font-semibold" style={{ color: 'var(--color-on-surface)' }}>
-              Noël
-            </h3>
-            <p className="text-[11px]" style={{ color: 'var(--color-on-surface-variant)' }}>
-              Décoratif : guirlandes, étoiles, ambiance nocturne
-            </p>
-          </div>
-        </div>
+  // Fonction centralisée pour toggle Noël
+  const toggleXmas = () => {
+    const next = !xmasActive;
+    const updated = { ...(xmasPrefs ?? {}), active: next };
+    localStorage.setItem('xmas_prefs_v2', JSON.stringify(updated));
+    setXmasPrefs(updated);
+  };
 
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="text-xs font-semibold block mb-1.5" style={{ color: 'var(--color-on-surface)' }}>
-              Couleur
-            </label>
-            <div className="flex gap-2">
-              {['#0067ff', '#f59e0b', '#dc2626', '#8b5cf6', '#16a34a', '#ec4899'].map((c) => (
-                <button
-                  key={c}
-                  onClick={() => setColor(c)}
-                  className={`w-7 h-7 rounded-full transition-transform hover:scale-110 cursor-pointer ${color === c ? 'ring-2 ring-offset-1 ring-on-surface' : ''}`}
-                  style={{ backgroundColor: c }}
-                />
-              ))}
-            </div>
-          </div>
-          <div>
-            <label className="text-xs font-semibold block mb-1.5" style={{ color: 'var(--color-on-surface)' }}>
-              Vitesse
-            </label>
-            <input
-              type="range"
-              min={0.3}
-              max={3}
-              step={0.1}
-              value={speed}
-              onChange={(e) => setSpeed(Number(e.target.value))}
-              className="w-full accent-primary"
-            />
-            <div className="flex justify-between text-[10px]" style={{ color: 'var(--color-on-surface-variant)' }}>
-              <span>Lent</span>
-              <span>Normal</span>
-              <span>Rapide</span>
-            </div>
-          </div>
-        </div>
-
-        <div className="flex items-center justify-between p-3 rounded-xl border border-border bg-surface-container">
-          <div>
-            <p className="text-sm font-semibold" style={{ color: 'var(--color-on-surface)' }}>
-              Activer la décoration de Noël
-            </p>
-            <p className="text-[10px]" style={{ color: 'var(--color-on-surface-variant)' }}>
-              Guirlandes lumineuses, ciel étoilé et ambiance nocturne.
-            </p>
-          </div>
-          <button
-            onClick={() => {
-              const next = !xmasActive;
-              localStorage.setItem('xmas_prefs_v2', JSON.stringify({ active: next }));
-            }}
-            className={`relative w-11 h-6 rounded-full transition-colors duration-300 cursor-pointer ${xmasActive ? 'bg-amber-400' : 'bg-surface-container'}`}
-          >
-            <span
-              className={`absolute top-1 left-1 w-5 h-5 rounded-full bg-white shadow transition-transform duration-300 ${xmasActive ? 'translate-x-5' : 'translate-x-0'}`}
-            />
-          </button>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="space-y-5">
+      {/* ── Options animations normales ── */}
       <div className="space-y-3">
         <label className="text-xs font-semibold block" style={{ color: 'var(--color-on-surface)' }}>
           Animations
@@ -546,7 +478,104 @@ function EffectsTab({ layoutSettings, setLayoutSettings }) {
         />
       </div>
 
-      {/* Preview */}
+      {/* ── Séparateur ── */}
+      <div className="border-t" style={{ borderColor: 'var(--color-outline-variant)' }} />
+
+      {/* ── Section Noël — toujours visible ── */}
+      <div className="space-y-3">
+        <label className="text-xs font-semibold flex items-center gap-1.5" style={{ color: 'var(--color-on-surface)' }}>
+          <TreePine className="w-3.5 h-3.5 text-amber-500" />
+          Thème de Noël
+        </label>
+
+        {/* Toggle principal */}
+        <div
+          className="flex items-center justify-between p-3 rounded-xl border"
+          style={{
+            backgroundColor: 'var(--color-surface-container)',
+            borderColor: xmasActive ? '#f59e0b' : 'var(--color-outline-variant)',
+          }}
+        >
+          <div>
+            <p className="text-xs font-semibold" style={{ color: 'var(--color-on-surface)' }}>
+              Activer la décoration de Noël
+            </p>
+            <p className="text-[10px]" style={{ color: 'var(--color-on-surface-variant)' }}>
+              Guirlandes lumineuses, ciel étoilé et ambiance nocturne.
+            </p>
+          </div>
+          <button
+            onClick={toggleXmas}
+            className={`relative w-11 h-6 rounded-full transition-colors duration-300 cursor-pointer ${xmasActive ? 'bg-amber-400' : 'bg-surface-container-high'}`}
+            style={{ boxShadow: xmasActive ? '0 0 10px rgba(251,191,36,0.4)' : 'none' }}
+          >
+            <span
+              className={`absolute top-1 left-1 w-5 h-5 rounded-full bg-white shadow transition-transform duration-300 ${xmasActive ? 'translate-x-5' : 'translate-x-0'}`}
+            />
+          </button>
+        </div>
+
+        {/* Options Noël détaillées — visibles uniquement si actif */}
+        {xmasActive && !reduced && (
+          <div
+            className="rounded-xl border p-4 space-y-4"
+            style={{
+              backgroundColor: 'var(--color-surface-container)',
+              borderColor: 'var(--color-outline-variant)',
+            }}
+          >
+            {/* Couleur */}
+            <div>
+              <label className="text-xs font-semibold block mb-2" style={{ color: 'var(--color-on-surface)' }}>
+                Couleur du thème
+              </label>
+              <div className="flex gap-2 flex-wrap">
+                {['#0067ff', '#f59e0b', '#dc2626', '#8b5cf6', '#16a34a', '#ec4899'].map((c) => (
+                  <button
+                    key={c}
+                    onClick={() => {
+                      const updated = { ...xmasPrefs, color: c };
+                      localStorage.setItem('xmas_prefs_v2', JSON.stringify(updated));
+                      setXmasPrefs(updated);
+                      setColor(c);
+                    }}
+                    className={`w-7 h-7 rounded-full transition-transform hover:scale-110 cursor-pointer ${(xmasPrefs?.color ?? color) === c ? 'ring-2 ring-offset-1 ring-on-surface' : ''}`}
+                    style={{ backgroundColor: c }}
+                  />
+                ))}
+              </div>
+            </div>
+
+            {/* Vitesse */}
+            <div>
+              <label className="text-xs font-semibold block mb-2" style={{ color: 'var(--color-on-surface)' }}>
+                Vitesse des animations
+              </label>
+              <input
+                type="range"
+                min={0.3}
+                max={3}
+                step={0.1}
+                value={xmasPrefs?.speed ?? 1}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  const updated = { ...xmasPrefs, speed: v };
+                  localStorage.setItem('xmas_prefs_v2', JSON.stringify(updated));
+                  setXmasPrefs(updated);
+                }}
+                className="w-full accent-primary"
+              />
+              <div className="flex justify-between text-[10px]" style={{ color: 'var(--color-on-surface-variant)' }}>
+                <span>Lent</span>
+                <span>Normal</span>
+                <span>Rapide</span>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ── Preview ── */}
       <div
         className="rounded-xl p-4 border"
         style={{
