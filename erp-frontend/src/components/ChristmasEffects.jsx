@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { motion, useAnimationFrame, useMotionValue, useSpring } from 'framer-motion';
 import {
   Star, Gift, Snowflake, TreePine, CandyCane,
-  Sparkles, Heart, Bell,
+  Sparkles, Heart, Bell, Balloon, Lightbulb,
 } from 'lucide-react';
 
 /**
@@ -236,17 +236,72 @@ function Atmosphere({ color, speed = 1, className }) {
  */
 const ChristmasIcons = {
   star: Star,
-  deer: Deer,
   gift: Gift,
   snowflake: Snowflake,
   tree: TreePine,
   candy: CandyCane,
   sparkles: Sparkles,
   heart: Heart,
-  wreath: Wreath,
-  bells: Bell,
-  treeFull: ChristmasTree,
+  bell: Bell,
+  balloons: Balloon,
+  lights: Lightbulb,
 };
+
+/**
+ * ─── Neige ───────────────────────────────────────────────────────────────────
+ */
+function Snowfall({ color, count = 80, className }) {
+  const particles = useMemo(() => {
+    const arr = [];
+    for (let i = 0; i < count; i++) {
+      arr.push({
+        id: i,
+        top: Math.random() * 100,
+        left: Math.random() * 100,
+        size: 2 + Math.random() * 3,
+        speed: 20 + Math.random() * 30,
+        opacity: 0.3 + Math.random() * 0.4,
+        delay: Math.random() * 5,
+      });
+    }
+    return arr;
+  }, [count]);
+
+  return (
+    <div
+      className={`pointer-events-none absolute inset-0 overflow-hidden ${className ?? ''}`}
+      style={{ zIndex: 0 }}
+    >
+      {particles.map((p) => (
+        <motion.div
+          key={p.id}
+          className="absolute rounded-full"
+          style={{
+            top: p.top,
+            left: p.left,
+            width: p.size,
+            height: p.size,
+            background: 'white',
+            borderRadius: '50%',
+            opacity: p.opacity,
+          }}
+          animate={{
+            y: [0, p.speed + Math.random() * 30],
+            opacity: [p.opacity, p.opacity * 0.3, p.opacity],
+          }}
+          transition={{
+            duration: p.speed + Math.random() * 20,
+            repeat: Infinity,
+            repeatType: 'loop',
+            ease: 'linear',
+            delay: p.delay,
+            times: [0, 1],
+          }}
+        />
+      ))}
+    </div>
+  );
+}
 
 export default function ChristmasEffects({ enabled = true, color = '#0067ff' }) {
   const reduced = useReducedMotion();
@@ -259,7 +314,9 @@ export default function ChristmasEffects({ enabled = true, color = '#0067ff' }) 
       <StarField color={color} speed={1} count={280} />
       <Garland color={color} speed={1} />
       <Atmosphere color={color} speed={1} />
-      {/* Saison finale : quelques étoiles fixes scintillantes en haut à droite */}
+      {/* Neige qui tombe */}
+      <Snowfall color={color} count={60} />
+      {/* Étoiles fixes scintillantes en haut à droite */}
       <div className="absolute right-8 top-8">
         {[0, 1, 2].map((i) => (
           <motion.div

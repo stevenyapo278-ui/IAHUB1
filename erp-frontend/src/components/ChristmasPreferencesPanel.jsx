@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { Slider, Label } from '@/components/ui';
 import {
-  ChristmasTree, Snowflake, Gift, Wind, Palette,
-  Star, Sun, Moon, Settings, RotateCcw,
+  Star, Snowflake, Gift, Palette,
+  Starburst, Balloon, Lightbulb, Settings, RotateCcw,
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 import { useUserPreferences } from '../context/UserPreferencesContext';
@@ -70,7 +70,7 @@ export function ChristmasPreferencesPanel() {
       {/* En-tête */}
       <div className="flex items-center gap-3 border-b border-outline-variant/40 pb-4">
         <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-400 to-red-500 flex items-center justify-center text-white">
-          <ChristmasTree className="w-5 h-5" />
+          <Star className="w-5 h-5" />
         </div>
         <div>
           <h3 className="font-semibold text-sm text-on-surface">Noël</h3>
@@ -94,7 +94,7 @@ export function ChristmasPreferencesPanel() {
             <div>
               <p className="text-sm font-semibold text-on-surface">Activer les animations de Noël</p>
               <p className="text-[11px] text-on-surface-variant">
-                Affichage de guirlandes, étoiles, ambiance nocturne et flou.
+                Guirlandes, étoiles, ambiance nocturne, flou et chute de neige.
                 Désactive une partie du style dès le démarrage (privilégie la
                 surcharge manuelle si tu veux quitter le style "noël").
               </p>
