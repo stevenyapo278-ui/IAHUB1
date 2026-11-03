@@ -44,6 +44,7 @@ services:
       dockerfile: Dockerfile
       args:
         VITE_API_URL: ${VITE_API_URL:-/api}
+        VITE_XMAS_ENABLED: ${VITE_XMAS_ENABLED:-true}
     restart: always
     depends_on:
       postgres:

@@ -13,7 +13,9 @@
 
 FROM node:20-slim AS build-frontend
 ARG VITE_API_URL=/api
+ARG VITE_XMAS_ENABLED=true
 ENV VITE_API_URL=${VITE_API_URL}
+ENV VITE_XMAS_ENABLED=${VITE_XMAS_ENABLED}
 
 WORKDIR /app/erp-frontend
 
