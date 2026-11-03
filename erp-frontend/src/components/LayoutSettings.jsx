@@ -441,13 +441,9 @@ function EffectsTab({ layoutSettings, setLayoutSettings }) {
     return null;
   });
 
-  // On force l'état si l'utilisateur a déjà des préférences existantes
-  const [xmasActive, setXmasActive] = useState(!!xmasPrefs?.active);
-
-  // Quand le panneau est ouvert, on syncronise depuis localStorage
-  useState(() => {
-    if (xmasPrefs?.active) setXmasActive(true);
-  });
+  // xmasActive est déduit de xmasPrefs directement (pas de state séparé)
+  // C'est la source unique de vérité pour l'état Noël
+  const xmasActive = !!xmasPrefs?.active;
 
   if (xmasActive && !reduced) {
     return (
