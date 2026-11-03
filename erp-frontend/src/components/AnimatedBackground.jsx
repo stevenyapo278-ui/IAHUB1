@@ -1,21 +1,37 @@
-import { useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import ChristmasEffects from './ChristmasEffects';
 
+/** Lit l'état Noël depuis le localStorage */
+function readXmasActive() {
+  if (typeof window === 'undefined') return false;
+  // Activation globale forcée via variable d'environnement (tous les utilisateurs)
+  if (import.meta.env.VITE_XMAS_ENABLED === 'true') return true;
+  // Préférence individuelle stockée dans localStorage
+  try {
+    const raw = localStorage.getItem('xmas_prefs_v2');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return parsed.active ?? false;
+    }
+  } catch { /* ignore */ }
+  // Par défaut : désactivé (opt-in, pas opt-out)
+  return false;
+}
+
 export default function AnimatedBackground() {
-  const xmasActive = useMemo(() => {
-    if (typeof window === 'undefined') return false;
-    // 1. Activation globale forcée via variable d'environnement (tous les utilisateurs)
-    if (import.meta.env.VITE_XMAS_ENABLED === 'true') return true;
-    // 2. Préférence individuelle stockée dans localStorage
-    try {
-      const raw = localStorage.getItem('xmas_prefs_v2');
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        return parsed.active ?? false;
-      }
-    } catch { /* ignore */ }
-    return true;
+  const [xmasActive, setXmasActive] = useState(readXmasActive);
+
+  // Réagit aux changements du toggle (même onglet via CustomEvent, autres onglets via storage event)
+  useEffect(() => {
+    const onStorage = () => setXmasActive(readXmasActive());
+    window.addEventListener('storage', onStorage);
+    // Écoute aussi un événement custom émis par le toggle dans le même onglet
+    window.addEventListener('xmas-prefs-changed', onStorage);
+    return () => {
+      window.removeEventListener('storage', onStorage);
+      window.removeEventListener('xmas-prefs-changed', onStorage);
+    };
   }, []);
 
   return (

@@ -450,6 +450,8 @@ function EffectsTab({ layoutSettings, setLayoutSettings }) {
     const updated = { ...(xmasPrefs ?? {}), active: next };
     localStorage.setItem('xmas_prefs_v2', JSON.stringify(updated));
     setXmasPrefs(updated);
+    // Notifie AnimatedBackground dans le même onglet (storage event ne se déclenche pas sur le même onglet)
+    window.dispatchEvent(new Event('xmas-prefs-changed'));
   };
 
 
