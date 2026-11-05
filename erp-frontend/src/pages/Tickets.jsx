@@ -4,6 +4,7 @@ import { useSearchParams, useNavigate, Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 import { markTicketUpdated, markCreationStarted } from '../utils/recentlyUpdatedTickets';
+import { celebrate } from '../utils/xmasConfetti';
 import {
   Ticket,
   Radio,
@@ -2005,6 +2006,7 @@ export default function Tickets() {
     try {
       await api.patch(`/tickets/${ticketId}`, { status: newStatus });
       toast.success(`Statut : ${STATUS_LABELS[newStatus] || newStatus}`);
+      if (newStatus === 'SOLVED' || newStatus === 'CLOSED') celebrate(e);
       refreshTicketsSilently();
     } catch (err) {
       toast.error(err.response?.data?.error || 'Échec mise à jour statut');

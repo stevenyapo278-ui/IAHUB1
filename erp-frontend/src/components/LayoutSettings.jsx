@@ -16,7 +16,6 @@ import {
   CaseSensitive,
   Snowflake,
   Star,
-  Wind,
   Gift,
   TreePine,
   Globe,
@@ -26,6 +25,7 @@ import { useUserPreferences } from '../context/UserPreferencesContext';
 import { FONT_STACKS, getFontFamily } from '../config/fonts';
 import ChristmasEffects from '../components/ChristmasEffects';
 import { useReducedMotion } from '../components/ChristmasEffects';
+import { readXmasPrefs, writeXmasPrefs } from '../hooks/useXmas';
 import { useAuth } from '../context/AuthContext';
 import api from '../api/client';
 
@@ -434,15 +434,8 @@ function EffectsTab({ layoutSettings, setLayoutSettings }) {
   const reduced = useReducedMotion();
 
   // Préférences Noël personnelles (localStorage)
-  const { prefs } = useUserPreferences();
-  const [xmasPrefs, setXmasPrefs] = useState(() => {
-    if (typeof window === 'undefined') return { active: false };
-    try {
-      const raw = localStorage.getItem('xmas_prefs_v2');
-      if (raw) return JSON.parse(raw);
-    } catch { /* ignore */ }
-    return { active: false };
-  });
+  // Toutes les options vivent dans `xmas_prefs_v2` (mêmes défauts que useXmas)
+  const [xmasPrefs, setXmasPrefs] = useState(readXmasPrefs);
 
   // xmasActive est déduit de xmasPrefs directement (source unique de vérité)
   const xmasActive = !!xmasPrefs?.active;
@@ -477,11 +470,7 @@ function EffectsTab({ layoutSettings, setLayoutSettings }) {
 
   // Fonction centralisée pour toggle Noël personnel
   const toggleXmas = () => {
-    const next = !xmasActive;
-    const updated = { ...(xmasPrefs ?? {}), active: next };
-    localStorage.setItem('xmas_prefs_v2', JSON.stringify(updated));
-    setXmasPrefs(updated);
-    window.dispatchEvent(new Event('xmas-prefs-changed'));
+    setXmasPrefs(writeXmasPrefs({ active: !xmasActive }));
   };
 
 
@@ -601,9 +590,7 @@ function EffectsTab({ layoutSettings, setLayoutSettings }) {
                   <button
                     key={c}
                     onClick={() => {
-                      const updated = { ...xmasPrefs, color: c };
-                      localStorage.setItem('xmas_prefs_v2', JSON.stringify(updated));
-                      setXmasPrefs(updated);
+                      setXmasPrefs(writeXmasPrefs({ color: c }));
                       setColor(c);
                     }}
                     className={`w-7 h-7 rounded-full transition-transform hover:scale-110 cursor-pointer ${(xmasPrefs?.color ?? color) === c ? 'ring-2 ring-offset-1 ring-on-surface' : ''}`}
@@ -624,12 +611,7 @@ function EffectsTab({ layoutSettings, setLayoutSettings }) {
                 max={3}
                 step={0.1}
                 value={xmasPrefs?.speed ?? 1}
-                onChange={(e) => {
-                  const v = Number(e.target.value);
-                  const updated = { ...xmasPrefs, speed: v };
-                  localStorage.setItem('xmas_prefs_v2', JSON.stringify(updated));
-                  setXmasPrefs(updated);
-                }}
+                onChange={(e) => setXmasPrefs(writeXmasPrefs({ speed: Number(e.target.value) }))}
                 className="w-full accent-primary"
               />
               <div className="flex justify-between text-[10px]" style={{ color: 'var(--color-on-surface-variant)' }}>
@@ -638,6 +620,40 @@ function EffectsTab({ layoutSettings, setLayoutSettings }) {
                 <span>Rapide</span>
               </div>
             </div>
+
+            {/* Décorations (apports du module NOEL) */}
+            <LayoutToggle
+              icon={Snowflake}
+              label="Neige plein écran"
+              description="Flocons en 3 plans de profondeur"
+              value={xmasPrefs?.snow !== false}
+              onChange={(v) => setXmasPrefs(writeXmasPrefs({ snow: v }))}
+            />
+
+            <LayoutToggle
+              icon={Star}
+              label="Bonnet de Père Noël"
+              description="Sur le logo de la barre latérale"
+              value={xmasPrefs?.santaHat !== false}
+              onChange={(v) => setXmasPrefs(writeXmasPrefs({ santaHat: v }))}
+            />
+
+            <LayoutToggle
+              icon={Sparkles}
+              label="Confettis à la résolution"
+              description="Une pluie dorée quand un ticket passe à Résolu ou Fermé"
+              value={xmasPrefs?.confetti !== false}
+              onChange={(v) => setXmasPrefs(writeXmasPrefs({ confetti: v }))}
+            />
+
+            <LayoutToggle
+              icon={TreePine}
+              label="Palette festive"
+              description="Primaire vert sapin et accents dorés"
+              value={!!xmasPrefs?.palette}
+              onChange={(v) => setXmasPrefs(writeXmasPrefs({ palette: v }))}
+            />
+
           </div>
         )}
       </div>

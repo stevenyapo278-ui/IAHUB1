@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 import { markTicketUpdated } from '../utils/recentlyUpdatedTickets';
+import { celebrate } from '../utils/xmasConfetti';
 import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
@@ -889,6 +890,7 @@ export default function TicketDetail() {
       markTicketUpdated(Number(id));
       await api.patch(`/tickets/${id}`, { [field]: value });
       toast.success('Mise à jour enregistrée');
+      if (field === 'status' && (value === 'SOLVED' || value === 'CLOSED')) celebrate();
       load();
     } catch (err) {
       setError(err.response?.data?.error || 'Erreur lors de la mise à jour');
@@ -2149,6 +2151,7 @@ export default function TicketDetail() {
                           markTicketUpdated(Number(id));
                           await api.patch(`/tickets/${id}`, { status: 'CLOSED' });
                           toast.success('Ticket fermé avec succès');
+                          celebrate();
                           load();
                         } catch (err) {
                           toast.error(err.response?.data?.error || 'Échec de la fermeture');

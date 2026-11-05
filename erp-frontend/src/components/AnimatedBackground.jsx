@@ -1,60 +1,35 @@
-import { useState, useEffect } from 'react';
+import { useEffect } from 'react';
 import { motion } from 'framer-motion';
 import ChristmasEffects from './ChristmasEffects';
-
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
-
-/** Lit les prefs Noël depuis le localStorage */
-function readXmasPrefs() {
-  if (typeof window === 'undefined') return { active: false, color: '#0067ff', speed: 1 };
-  try {
-    const raw = localStorage.getItem('xmas_prefs_v2');
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      return {
-        active: parsed.active ?? false,
-        color: parsed.color ?? '#0067ff',
-        speed: parsed.speed ?? 1,
-      };
-    }
-  } catch { /* ignore */ }
-  return { active: false, color: '#0067ff', speed: 1 };
-}
+import { useXmas } from '../hooks/useXmas';
 
 export default function AnimatedBackground() {
-  const [xmasPrefs, setXmasPrefs] = useState(readXmasPrefs);
-  // null = pas encore chargé, false = admin n'a pas forcé, true = admin force
-  const [adminForced, setAdminForced] = useState(null);
+  const xmas = useXmas();
 
-  // Charge le réglage admin au montage (endpoint public, sans token)
+  // Classes globales utilisées par le CSS (cadre des cartes, halo sidebar,
+  // palette festive). Source unique : ce composant.
   useEffect(() => {
-    fetch(`${API_BASE}/system-settings/public`)
-      .then((r) => r.json())
-      .then((data) => setAdminForced(!!data.xmasForceEnabled))
-      .catch(() => setAdminForced(false));
-  }, []);
-
-  // Réagit aux changements du toggle personnel (même onglet ou autre onglet)
-  useEffect(() => {
-    const onStorage = () => setXmasPrefs(readXmasPrefs());
-    window.addEventListener('storage', onStorage);
-    window.addEventListener('xmas-prefs-changed', onStorage);
+    const root = document.documentElement;
+    root.classList.toggle('xmas-on', xmas.active);
+    root.classList.toggle('xmas-night', xmas.active && xmas.nightMode);
+    root.classList.toggle('xmas-palette', xmas.active && xmas.palette);
     return () => {
-      window.removeEventListener('storage', onStorage);
-      window.removeEventListener('xmas-prefs-changed', onStorage);
+      root.classList.remove('xmas-on', 'xmas-night', 'xmas-palette');
     };
-  }, []);
-
-  // L'admin force = tout le monde voit les animations, peu importe la préférence perso
-  const isActive = adminForced === true || xmasPrefs.active;
+  }, [xmas.active, xmas.nightMode, xmas.palette]);
 
   return (
     <>
       {/* ── Effets Noël — rendu directement (sans wrapper) pour que les z-index
-           internes (guirlande z-45, neige z-35) ne soient pas emprisonnés
+           internes (neige z-35, nuit z-33/34) ne soient pas emprisonnés
            dans un contexte d'empilement inférieur au header (z-30). */}
-      {isActive && (
-        <ChristmasEffects color={xmasPrefs.color} speed={xmasPrefs.speed} />
+      {xmas.active && (
+        <ChristmasEffects
+          color={xmas.color}
+          speed={xmas.speed}
+          nightMode={xmas.nightMode}
+          snow={xmas.snow}
+        />
       )}
 
       {/* ── Fond animé (dégradés subtils) — reste en arrière-plan ── */}
@@ -88,5 +63,3 @@ export default function AnimatedBackground() {
     </>
   );
 }
-
-

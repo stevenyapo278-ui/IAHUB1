@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import MarieLoader from '../components/MarieLoader';
@@ -56,6 +56,9 @@ import LayoutSettings from '../components/LayoutSettings';
 import CustomizerDrawer from '../components/CustomizerDrawer';
 import CursorGlow from '../components/CursorGlow';
 import AnimatedBackground from '../components/AnimatedBackground';
+import SantaHat from '../components/SantaHat';
+import { SidebarSnowfall } from '../components/ChristmasEffects';
+import { useXmas } from '../hooks/useXmas';
 import Tooltip from '../components/ui/tooltip';
 import { useNotifications } from '../context/NotificationContext';
 import { useUserPreferences } from '../context/UserPreferencesContext';
@@ -123,6 +126,9 @@ export default function MainLayout() {
   const navigate = useNavigate();
   const location = useLocation();
   const { settings: systemSettings, loading: settingsLoading } = useSystemSettings();
+
+  // Décoration Noël : source unique (localStorage + forçage admin)
+  const xmas = useXmas();
 
   // Photo de profil : chemin relatif /uploads/… résolu contre l'origine de l'API
   const sidebarAvatarSrc = resolveAvatarUrl(user?.avatarUrl);
@@ -367,7 +373,7 @@ export default function MainLayout() {
       {/* SIDEBAR */}
       <aside
         ref={sidebarRef}
-        className={`app-sidebar ${isSidebarExpanded || mobileOpen ? 'expanded' : ''} ${mobileOpen ? 'mobile-open' : ''}`}
+        className={`app-sidebar relative overflow-hidden ${isSidebarExpanded || mobileOpen ? 'expanded' : ''} ${mobileOpen ? 'mobile-open' : ''}`}
         onMouseEnter={() => { if (!isMobileViewport()) setSidebarHovered(true); }}
         onMouseLeave={() => {
           if (isMobileViewport()) return;
@@ -376,12 +382,23 @@ export default function MainLayout() {
           setShowSystemMenu(false);
         }}
       >
+        {/* Flocons dans la barre latérale (thème de Noël) */}
+        {xmas.active && <SidebarSnowfall speed={xmas.speed} />}
+
+        {/* Liseré lumineux animé sur le bord droit */}
+        <div className="sidebar-beam" aria-hidden="true" />
+
         {/* Logo */}
         <div className="sidebar-logo flex items-center gap-3">
-          <div className="sidebar-logo-icon">
-            <span className="sidebar-logo-m text-base font-bold tracking-wider bg-gradient-to-r from-primary to-info bg-clip-text text-transparent">
-              M
-            </span>
+          {xmas.active && xmas.santaHat && <SantaHat />}
+          <div className="sidebar-logo-icon flex items-center justify-center">
+            {xmas.active ? (
+              <span className="text-lg leading-none" title="Noël">{xmas.emoji || '🎄'}</span>
+            ) : (
+              <span className="sidebar-logo-m text-base font-bold tracking-wider bg-gradient-to-r from-primary to-info bg-clip-text text-transparent">
+                M
+              </span>
+            )}
             <div className="sidebar-logo-full">
               <MarieLoader />
             </div>
@@ -496,6 +513,18 @@ export default function MainLayout() {
           </>
           )}
         </nav>
+
+        {/* Sapin décoratif (thème de Noël) */}
+        {xmas.active && (
+          <div className="sidebar-tree" aria-hidden="true">
+            <span className="sidebar-tree-star">★</span>
+            <span className="sidebar-tree-emoji">🎄</span>
+            <span className="sidebar-tree-bulb sidebar-tree-bulb--1" />
+            <span className="sidebar-tree-bulb sidebar-tree-bulb--2" />
+            <span className="sidebar-tree-bulb sidebar-tree-bulb--3" />
+            <span className="sidebar-tree-bulb sidebar-tree-bulb--4" />
+          </div>
+        )}
 
         {/* User profile at bottom */}
         <div
@@ -644,6 +673,9 @@ export default function MainLayout() {
 
           {/* Right: Actions */}
           <div className="flex items-center gap-3 shrink-0">
+            {/* Compte à rebours Noël */}
+            {xmas.active && <XmasCountdown emoji={xmas.emoji} />}
+
             {/* Search trigger */}
             <button
               onClick={triggerGlobalSearch}
@@ -817,6 +849,36 @@ function CompactSectionButton({ items, isActive, currentItem, label, icon: Icon,
         </div>
       )}
     </div>
+  );
+}
+
+// ── Compte à rebours Noël (badge discret dans le header) ─────────────────────
+function XmasCountdown({ emoji = '🎄' }) {
+  const label = useMemo(() => {
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    let target = new Date(now.getFullYear(), 11, 25);
+    if (today.getTime() > target.getTime()) target = new Date(now.getFullYear() + 1, 11, 25);
+    const days = Math.round((target.getTime() - today.getTime()) / 86400000);
+    if (days === 0) return 'Joyeux Noël !';
+    if (days === 1) return 'Noël demain';
+    if (days <= 10) return `Noël · J-${days}`;
+    return `Noël dans ${days} j`;
+  }, []);
+
+  return (
+    <span
+      className="hidden lg:flex items-center gap-1.5 h-9 px-3 rounded-xl border shrink-0"
+      title="Compte à rebours avant Noël"
+      style={{
+        borderColor: 'rgba(245,158,11,0.45)',
+        background: 'linear-gradient(135deg, rgba(245,158,11,0.14), rgba(220,38,38,0.10))',
+        color: 'var(--color-on-surface)',
+      }}
+    >
+      <span className="text-sm leading-none" aria-hidden="true">{emoji}</span>
+      <span className="text-[11px] font-bold tracking-tight whitespace-nowrap">{label}</span>
+    </span>
   );
 }
 

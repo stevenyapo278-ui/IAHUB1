@@ -173,6 +173,262 @@
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════════ */
+/* EFFETS NOËL ENRICHIS — neige (3 couches), guirlande, amoncellement, nuit,      */
+/* confettis, cadre festif des cartes, halo sidebar.                              */
+/* Tout est piloté par :                                                          */
+/*   • les classes `.xmas-*` posées par ChristmasEffects.jsx                      */
+/*   • `html.xmas-on` / `html.xmas-night` posés par AnimatedBackground.jsx        */
+/*   • la vitesse (slider 0.3 → 3) via `animation-duration` en style inline       */
+/* ═══════════════════════════════════════════════════════════════════════════════ */
+
+/* ── Neige : chute en CSS pur (bien plus léger que N motion.div) ───────────── */
+@keyframes xmas-flake-fall {
+  0%   { transform: translate3d(calc(var(--xmas-sway, 24px) * -1), -8vh, 0) rotate(0deg); }
+  25%  { transform: translate3d(var(--xmas-sway, 24px), 26vh, 0) rotate(96deg); }
+  50%  { transform: translate3d(calc(var(--xmas-sway, 24px) * -0.7), 55vh, 0) rotate(184deg); }
+  75%  { transform: translate3d(var(--xmas-sway, 24px), 84vh, 0) rotate(276deg); }
+  100% { transform: translate3d(calc(var(--xmas-sway, 24px) * -0.4), 114vh, 0) rotate(368deg); }
+}
+
+.xmas-flake {
+  position: absolute;
+  top: -8vh;
+  display: block;
+  border-radius: 50%;
+  pointer-events: none;
+  animation-name: xmas-flake-fall;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+  will-change: transform;
+}
+
+.xmas-flake--glyph {
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  line-height: 1;
+}
+
+/* ── Bonnet de Père Noël sur le logo de la sidebar ─────────────────────────── */
+.xmas-santa-hat {
+  position: absolute;
+  top: 2px;
+  left: 8px;
+  z-index: 2;
+  transform: rotate(-18deg);
+  pointer-events: none;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.25));
+}
+
+/* ── Amoncellement de neige en bas de page ─────────────────────────────────── */
+@keyframes xmas-snowbank-bob {
+  0%, 100% { transform: translate3d(0, 0, 0); }
+  50%      { transform: translate3d(-10px, -4px, 0); }
+}
+
+.xmas-snowbank {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  animation-name: xmas-snowbank-bob;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+}
+
+.xmas-snowbank--front {
+  top: auto;
+  height: 74%;
+  opacity: 0.7;
+  animation-direction: alternate;
+}
+
+/* ── Ampoules de la guirlande de verdure ───────────────────────────────────── */
+@keyframes xmas-bulb-blink {
+  0%, 100% { opacity: 0.4;  filter: brightness(0.85); }
+  42%      { opacity: 1;    filter: brightness(1.4); }
+  58%      { opacity: 0.78; filter: brightness(1.05); }
+  76%      { opacity: 1;    filter: brightness(1.25); }
+}
+
+.xmas-bulb {
+  position: absolute;
+  width: 7px;
+  height: 9px;
+  border-radius: 50% 50% 55% 55% / 45% 45% 60% 60%;
+  transform: translateX(-50%);
+  pointer-events: none;
+  animation-name: xmas-bulb-blink;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+}
+
+/* ── Étoiles du ciel nocturne ──────────────────────────────────────────────── */
+@keyframes xmas-twinkle {
+  0%, 100% { opacity: 0.18; transform: scale(0.7); }
+  50%      { opacity: 1;    transform: scale(1.2); }
+}
+
+.xmas-nightstar {
+  position: absolute;
+  border-radius: 50%;
+  pointer-events: none;
+  animation-name: xmas-twinkle;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+}
+
+.xmas-nightstar--glyph {
+  background: none;
+  box-shadow: none;
+  border-radius: 0;
+  line-height: 1;
+}
+
+/* ── Confettis de neige au clic ────────────────────────────────────────────── */
+.xmas-burst {
+  position: absolute;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+@keyframes xmas-confetti-fly {
+  0% {
+    transform: translate(-50%, -50%) scale(0.3) rotate(0deg);
+    opacity: 0;
+  }
+  12% { opacity: 1; }
+  100% {
+    transform: translate(calc(-50% + var(--dx, 0px)), calc(-50% + var(--dy, 0px) + 30px))
+      scale(0.85) rotate(var(--spin, 0deg));
+    opacity: 0;
+  }
+}
+
+.xmas-confetti {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: block;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow: 0 0 6px rgba(150, 190, 255, 0.75);
+  opacity: 0;
+  animation-name: xmas-confetti-fly;
+  animation-timing-function: cubic-bezier(0.15, 0.7, 0.4, 1);
+  animation-fill-mode: both;
+  animation-iteration-count: 1;
+}
+
+.xmas-confetti--glyph {
+  background: none;
+  box-shadow: none;
+  border-radius: 0;
+  line-height: 1;
+  color: rgba(226, 240, 255, 0.95);
+}
+
+/* ── Cadre festif des cartes (KPI + widgets du dashboard) ──────────────────── */
+html.xmas-on .dashboard-widget,
+html.xmas-on .xmas-card {
+  position: relative;
+}
+
+html.xmas-on .dashboard-widget::after,
+html.xmas-on .xmas-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  pointer-events: none;
+  background: linear-gradient(
+    135deg,
+    rgba(245, 158, 11, 0.6) 0%,
+    rgba(245, 158, 11, 0.06) 30%,
+    rgba(0, 0, 0, 0) 50%,
+    rgba(220, 38, 38, 0.08) 70%,
+    rgba(220, 38, 38, 0.55) 100%
+  );
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  opacity: 0.7;
+  transition: opacity 0.2s ease;
+}
+
+html.xmas-on .dashboard-widget:hover::after,
+html.xmas-on .xmas-card:hover::after {
+  opacity: 1;
+}
+
+html.xmas-on .dashboard-widget::before,
+html.xmas-on .xmas-card::before {
+  content: '✦';
+  position: absolute;
+  top: 5px;
+  right: 6px;
+  z-index: 2;
+  font-size: 9px;
+  line-height: 1;
+  color: rgba(245, 158, 11, 0.85);
+  pointer-events: none;
+  animation: xmas-sparkle 2.8s ease-in-out infinite;
+}
+
+/* ── Halo lumineux sur les icônes de la sidebar ────────────────────────────── */
+@keyframes xmas-halo {
+  0%, 100% {
+    filter: drop-shadow(0 0 2px color-mix(in srgb, var(--color-primary) 30%, transparent));
+  }
+  50% {
+    filter: drop-shadow(0 0 8px color-mix(in srgb, var(--color-primary) 75%, transparent));
+  }
+}
+
+html.xmas-on .sidebar-item.active .sidebar-item-icon,
+html.xmas-on .sidebar-item:hover .sidebar-item-icon {
+  animation: xmas-halo 2.8s ease-in-out infinite;
+}
+
+/* ── Palette festive optionnelle : primaire vert sapin + accents dorés ────── */
+html.xmas-palette {
+  --skin-primary: #165b33;
+  --skin-primary-hover: #114d2a;
+  --skin-primary-foreground: #ffffff;
+  --skin-ring: #d4af37;
+}
+
+html.xmas-palette.dark {
+  --skin-primary: #2f9e63;
+  --skin-primary-hover: #38b171;
+  --skin-primary-foreground: #04150c;
+  --skin-ring: #f5d77a;
+}
+
+/* ── Accessibilité : on coupe tout si l'utilisateur réduit les animations ──── */
+@media (prefers-reduced-motion: reduce) {
+  .xmas-flake,
+  .xmas-snowbank,
+  .xmas-bulb,
+  .xmas-nightstar,
+  .xmas-confetti,
+  .xmas-star,
+  .sidebar-beam::after,
+  .sidebar-tree-emoji,
+  .sidebar-tree-star,
+  .sidebar-tree-bulb,
+  html.xmas-on .app-sidebar::before,
+  html.xmas-on .dashboard-widget::before,
+  html.xmas-on .xmas-card::before,
+  html.xmas-on .sidebar-item.active .sidebar-item-icon,
+  html.xmas-on .sidebar-item:hover .sidebar-item-icon {
+    animation: none !important;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════════ */
 /* KATALYST SKIN SYSTEM — 13 skins via data-skin attribute on <html>            */
 /* Each skin defines: --background, --surface, --surface-muted, --foreground,   */
 /* --muted-foreground, --border, --primary, --primary-hover,                    */
@@ -1700,6 +1956,286 @@ html.theme-animating *::after {
 .app-sidebar.expanded .sidebar-user-info {
   opacity: 1;
   max-width: 160px;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   SIDEBAR — FINITIONS VISUELLES
+   · liseré lumineux qui parcourt le bord droit
+   · item actif en dégradé avec halo
+   · avatar cerclé d'un anneau lumineux
+   · ambiance « nuit d'hiver » quand le thème de Noël est actif
+══════════════════════════════════════════════════════════════════════════════ */
+
+/* Liseré + lumière qui descend lentement le long du bord */
+.sidebar-beam {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 1px;
+  pointer-events: none;
+  z-index: 3;
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    color-mix(in srgb, var(--color-primary) 55%, transparent) 14%,
+    transparent 40%,
+    color-mix(in srgb, var(--color-primary) 45%, transparent) 64%,
+    transparent 90%
+  );
+  opacity: 0.65;
+}
+
+.sidebar-beam::after {
+  content: '';
+  position: absolute;
+  left: -1.5px;
+  width: 4px;
+  height: 110px;
+  border-radius: 999px;
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    color-mix(in srgb, var(--color-primary) 85%, transparent),
+    transparent
+  );
+  filter: blur(2.5px);
+  animation: sidebar-beam-run 11s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
+}
+
+@keyframes sidebar-beam-run {
+  0%   { top: -110px; opacity: 0; }
+  8%   { opacity: 0.85; }
+  92%  { opacity: 0.85; }
+  100% { top: 100%; opacity: 0; }
+}
+
+/* Item actif : dégradé + halo doux (suit la couleur du skin) */
+.sidebar-item {
+  transition: background 0.16s ease, color 0.16s ease, box-shadow 0.2s ease;
+}
+
+.sidebar-item-icon {
+  transition: min-width 0.2s ease, transform 0.18s ease;
+}
+
+.sidebar-item:hover {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-primary) 7%, transparent);
+}
+
+.sidebar-item:hover .sidebar-item-icon {
+  transform: translateX(1px) scale(1.06);
+}
+
+.sidebar-item.active {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--color-primary) 16%, transparent) 0%,
+    color-mix(in srgb, var(--color-primary) 6%, transparent) 72%,
+    transparent 100%
+  );
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--color-primary) 16%, transparent),
+    0 8px 20px -14px color-mix(in srgb, var(--color-primary) 80%, transparent);
+}
+
+.sidebar-item.active .sidebar-item-icon {
+  transform: scale(1.05);
+}
+
+/* Libellé de groupe : petite ligne de fuite vers la droite */
+.app-sidebar.expanded .sidebar-group-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.app-sidebar.expanded .sidebar-group-label::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--color-outline-variant) 90%, transparent), transparent);
+}
+
+/* Avatar : anneau lumineux + reflet */
+.sidebar-user-avatar {
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--color-primary) 22%, transparent),
+    color-mix(in srgb, var(--color-primary) 6%, transparent)
+  );
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--color-primary) 26%, transparent),
+    0 6px 14px -8px color-mix(in srgb, var(--color-primary) 70%, transparent);
+}
+
+/* ── Ambiance « nuit d'hiver » (thème de Noël) ─────────────────────────────── */
+
+/* Aurore discrète qui respire derrière le logo et le début de la navigation */
+html.xmas-on .app-sidebar::before {
+  content: '';
+  position: absolute;
+  left: -50%;
+  right: -50%;
+  top: -18%;
+  height: 62%;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(55% 60% at 30% 25%, color-mix(in srgb, var(--color-primary) 30%, transparent), transparent 70%),
+    radial-gradient(45% 45% at 78% 0%, color-mix(in srgb, #d4af37 16%, transparent), transparent 72%);
+  filter: blur(34px);
+  opacity: 0.75;
+  animation: sidebar-aurora 19s ease-in-out infinite alternate;
+}
+
+@keyframes sidebar-aurora {
+  0%   { transform: translate3d(-4%, -3%, 0) scale(1); }
+  50%  { transform: translate3d(3%, 2%, 0) scale(1.07); }
+  100% { transform: translate3d(-2%, 3%, 0) scale(1.02); }
+}
+
+/* Congère / gel en bas de la barre */
+html.xmas-on .app-sidebar::after {
+  content: '';
+  position: absolute;
+  left: -20%;
+  right: -20%;
+  bottom: -8px;
+  height: 130px;
+  z-index: 0;
+  pointer-events: none;
+  background: radial-gradient(
+    120% 100% at 50% 100%,
+    rgba(255, 255, 255, 0.18) 0%,
+    rgba(255, 255, 255, 0.06) 45%,
+    transparent 74%
+  );
+}
+
+html.xmas-on:not(.dark) .app-sidebar::after {
+  background: radial-gradient(
+    120% 100% at 50% 100%,
+    color-mix(in srgb, var(--color-primary) 10%, transparent) 0%,
+    color-mix(in srgb, var(--color-primary) 4%, transparent) 45%,
+    transparent 74%
+  );
+}
+
+/* L'item actif s'illumine un peu plus chaudement */
+html.xmas-on .sidebar-item.active {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--color-primary) 18%, transparent) 0%,
+    color-mix(in srgb, #d4af37 6%, transparent) 72%,
+    transparent 100%
+  );
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, #d4af37 20%, transparent),
+    0 8px 22px -14px color-mix(in srgb, #d4af37 60%, transparent);
+}
+
+/* ── Sapin décoratif du thème de Noël ──────────────────────────────────────── */
+.sidebar-tree {
+  position: relative;
+  flex-shrink: 0;
+  width: 100%;
+  height: 104px;
+  margin: 2px 0 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Inutile dans une barre repliée (80 px) */
+.app-sidebar:not(.expanded) .sidebar-tree {
+  display: none;
+}
+
+/* Pas de place sur les écrans bas : on masque plutôt que de rogner la navigation */
+@media (max-height: 720px) {
+  .sidebar-tree {
+    display: none;
+  }
+}
+
+/* Halo au sol : le sapin « pose » sur la barre */
+.sidebar-tree::after {
+  content: '';
+  position: absolute;
+  bottom: 4px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 130px;
+  height: 18px;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(212, 175, 55, 0.22), transparent);
+  filter: blur(5px);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.sidebar-tree-emoji {
+  position: relative;
+  z-index: 1;
+  font-size: 84px;
+  line-height: 1;
+  filter: drop-shadow(0 0 12px rgba(212, 175, 55, 0.35));
+  animation: sidebar-tree-glow 4.5s ease-in-out infinite;
+}
+
+@keyframes sidebar-tree-glow {
+  0%, 100% {
+    filter: drop-shadow(0 0 10px rgba(212, 175, 55, 0.3));
+    transform: scale(1);
+  }
+  50% {
+    filter: drop-shadow(0 0 26px rgba(212, 175, 55, 0.6));
+    transform: scale(1.03);
+  }
+}
+
+.sidebar-tree-star {
+  position: absolute;
+  top: 2px;
+  left: 50%;
+  margin-left: -9px;
+  font-size: 18px;
+  line-height: 1;
+  color: #ffd166;
+  z-index: 2;
+  animation: sidebar-tree-star 1.4s ease-in-out infinite alternate;
+}
+
+@keyframes sidebar-tree-star {
+  from { transform: scale(1) rotate(-6deg); text-shadow: 0 0 6px rgba(255, 209, 102, 0.7); }
+  to   { transform: scale(1.3) rotate(14deg); text-shadow: 0 0 18px gold; }
+}
+
+.sidebar-tree-bulb {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  animation: sidebar-tree-blink 1.1s ease-in-out infinite alternate;
+}
+
+.sidebar-tree-bulb--1 { top: 22%; left: 26%; background: #ff4545; box-shadow: 0 0 12px #ff4545; }
+.sidebar-tree-bulb--2 { top: 40%; right: 24%; background: #ffe066; box-shadow: 0 0 12px #ffe066; animation-delay: 0.3s; }
+.sidebar-tree-bulb--3 { top: 58%; left: 28%; background: #4de1ff; box-shadow: 0 0 12px #4de1ff; animation-delay: 0.6s; }
+.sidebar-tree-bulb--4 { top: 74%; right: 26%; background: #ff69b4; box-shadow: 0 0 12px #ff69b4; animation-delay: 0.9s; }
+
+@keyframes sidebar-tree-blink {
+  from { opacity: 0.3; transform: scale(0.85); }
+  to   { opacity: 1; transform: scale(1.35); }
+}
+
+/* Flocons lisibles aussi sur sidebar claire */
+html:not(.dark) .app-sidebar .xmas-flake {
+  background: rgba(120, 160, 210, 0.75) !important;
+  box-shadow: 0 0 4px rgba(90, 140, 200, 0.35) !important;
 }
 
 /* ── Tooltip (collapsed) ──────────────────────────────────────────────────── */

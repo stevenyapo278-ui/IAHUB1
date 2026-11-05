@@ -77,7 +77,7 @@ export function KpiCard({
 
   return (
     <div
-      className="rounded-2xl border p-4 flex flex-col gap-3 transition-all duration-200 hover:scale-[1.01] group cursor-default"
+      className="xmas-card rounded-2xl border p-4 flex flex-col gap-3 transition-all duration-200 hover:scale-[1.01] group cursor-default"
       style={{
         backgroundColor: 'var(--color-surface-container-lowest)',
         borderColor: 'color-mix(in srgb, var(--color-outline-variant) 30%, transparent)',
