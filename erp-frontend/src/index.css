@@ -416,8 +416,8 @@ html.xmas-palette.dark {
   .xmas-confetti,
   .xmas-star,
   .sidebar-beam::after,
-  .sidebar-tree-emoji,
-  .sidebar-tree-star,
+  .sidebar-tree-svg,
+  .sidebar-tree-svg .xmas-tree-star,
   .sidebar-tree-bulb,
   html.xmas-on .app-sidebar::before,
   html.xmas-on .dashboard-widget::before,
@@ -2177,13 +2177,22 @@ html.xmas-on .sidebar-item.active {
   z-index: 0;
 }
 
-.sidebar-tree-emoji {
+.sidebar-tree-svg {
   position: relative;
   z-index: 1;
-  font-size: 84px;
-  line-height: 1;
+  width: 92px;
+  height: 92px;
+  /* L'étoile et le halo peuvent déborder légèrement du viewBox. */
+  overflow: visible;
   filter: drop-shadow(0 0 12px rgba(212, 175, 55, 0.35));
   animation: sidebar-tree-glow 4.5s ease-in-out infinite;
+}
+
+/* Scintillement de l'étoile seule (le path, pas tout le sapin). */
+.sidebar-tree-svg .xmas-tree-star {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: sidebar-tree-star-twinkle 2.6s ease-in-out infinite alternate;
 }
 
 @keyframes sidebar-tree-glow {
@@ -2197,21 +2206,9 @@ html.xmas-on .sidebar-item.active {
   }
 }
 
-.sidebar-tree-star {
-  position: absolute;
-  top: 2px;
-  left: 50%;
-  margin-left: -9px;
-  font-size: 18px;
-  line-height: 1;
-  color: #ffd166;
-  z-index: 2;
-  animation: sidebar-tree-star 1.4s ease-in-out infinite alternate;
-}
-
-@keyframes sidebar-tree-star {
-  from { transform: scale(1) rotate(-6deg); text-shadow: 0 0 6px rgba(255, 209, 102, 0.7); }
-  to   { transform: scale(1.3) rotate(14deg); text-shadow: 0 0 18px gold; }
+@keyframes sidebar-tree-star-twinkle {
+  from { opacity: 0.85; transform: scale(0.94) rotate(-6deg); }
+  to   { opacity: 1;    transform: scale(1.08) rotate(6deg); }
 }
 
 .sidebar-tree-bulb {
