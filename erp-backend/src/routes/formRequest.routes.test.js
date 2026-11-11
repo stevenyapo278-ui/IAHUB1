@@ -11,6 +11,7 @@ jest.mock('../prismaClient', () => ({
   ticketEvent: { create: jest.fn() },
   ticketApproval: { create: jest.fn() },
   user: { findUnique: jest.fn() },
+  authSession: { findUnique: jest.fn(), update: jest.fn().mockResolvedValue({}), updateMany: jest.fn().mockResolvedValue({ count: 0 }) },
   team: { findUnique: jest.fn() },
   location: { findUnique: jest.fn() },
 }));
@@ -23,15 +24,19 @@ jest.mock('../services/hierarchicalApproval', () => ({
 }));
 
 const jwt = require('jsonwebtoken');
+process.env.JWT_SECRET = process.env.JWT_SECRET || 'test_jwt_secret_for_ci';
 const router = require('./formRequest.routes');
 const prisma = require('../prismaClient');
 const { applySla } = require('../services/slaService');
 const { sendManagerApprovalEmail, MANAGER_KEY, CC_KEY } = require('../services/hierarchicalApproval');
 
-const TOKEN = jwt.sign({ sub: 1, role: 'SUPERADMIN' }, process.env.JWT_SECRET);
+const TOKEN = jwt.sign(
+  { sub: 1, role: 'SUPERADMIN', sid: 'test-session', tv: 0, sst: Math.floor(Date.now() / 1000) },
+  process.env.JWT_SECRET
+);
 const AUTH_USER = {
   id: 1, email: 'super@prosuma.ci', fullName: 'Super Admin',
-  role: 'SUPERADMIN', roles: [], teamId: null, isActive: true,
+  role: 'SUPERADMIN', roles: [], teamId: null, isActive: true, tokenVersion: 0,
 };
 
 const SIMPLE_FORM = {
@@ -135,6 +140,15 @@ beforeEach(() => {
   prisma.formSubmission.create.mockResolvedValue({ id: 1 });
   prisma.ticketEvent.create.mockResolvedValue({ id: 1 });
   applySla.mockResolvedValue(undefined);
+  prisma.authSession.findUnique.mockImplementation(async ({ where }) => ({
+    id: where.id,
+    userId: 1,
+    revokedAt: null,
+    sessionStart: new Date(),
+    lastActivityAt: new Date(),
+    expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+    user: AUTH_USER,
+  }));
   prisma.user.findUnique.mockImplementation(async ({ where, select }) => {
     if (select && select.isActive) return AUTH_USER;
     if (where.id === 999) return null;

@@ -4,7 +4,7 @@ import api from '../../api/client';
 import ConfirmDialog from '../../components/ConfirmDialog';
 import Toggle from '../../components/Toggle';
 import DataGrid from '../../components/DataGrid';
-import { Zap, BarChart3, AlertTriangle } from 'lucide-react';
+import { Zap, BarChart3, AlertTriangle, Power } from 'lucide-react';
 
 const inputClass =
   'bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300';
@@ -451,6 +451,10 @@ export default function AiProvidersTab() {
   const [aiSettings, setAiSettings] = useState({ aiEnabled: true, aiDailyTokenBudget: 100000, aiTokenAlertThreshold: 0.8, aiTokenAlertRecipients: [] });
   const [aiUsage, setAiUsage] = useState(null);
   const [loadingUsage, setLoadingUsage] = useState(false);
+  // Arrêt d'urgence (kill switch) : état lu à part, car il doit refléter la base
+  // immédiatement après un clic — indépendamment des autres réglages de la page.
+  const [killSwitch, setKillSwitch] = useState({ active: false, reason: null, activatedAt: null, activatedBy: null, writesEnabled: true });
+  const [killPending, setKillPending] = useState(false);
 
   // Liste de tous les modèles pour le sélecteur vocal
   const allModels = useMemo(() => {
@@ -488,6 +492,15 @@ export default function AiProvidersTab() {
         });
       })
       .catch(() => {});
+    api.get('/system-settings/ai-kill-switch')
+      .then(({ data }) => setKillSwitch({
+        active: data.active === true,
+        reason: data.reason || null,
+        activatedAt: data.activatedAt || null,
+        activatedBy: data.activatedBy || null,
+        writesEnabled: data.writesEnabled !== false,
+      }))
+      .catch(() => {});
     // Charger les stats d'usage IA
     setLoadingUsage(true);
     api.get('/system/ai-usage?days=7')
@@ -519,6 +532,44 @@ export default function AiProvidersTab() {
       setError(err.response?.data?.error || 'Erreur lors de la mise à jour');
     } finally {
       setSaving(false);
+    }
+  }
+
+  // Arrêt d'urgence : confirmation explicite (un clic accidentel couperait tout le service).
+  // L'activation est auditée côté serveur et ferme les sessions vocales en cours.
+  async function handleToggleKillSwitch(enabled) {
+    if (enabled && !window.confirm("Activer l'arrêt d'urgence IA ?\n\nTous les appels IA et toutes les actions de l'assistant seront bloqués immédiatement, et les sessions vocales en cours seront fermées.")) {
+      return;
+    }
+    setKillPending(true);
+    try {
+      const { data } = await api.post('/system-settings/ai-kill-switch', {
+        enabled,
+        reason: enabled ? 'Arrêt d’urgence depuis Paramètres > IA' : null,
+      });
+      setKillSwitch({
+        active: data.active === true,
+        reason: data.reason || null,
+        activatedAt: data.activatedAt || null,
+        activatedBy: data.activatedBy || null,
+        writesEnabled: killSwitch.writesEnabled,
+      });
+    } catch (err) {
+      setError(err.response?.data?.error || 'Erreur lors du changement d’état');
+    } finally {
+      setKillPending(false);
+    }
+  }
+
+  async function handleToggleWrites(enabled) {
+    setKillPending(true);
+    try {
+      const { data } = await api.post('/system-settings/ai-writes', { enabled });
+      setKillSwitch((prev) => ({ ...prev, writesEnabled: data.writesEnabled !== false }));
+    } catch (err) {
+      setError(err.response?.data?.error || 'Erreur');
+    } finally {
+      setKillPending(false);
     }
   }
 
@@ -567,6 +618,57 @@ export default function AiProvidersTab() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Arrêt d'urgence (kill switch) */}
+      <motion.div variants={itemVariants} className={`bento-card p-lg ${killSwitch.active ? 'border-2 border-red-500/50' : ''}`}>
+        <div className="flex items-center gap-3 mb-4">
+          <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${killSwitch.active ? 'bg-red-500/15' : 'bg-surface-container'}`}>
+            <Power className={`w-5 h-5 ${killSwitch.active ? 'text-red-600 dark:text-red-400' : 'text-on-surface-variant'}`} />
+          </div>
+          <div>
+            <h3 className="font-headline-sm text-headline-sm text-on-surface font-bold">Arrêt d'urgence</h3>
+            <p className="font-body-xs text-body-xs text-on-surface-variant">
+              Coupe immédiatement tous les appels IA et toutes les actions de l'agent, sans redémarrage.
+            </p>
+          </div>
+        </div>
+
+        {killSwitch.active && (
+          <div className="mb-4 rounded-xl border border-red-500/30 bg-red-500/5 p-md text-xs text-red-600 dark:text-red-400 space-y-1">
+            <div className="font-semibold">L'IA est arrêtée.</div>
+            {killSwitch.reason && <div>Motif : {killSwitch.reason}</div>}
+            <div>
+              Actionné par {killSwitch.activatedBy || 'un administrateur'}
+              {killSwitch.activatedAt ? ` le ${new Date(killSwitch.activatedAt).toLocaleString('fr-FR')}` : ''}.
+            </div>
+          </div>
+        )}
+
+        <div className="space-y-md">
+          <div className="flex items-center justify-between gap-md">
+            <div>
+              <div className="font-body-sm text-body-sm text-on-surface font-semibold">Arrêt d'urgence</div>
+              <p className="text-xs text-on-surface-variant">Bloque le pipeline email, le chatbot, l'assistant vocal et tous les outils.</p>
+            </div>
+            <Toggle
+              checked={killSwitch.active}
+              onChange={handleToggleKillSwitch}
+              disabled={killPending}
+            />
+          </div>
+          <div className="flex items-center justify-between gap-md">
+            <div>
+              <div className="font-body-sm text-body-sm text-on-surface font-semibold">Actions de l'agent</div>
+              <p className="text-xs text-on-surface-variant">Autorise la création de tickets, les suivis et les envois. Désactivé, l'assistant informe sans agir.</p>
+            </div>
+            <Toggle
+              checked={killSwitch.writesEnabled}
+              onChange={handleToggleWrites}
+              disabled={killPending || killSwitch.active}
+            />
+          </div>
+        </div>
+      </motion.div>
 
       {/* Toggle global IA + Budget */}
       <motion.div variants={itemVariants} className="bento-card p-lg">

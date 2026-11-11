@@ -39,7 +39,12 @@ services:
       NODE_ENV: development
       DATABASE_URL: postgresql://erp_user:erp_password@postgres:5432/erp_itsm?schema=public
       JWT_SECRET: ${JWT_SECRET:-dev_jwt_secret_change_in_production}
-      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-30d}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-15m}
+      AUTH_SESSION_MAX_HOURS: ${AUTH_SESSION_MAX_HOURS:-12}
+      AUTH_IDLE_TIMEOUT_MINUTES: ${AUTH_IDLE_TIMEOUT_MINUTES:-30}
+      AUTH_COOKIE_SAMESITE: ${AUTH_COOKIE_SAMESITE:-lax}
+      AUTH_MAX_SESSIONS: ${AUTH_MAX_SESSIONS:-10}
+      SECRETS_ENCRYPTION_KEY: ${SECRETS_ENCRYPTION_KEY:-}
       CORS_ORIGIN: http://localhost:5173,http://localhost:4000
       FRONTEND_URL: http://localhost:5173
       BACKEND_URL: http://localhost:4000

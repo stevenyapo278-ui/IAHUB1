@@ -169,8 +169,11 @@ model User {
   isActive            Boolean              @default(true)
   receiveDraftAlerts  Boolean              @default(false) // reçoit l'email de relance quand un AiEmailDraft attend trop longtemps une validation humaine (opt-in, activé par un admin)
   mustChangePassword  Boolean              @default(false) // force l'affichage de l'écran de changement de mot de passe à la prochaine connexion (ex: après réinitialisation par un admin)
+  tokenVersion        Int                  @default(0) // incrémenté à chaque changement/réinitialisation de mot de passe : révoque tous les JWT existants
   authProvider        String               @default("local") // "local" ou "ldap" — les comptes LDAP se connectent via l'Active Directory, pas avec un mot de passe local
   passwordResetTokens PasswordResetToken[]
+  authSessions        AuthSession[]
+  voiceTickets        VoiceTicket[]
   createdAt           DateTime             @default(now())
   updatedAt           DateTime             @updatedAt
 
@@ -696,6 +699,21 @@ model SystemSettings {
   aiDailyTokenBudget     Int      @default(100000) // budget journalier en tokens (0 = illimité)
   aiTokenAlertThreshold  Float    @default(0.8) // seuil d'alerte (0.8 = alerte à 80% du budget)
   aiTokenAlertRecipients String[] @default([]) // adresses email pour les alertes de quota
+
+  // ── Gouvernance des outils de l'agent (kill switch) ──────────────────────
+  // Interrupteur d'arrêt d'urgence : quand il est actif, AUCUN appel IA n'est effectué
+  // (pipeline email, chatbot, vocal, rapports) et AUCUN outil n'est exécuté. Il est
+  // actionnable sans redémarrage (POST /api/system/ai-kill-switch) et audité.
+  aiKillSwitch          Boolean   @default(false)
+  aiKillSwitchReason    String?   @db.Text
+  aiKillSwitchAt        DateTime?
+  aiKillSwitchBy        String?   // email de l'admin qui a actionné l'arrêt
+  // Interrupteur des actions d'écriture/externes (création de ticket, suivi, envoi d'email).
+  // Les outils de lecture restent disponibles : l'agent continue d'informer sans agir.
+  aiWritesEnabled       Boolean   @default(true)
+  // Liste de refus explicite d'outils (noms d'outils, chat et vocal), en plus de la politique
+  // par défaut. Un outil listé ici est refusé même si son interrupteur global est actif.
+  aiDisabledTools       String[]  @default([])
 
   // URLs absolues du serveur, utilisées pour générer des liens/ressources dans les emails sortants
   // (logo de signature, lien d'approbation de brouillon, lien de réinitialisation de mot de passe).
@@ -1304,13 +1322,68 @@ model Notification {
   @@index([userId, createdAt])
 }
 
+// Session de rafraîchissement : le refresh token est un secret opaque aléatoire, stocké
+// uniquement sous forme de hash SHA-256. Il est transmis dans un cookie HttpOnly (jamais
+// accessible au JavaScript), tourné à chaque /auth/refresh, et révocable côté serveur.
+// Une session porte le plafond absolu (expiresAt) et le suivi d'inactivité (lastActivityAt).
+model AuthSession {
+  id             String    @id @default(cuid())
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId         Int
+  tokenHash         String    @unique
+  previousTokenHash String?   // hash du refresh token juste avant la dernière rotation
+  rotatedAt         DateTime? // date de la dernière rotation (fenêtre de grâce anti-course)
+  tokenVersion      Int       @default(0) // version de l'utilisateur au moment de la création
+  activeRole        String?   // rôle actif (peut différer du rôle principal après /auth/switch-role)
+  sessionStart      DateTime  @default(now())
+  lastActivityAt DateTime  @default(now())
+  expiresAt      DateTime
+  revokedAt      DateTime?
+  ipAddress      String?
+  userAgent      String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@index([previousTokenHash])
+}
+
+// Ticket à usage unique et courte durée pour authentifier la connexion WebSocket vocale.
+// Le navigateur ne peut pas envoyer d'en-tête Authorization sur un WebSocket : le front
+// échange son jeton d'accès contre ce ticket (60 s, usage unique) au lieu de mettre le
+// JWT en query string, où il fuiterait dans les logs proxy / l'historique.
+model VoiceTicket {
+  id        Int       @id @default(autoincrement())
+  tokenHash String    @unique
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    Int
+  sessionId String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([expiresAt])
+}
+
+// Compteur des tentatives de connexion échouées, persisté pour survivre aux
+// redémarrages et rester cohérent entre plusieurs instances (contrairement à une Map).
+model LoginAttempt {
+  key            String    @id // email normalisé
+  count          Int       @default(0)
+  firstAttemptAt DateTime
+  lastAttemptAt  DateTime
+  lockedUntil    DateTime?
+}
+
+
 // Lien "mot de passe oublié" envoyé par email à l'utilisateur — token opaque à usage unique,
 // expire après un délai court, comme EmailApprovalToken mais volontairement séparé : ce token
 // donne accès à la définition d'un mot de passe de connexion complet, un niveau de sensibilité
 // différent d'approuver un brouillon d'email.
 model PasswordResetToken {
   id        Int       @id @default(autoincrement())
-  token     String    @unique
+  tokenHash String    @unique
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   userId    Int
   expiresAt DateTime
@@ -1933,4 +2006,24 @@ model TicketApproval {
   createdAt       DateTime @default(now())
 
   @@index([ticketId])
+}
+
+// Journal d'idempotence des actions à effet externe (envoi d'email IA, création de ticket
+// par l'agent, rapport envoyé…). Une clé déterministe (portée + identifiant métier) garantit
+// qu'une action déjà exécutée n'est pas rejouée après un retry, un double clic, un crash entre
+// l'envoi et la mise à jour du statut, ou une restauration de sauvegarde.
+model IdempotencyRecord {
+  id           Int      @id @default(autoincrement())
+  key          String   @unique // "<scope>:<identifiant métier>"
+  scope        String
+  userId       Int?
+  requestHash  String // SHA-256 des paramètres : une même clé avec des paramètres différents est refusée
+  state        String   @default("IN_PROGRESS") // IN_PROGRESS | COMPLETED | FAILED
+  responseBody Json?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  expiresAt    DateTime
+
+  @@index([expiresAt])
+  @@index([scope])
 }

@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const nodemailer = require('nodemailer');
 const prisma = require('../prismaClient');
+const { runIdempotent } = require('./idempotency');
 const { graphFetch } = require('../utils/graphClient');
 const { getSystemSettings, resolveFrontendUrl } = require('./systemSettings');
 const { logEvent } = require('./ticketEvent');
@@ -1278,7 +1279,7 @@ async function wrapDraftContentForSend({ content, ticketId }) {
 //  - CC = personnes en copie de la demande d'origine : celui fourni par l'appelant, sinon
 //    celui stocké sur le brouillon, sinon celui du dernier message entrant. Le destinataire
 //    principal et la boîte support (expéditeur) ne sont jamais dupliqués (géré par sendEmail).
-async function sendAiDraftEmail({
+async function sendAiDraftEmailCore({
   ticketId,
   draft = null,
   to,
@@ -1669,6 +1670,30 @@ async function sendReopenNotificationEmail({ ticketId, glpiTicketId, ticketTitle
 
   return sendEmail({ ticketId, to: technicianEmail, subject, bodyHtml, saveAsMessage: false });
 }
+
+// Enveloppe idempotente de l'envoi d'un brouillon IA : un double clic, un retry réseau ou
+// un crash entre l'envoi SMTP/Graph et la mise à jour du statut du brouillon ne peut pas
+// produire un second envoi. La clé est l'identifiant du brouillon, le hash couvre le contenu.
+async function sendAiDraftEmail(options = {}) {
+  const draftId = options?.draft?.id;
+  if (!draftId) return sendAiDraftEmailCore(options);
+
+  const { value } = await runIdempotent(
+    {
+      scope: 'ai-draft-send',
+      key: draftId,
+      payload: {
+        to: options.to || options.draft?.recipientEmail || null,
+        cc: Array.isArray(options.cc) ? options.cc : null,
+        subject: options.subject ?? options.draft?.subject ?? null,
+        content: options.content ?? options.draft?.proposedContent ?? null,
+      },
+    },
+    () => sendAiDraftEmailCore(options)
+  );
+  return value;
+}
+
 
 module.exports = {
   sendEmail,

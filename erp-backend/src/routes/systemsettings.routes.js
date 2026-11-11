@@ -15,6 +15,8 @@ const cacheStore = require('../services/cacheStore');
 const { EMAIL_TEMPLATE_REGISTRY } = require('../services/emailTemplateRegistry');
 const { getTemplateOverride } = require('../services/emailTemplates');
 const { buildTemplateSample } = require('../services/emailTemplateSamples');
+const { invalidatePolicyCache } = require('../services/toolPolicy');
+const { closeAllVoiceSessions } = require('./voiceLive.routes');
 
 const router = express.Router();
 router.use(authenticate);
@@ -165,6 +167,9 @@ router.patch(
     body('aiTokenAlertThreshold').optional().isFloat({ min: 0, max: 1 }),
     body('aiTokenAlertRecipients').optional().isArray(),
     body('aiTokenAlertRecipients.*').optional().isEmail(),
+    body('aiWritesEnabled').optional().isBoolean(),
+    body('aiDisabledTools').optional().isArray({ max: 100 }),
+    body('aiDisabledTools.*').optional().isString().isLength({ min: 1, max: 100 }).matches(/^[a-z0-9_]+$/),
     body('voiceAiModelId').optional({ nullable: true }).isInt(),
     body('intentAiModelId').optional({ nullable: true }).isInt(),
     body('summaryAiModelId').optional({ nullable: true }).isInt(),
@@ -224,16 +229,169 @@ router.patch(
     if (req.body.aiDailyTokenBudget !== undefined) data.aiDailyTokenBudget = req.body.aiDailyTokenBudget;
     if (req.body.aiTokenAlertThreshold !== undefined) data.aiTokenAlertThreshold = req.body.aiTokenAlertThreshold;
     if (req.body.aiTokenAlertRecipients !== undefined) data.aiTokenAlertRecipients = req.body.aiTokenAlertRecipients;
+    if (req.body.aiWritesEnabled !== undefined) data.aiWritesEnabled = req.body.aiWritesEnabled;
+    if (req.body.aiDisabledTools !== undefined) data.aiDisabledTools = req.body.aiDisabledTools;
     if (req.body.voiceAiModelId !== undefined) data.voiceAiModelId = req.body.voiceAiModelId || null;
     if (req.body.intentAiModelId !== undefined) data.intentAiModelId = req.body.intentAiModelId || null;
     if (req.body.summaryAiModelId !== undefined) data.summaryAiModelId = req.body.summaryAiModelId || null;
 
     const updated = await prisma.systemSettings.update({ where: { id: 1 }, data });
     cacheStore.clear();
+    // La politique d'outils est mise en cache 2 s : on la vide pour que le changement
+    // (écritures coupées, outil désactivé) soit pris en compte au tour suivant.
+    invalidatePolicyCache();
 
     auditLog('SYSTEM_SETTINGS_UPDATED', { actor: req.user, targetType: 'SystemSettings', targetId: 1, targetLabel: 'Réglages automatisation', metadata: { changedFields: Object.keys(data) } }).catch(() => {});
 
     return res.json(updated);
+  }
+);
+
+// ── Arrêt d'urgence de l'IA (kill switch) ──────────────────────────────────
+// Actionnable sans redémarrage : coupe immédiatement tous les appels IA et toutes les
+// exécutions d'outils, ferme les sessions vocales en cours et notifie les clients.
+// Audité (AI_KILL_SWITCH_ENABLED/DISABLED) — l'activation est un événement de sécurité.
+router.get('/ai-kill-switch', async (req, res) => {
+  const settings = await getOrCreateSettings();
+  return res.json({
+    active: settings.aiKillSwitch === true,
+    reason: settings.aiKillSwitchReason || null,
+    activatedAt: settings.aiKillSwitchAt || null,
+    activatedBy: settings.aiKillSwitchBy || null,
+    writesEnabled: settings.aiWritesEnabled !== false,
+    disabledTools: Array.isArray(settings.aiDisabledTools) ? settings.aiDisabledTools : [],
+  });
+});
+
+router.post(
+  '/ai-kill-switch',
+  requirePermission('settings.ai', ['ADMIN']),
+  [
+    body('enabled').isBoolean(),
+    body('reason').optional({ nullable: true }).isString().isLength({ max: 500 }),
+  ],
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
+    await getOrCreateSettings();
+    const enabled = req.body.enabled === true;
+    const reason = req.body.reason ? String(req.body.reason).trim() : null;
+
+    const updated = await prisma.systemSettings.update({
+      where: { id: 1 },
+      data: {
+        aiKillSwitch: enabled,
+        aiKillSwitchReason: enabled ? (reason || 'Arrêt d’urgence actionné par un administrateur') : null,
+        aiKillSwitchAt: enabled ? new Date() : null,
+        aiKillSwitchBy: enabled ? (req.user?.email || null) : null,
+      },
+    });
+
+    invalidatePolicyCache();
+    cacheStore.clear();
+
+    let closedSessions = 0;
+    if (enabled) {
+      // Coupe les conversations vocales en cours : l'arrêt est immédiat, pas à la fin du tour.
+      try {
+        closedSessions = closeAllVoiceSessions('kill-switch');
+      } catch (err) {
+        console.error('[systemsettings] Fermeture des sessions vocales impossible :', err.message);
+      }
+      try {
+        const { getIO } = require('../utils/socket');
+        getIO()?.emit('ai:kill-switch', { active: true, reason: updated.aiKillSwitchReason, at: updated.aiKillSwitchAt });
+      } catch { /* Socket.IO non initialisé (tests) : sans conséquence */ }
+    } else {
+      try {
+        const { getIO } = require('../utils/socket');
+        getIO()?.emit('ai:kill-switch', { active: false });
+      } catch { /* idem */ }
+    }
+
+    auditLog(enabled ? 'AI_KILL_SWITCH_ENABLED' : 'AI_KILL_SWITCH_DISABLED', {
+      actor: req.user,
+      targetType: 'SystemSettings',
+      targetId: 1,
+      targetLabel: 'Arrêt d’urgence IA',
+      metadata: { reason: updated.aiKillSwitchReason, closedVoiceSessions: closedSessions },
+    }).catch(() => {});
+
+    return res.json({
+      active: updated.aiKillSwitch,
+      reason: updated.aiKillSwitchReason,
+      activatedAt: updated.aiKillSwitchAt,
+      activatedBy: updated.aiKillSwitchBy,
+      closedVoiceSessions: closedSessions,
+    });
+  }
+);
+
+// Interrupteur des actions d'écriture/externes (l'agent continue d'informer sans agir).
+router.post(
+  '/ai-writes',
+  requirePermission('settings.ai', ['ADMIN']),
+  [body('enabled').isBoolean()],
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
+    await getOrCreateSettings();
+    const updated = await prisma.systemSettings.update({
+      where: { id: 1 },
+      data: { aiWritesEnabled: req.body.enabled === true },
+    });
+    invalidatePolicyCache();
+    cacheStore.clear();
+
+    auditLog('AI_WRITES_TOGGLED', {
+      actor: req.user,
+      targetType: 'SystemSettings',
+      targetId: 1,
+      targetLabel: 'Actions de l’agent',
+      metadata: { enabled: updated.aiWritesEnabled },
+    }).catch(() => {});
+
+    return res.json({ writesEnabled: updated.aiWritesEnabled });
+  }
+);
+
+// Désactivation ciblée d'outils (liste de refus, en plus de la politique par défaut).
+router.put(
+  '/ai-disabled-tools',
+  requirePermission('settings.ai', ['ADMIN']),
+  [
+    body('tools').isArray({ max: 100 }),
+    body('tools.*').isString().isLength({ min: 1, max: 100 }).matches(/^[a-z0-9_]+$/),
+  ],
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
+    const { isKnownTool } = require('../services/toolPolicy');
+    const unknown = req.body.tools.filter((t) => !isKnownTool(t));
+    if (unknown.length > 0) {
+      return res.status(400).json({ error: `Outil(s) inconnu(s) : ${unknown.join(', ')}` });
+    }
+
+    await getOrCreateSettings();
+    const updated = await prisma.systemSettings.update({
+      where: { id: 1 },
+      data: { aiDisabledTools: [...new Set(req.body.tools)] },
+    });
+    invalidatePolicyCache();
+    cacheStore.clear();
+
+    auditLog('AI_TOOLS_POLICY_UPDATED', {
+      actor: req.user,
+      targetType: 'SystemSettings',
+      targetId: 1,
+      targetLabel: 'Outils désactivés',
+      metadata: { disabledTools: updated.aiDisabledTools },
+    }).catch(() => {});
+
+    return res.json({ disabledTools: updated.aiDisabledTools });
   }
 );
 

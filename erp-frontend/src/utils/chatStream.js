@@ -1,4 +1,5 @@
-import api from '../api/client';
+import api, { refreshAccessToken } from '../api/client';
+import { getAccessToken } from '../api/tokenStore';
 
 // Libellés humains des outils agentic — affichés pendant l'exécution (streaming SSE).
 export const TOOL_LABELS = {
@@ -35,19 +36,32 @@ export const TOOL_LABELS = {
 // dégrade, back ancien), on rejoue la même requête en JSON simple pour ne pas
 // perdre le message de l'utilisateur.
 export async function postChatWithStream(body, { onTool } = {}) {
-  const token = localStorage.getItem('token');
   // On dérive l'URL du baseURL axios (VITE_API_URL en prod, proxy /api en dev)
   // plutôt que de durcir « /api », qui casserait selon l'environnement.
   const base = (api.defaults.baseURL || '/api').replace(/\/+$/, '');
+  const url = `${base}/chat?stream=1`;
+  const payload = JSON.stringify(body);
 
-  const res = await fetch(`${base}/chat?stream=1`, {
+  const doFetch = (token) => fetch(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
-    body: JSON.stringify(body),
+    body: payload,
   });
+
+  // Le flux SSE n'est pas intercepté par axios : on gère ici le refresh silencieux
+  // quand le jeton d'accès (15 min) a expiré pendant une session de chat longue.
+  let res = await doFetch(getAccessToken());
+  if (res.status === 401) {
+    try {
+      const fresh = await refreshAccessToken();
+      if (fresh) res = await doFetch(fresh);
+    } catch {
+      // Cookie de refresh absent/expiré : l'erreur HTTP ci-dessous déclenchera la reconnexion.
+    }
+  }
 
   const contentType = res.headers.get('content-type') || '';
   if (!res.ok || !contentType.includes('text/event-stream')) {

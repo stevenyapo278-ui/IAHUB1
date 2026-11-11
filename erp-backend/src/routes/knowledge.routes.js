@@ -11,6 +11,8 @@ const { generateEmbedding, toVectorLiteral } = require('../utils/embeddings');
 const { searchKnowledge } = require('../services/knowledgeSearch');
 const { auditLog } = require('../services/auditLogService');
 const { validateUpload } = require('../utils/security');
+const { verifyAccessToken } = require('../utils/authToken');
+const { findLiveSession } = require('../utils/authSession');
 
 const router = express.Router();
 const upload = multer({ limits: { fileSize: 20 * 1024 * 1024 } }); // 20 Mo max
@@ -18,14 +20,25 @@ const upload = multer({ limits: { fileSize: 20 * 1024 * 1024 } }); // 20 Mo max
 const KNOWLEDGE_DIR = path.join(process.cwd(), 'uploads', 'knowledge');
 if (!fs.existsSync(KNOWLEDGE_DIR)) fs.mkdirSync(KNOWLEDGE_DIR, { recursive: true });
 
-// Télécharger le fichier source d'un document — AVANT authenticate pour accepter ?token= (iframe)
+// Télécharger le fichier source d'un document — AVANT authenticate pour gérer le Bearer manuellement.
+// Le jeton n'est accepté QUE dans l'en-tête Authorization (jamais en query string : fuite via logs/Referer).
 router.get('/documents/:id/file', async (req, res) => {
   try {
     const header = req.headers.authorization || '';
-    const queryToken = req.query.token;
-    const token = header.startsWith('Bearer ') ? header.slice(7) : queryToken || null;
+    const token = header.startsWith('Bearer ') ? header.slice(7) : null;
     if (!token) return res.status(401).json({ error: 'Token manquant' });
-    try { require('jsonwebtoken').verify(token, process.env.JWT_SECRET); } catch { return res.status(401).json({ error: 'Token invalide' }); }
+    let payload;
+    try {
+      payload = verifyAccessToken(token);
+    } catch {
+      return res.status(401).json({ error: 'Token invalide ou expiré' });
+    }
+    // Authentification hors middleware : on vérifie aussi la session (révocation,
+    // inactivité, état du compte), comme le middleware authenticate.
+    const session = await findLiveSession(payload);
+    if (!session) {
+      return res.status(401).json({ error: 'Session révoquée ou expirée' });
+    }
 
     const doc = await prisma.knowledgeDocument.findUnique({ where: { id: Number(req.params.id) }, select: { filePath: true, filename: true, sourceType: true } });
     if (!doc || !doc.filePath) return res.status(404).json({ error: 'Fichier non disponible' });

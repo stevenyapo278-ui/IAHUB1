@@ -7,7 +7,7 @@
 #   app        — Application ERP (backend + frontend React)
 #   db         — Base de données MySQL pour GLPI ITSM
 #   glpi       — GLPI (Gestionnaire Libre de Parc Informatique)
-#   glpi-mcp   — Pont MCP (Model Context Protocol) vers GLPI
+#   glpi-mcp   — Pont MCP vers GLPI (optionnel, profil « glpi » : non démarré par défaut)
 # =============================================================================
 
 services:
@@ -52,7 +52,12 @@ services:
       PORT: 4000
       DATABASE_URL: postgresql://${POSTGRES_USER:-erp_user}:${POSTGRES_PASSWORD:-erp_password}@postgres:5432/${POSTGRES_DB:-erp_itsm}?schema=public
       JWT_SECRET: ${JWT_SECRET}
-      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-30d}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-15m}
+      AUTH_SESSION_MAX_HOURS: ${AUTH_SESSION_MAX_HOURS:-12}
+      AUTH_IDLE_TIMEOUT_MINUTES: ${AUTH_IDLE_TIMEOUT_MINUTES:-30}
+      AUTH_COOKIE_SAMESITE: ${AUTH_COOKIE_SAMESITE:-lax}
+      AUTH_MAX_SESSIONS: ${AUTH_MAX_SESSIONS:-10}
+      SECRETS_ENCRYPTION_KEY: ${SECRETS_ENCRYPTION_KEY:-}
       CORS_ORIGIN: ${CORS_ORIGIN:-*}
       MICROSOFT_REDIRECT_URI: ${MICROSOFT_REDIRECT_URI}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:4000}
@@ -96,7 +101,11 @@ services:
 
   # ── Pont MCP GLPI (Model Context Protocol) ──────────────────────────────
   # Sert d'interface entre les assistants IA (Claude, etc.) et l'API REST GLPI
+  # Profil « glpi » : GLPI n'est plus utilisé en production. Le service reste défini
+  # pour un environnement de recette qui en aurait besoin, mais n'est JAMAIS démarré
+  # par `docker compose up` sans activation explicite du profil.
   glpi-mcp:
+    profiles: ["glpi"]
     build:
       context: ./mcp-glpi
       dockerfile: Dockerfile

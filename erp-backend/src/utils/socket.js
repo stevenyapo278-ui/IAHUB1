@@ -1,8 +1,9 @@
 const { Server } = require('socket.io');
-const jwt = require('jsonwebtoken');
 const { logger } = require('./logger');
 const prisma = require('../prismaClient');
 const { getUserPermissions } = require('../middleware/permissions');
+const { verifyAccessToken } = require('./authToken');
+const { getIdleTimeoutMs } = require('./authSession');
 
 let io = null;
 
@@ -27,16 +28,41 @@ function initSocket(server) {
 
     let decoded;
     try {
-      decoded = jwt.verify(token, process.env.JWT_SECRET);
+      decoded = verifyAccessToken(token);
     } catch (err) {
-      return next(new Error('Token invalide'));
+      return next(new Error(err.code === 'SESSION_EXPIRED' ? 'Session expirée' : 'Token invalide'));
     }
 
-    prisma.user
-      .findUnique({ where: { id: decoded.sub }, select: { id: true, role: true, isActive: true } })
-      .then(async (user) => {
-        if (!user || !user.isActive) return next(new Error('Compte inactif ou supprimé'));
+    const now = new Date();
+    prisma.authSession
+      .findUnique({
+        where: { id: String(decoded.sid) },
+        select: {
+          id: true,
+          userId: true,
+          revokedAt: true,
+          sessionStart: true,
+          lastActivityAt: true,
+          expiresAt: true,
+          user: { select: { id: true, role: true, isActive: true, tokenVersion: true } },
+        },
+      })
+      .then(async (session) => {
+        const user = session?.user;
+        if (!session || !user || session.userId !== Number(decoded.sub)) {
+          return next(new Error('Session invalide'));
+        }
+        if (session.revokedAt || session.expiresAt <= now) {
+          return next(new Error('Session expirée ou révoquée'));
+        }
+        if (now.getTime() - session.lastActivityAt.getTime() > getIdleTimeoutMs()) {
+          return next(new Error('Session inactive'));
+        }
+        if (!user.isActive || Number(decoded.tv) !== Number(user.tokenVersion ?? 0)) {
+          return next(new Error('Session révoquée'));
+        }
         socket.userId = user.id;
+        socket.sessionId = session.id;
         socket.userRole = user.role;
         // SUPERADMIN bypass, sinon charger les permissions du groupe
         socket.userPermissions = user.role === 'SUPERADMIN'
@@ -78,6 +104,31 @@ function initSocket(server) {
 
 function getIO() {
   return io;
+}
+
+// Déconnecte immédiatement toutes les sockets d'une session révoquée. Le client ne pourra
+// pas se reconnecter avec l'ancien jeton (sid révoqué) ; il devra se reconnecter après login.
+function disconnectSession(sessionId, reason = 'Session révoquée') {
+  if (!io || !sessionId) return;
+  for (const socket of io.sockets.sockets.values()) {
+    if (socket.sessionId === String(sessionId)) {
+      socket.emit('auth:revoked', { reason });
+      socket.disconnect(true);
+    }
+  }
+}
+
+// Révoque toutes les sockets d'un utilisateur (changement de mot de passe, désactivation,
+// réinitialisation admin). On peut épargner la session courante après un changement de mot
+// de passe, le temps que le client bascule sur le nouveau jeton.
+function disconnectUserSessions(userId, { exceptSessionId, reason = 'Session révoquée' } = {}) {
+  if (!io || !userId) return;
+  for (const socket of io.sockets.sockets.values()) {
+    if (Number(socket.userId) !== Number(userId)) continue;
+    if (exceptSessionId && socket.sessionId === String(exceptSessionId)) continue;
+    socket.emit('auth:revoked', { reason });
+    socket.disconnect(true);
+  }
 }
 
 // Invalide la session d'un utilisateur en temps réel : le client rappelle /auth/me immédiatement.
@@ -355,4 +406,17 @@ async function userHasPermission(userId, permissionKey) {
   return perms.has(permissionKey);
 }
 
-module.exports = { initSocket, getIO, emitUserUpdated, persistNotification, emitTicketCreated, emitTicketUpdated, emitTicketAssigned, emitSlaBreach, emitTicketEscalated, userHasPermission };
+module.exports = {
+  initSocket,
+  getIO,
+  disconnectSession,
+  disconnectUserSessions,
+  emitUserUpdated,
+  persistNotification,
+  emitTicketCreated,
+  emitTicketUpdated,
+  emitTicketAssigned,
+  emitSlaBreach,
+  emitTicketEscalated,
+  userHasPermission,
+};

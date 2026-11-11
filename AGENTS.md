@@ -79,12 +79,25 @@ Every sync is wrapped in `withHealthTracking` — 3 consecutive failures trigger
 
 ### Auth & Permissions
 - JWT with roles: SUPERADMIN, ADMIN, HOTLINE, TECHNICIAN, REQUESTER
+- Access token TTL: `JWT_EXPIRES_IN` (default `15m`), kept in memory on the frontend (never `localStorage`). Renewal via opaque refresh token in the `HttpOnly` cookie `ia_hub_refresh`, stored as SHA-256 hash in `AuthSession` and rotated on every `POST /auth/refresh`.
+- Session limits: `AUTH_IDLE_TIMEOUT_MINUTES` (default `30`, activity-based via `X-User-Activity`), absolute cap `AUTH_SESSION_MAX_HOURS` (default `12`), and `AUTH_MAX_SESSIONS` (default `10` active sessions per user; oldest revoked). Expired/revoked sessions and used reset tokens are purged every 6 h (7-day retention). The access token carries `sid` (session), `tv` and `sst`; middleware checks the session in DB on every request.
+- Revocation: `User.tokenVersion` is incremented on password change/reset and embedded in every JWT (`tv`); tokens with an older version are rejected. `revokeAllUserSessions()` also disconnects live Socket.IO sessions. Tokens without `sid`/`tv`/`sst` are rejected (one-time re-login after deploy).
+- Refresh-token replay: a rotated refresh token replayed after a 20 s grace window revokes the whole session and logs `AUTH_REFRESH_REUSED`.
+- Password reset tokens are stored hashed (SHA-256, `PasswordResetToken.tokenHash`), single-use, 1 h TTL.
+- Secrets at rest: `ApiConfig.apiKey`/`extra.appToken`, `AiKey.apiKey`, `EmailAccount.clientSecret`/`refreshToken`/`password` are encrypted with AES-256-GCM (`SECRETS_ENCRYPTION_KEY`, `enc:v1:` prefix) by a transparent Prisma middleware in `src/prismaClient.js`. Migration script: `node scripts/encryptSecrets.js status|encrypt`. Losing the key makes stored secrets unrecoverable.
+- Secret rotation runbook: `docs/ROTATION_SECRETS.md` + `erp-backend/scripts/rotateSecrets.js`.
 - Fine-grained permission groups (18 keys) managed via UI
 - Middleware: `authenticate` + `requirePermission('key', ['ADMIN'])`
-- Default login: `superadmin@prosuma.ci` / `12345678` (seeded)
+- Account lockout: persisted in the `LoginAttempt` table (`AUTH_LOCKOUT_THRESHOLD`, default `10` failures / 15 min → 15 min lock). Atomic SQL upsert, fail-open if the DB is down. Purged after 24 h.
+- Password policy: `validatePasswordStrength()` in `src/utils/security.js` (`PASSWORD_MIN_LENGTH`, default `12`, plus lowercase/uppercase/digit/special, blocklist and predictable sequences). Enforced on register, reset, change-password and admin user create/update; mirrored client-side in `erp-frontend/src/utils/passwordPolicy.js`.
+- Password-reset rate limits (in `app.js`): `/auth/forgot-password` 10/15 min per IP + 3/15 min per email; `/auth/reset-password` 10/15 min per IP.
+- CSRF defence-in-depth: `POST /auth/refresh` and `/auth/logout` reject requests whose `Origin` is neither the API host nor a `CORS_ORIGIN`/`FRONTEND_URL`/`BACKEND_URL` host (`requireTrustedOrigin`).
+- No JWT in query strings: `GET /knowledge/documents/:id/file` and the voice WebSocket accept only `Authorization: Bearer`. Browser WebSocket auth uses a single-use 60 s ticket (`POST /api/voice-live/ticket` → `VoiceTicket` table) consumed atomically at handshake.
+- Default login: `superadmin@prosuma.ci` / `12345678` when `SEED_ADMIN_PASSWORD` is unset (the seeded account is then flagged `mustChangePassword`). Set `SEED_ADMIN_PASSWORD` (12+ chars) on a fresh production database.
 
 ### Real-time
 - Socket.IO initialized in `server.js`, used for instant notifications
+- Voice WebSocket on port 4001 (`setupVoiceLive`): authenticated with a single-use ticket (`?ticket=`, 60 s) obtained from `POST /api/voice-live/ticket`, or a `Bearer` header for non-browser clients
 
 ## Frontend
 

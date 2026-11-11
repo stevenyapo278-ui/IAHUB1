@@ -10,7 +10,9 @@ const { ADMIN_LIKE_ROLES, ROLE_DEFAULT_GROUP_NAME, canAssignRole } = require('..
 const { sanitizeError } = require('../utils/sanitizeError');
 const { auditLog } = require('../services/auditLogService');
 const { emitUserUpdated } = require('../utils/socket');
+const { revokeAllUserSessions } = require('../utils/authSession');
 const { logger } = require('../utils/logger');
+const { validatePasswordStrength } = require('../utils/security');
 const { isLdapSyncConfigured, syncLdapDirectory } = require('../services/ldapDirectory');
 
 // Après toute écriture sur les utilisateurs, on invalide les listes mises en cache (TTL 30s,
@@ -21,7 +23,6 @@ function invalidateUserCaches() {
   cacheStore.clear('GET /api/teams');
 }
 
-const MIN_PASSWORD_LENGTH = 8;
 
 // ── Synchronisation rôle ↔ groupe (RBAC) ─────────────────────────────────
 // « Le groupe suit le rôle » : quand un utilisateur reçoit un rôle associé à un groupe par défaut
@@ -405,7 +406,11 @@ router.post(
   '/',
   [
     body('email').trim().isEmail().withMessage('Email invalide'),
-    body('password').isLength({ min: MIN_PASSWORD_LENGTH }).withMessage(`Le mot de passe doit contenir au moins ${MIN_PASSWORD_LENGTH} caractères`),
+    body('password').custom((v) => {
+      const result = validatePasswordStrength(v);
+      if (!result.valid) throw new Error(result.error);
+      return true;
+    }),
     body('fullName').trim().notEmpty().withMessage('Le nom complet est requis'),
   ],
   async (req, res) => {
@@ -467,7 +472,12 @@ router.patch(
   [
     body('email').optional().trim().isEmail().withMessage('Email invalide'),
     body('fullName').optional().trim().notEmpty().withMessage('Le nom complet ne peut pas être vide'),
-    body('password').optional().isLength({ min: MIN_PASSWORD_LENGTH }).withMessage(`Le mot de passe doit contenir au moins ${MIN_PASSWORD_LENGTH} caractères`),
+    body('password').optional().custom((v) => {
+      if (v === undefined || v === null || v === '') return true;
+      const result = validatePasswordStrength(v);
+      if (!result.valid) throw new Error(result.error);
+      return true;
+    }),
     body('teamId').optional({ values: 'null' }).customSanitizer(value => value === null ? null : Number(value)).isInt({ min: 1 }).withMessage('teamId doit être un entier positif ou null'),
   ],
   async (req, res) => {
@@ -517,10 +527,17 @@ router.patch(
       data.role = data.roles[0];
     }
     if (teamId !== undefined) data.teamId = teamId;
-    if (isActive !== undefined) data.isActive = isActive;
+    if (isActive !== undefined) {
+      data.isActive = isActive;
+      // Une désactivation révoque durablement les jetons existants : ils ne redeviendront
+      // pas valides si le compte est réactivé plus tard.
+      if (isActive === false) data.tokenVersion = { increment: 1 };
+    }
     if (receiveDraftAlerts !== undefined) data.receiveDraftAlerts = receiveDraftAlerts;
     if (password) {
       data.passwordHash = await bcrypt.hash(password, 10);
+      // Révoque toutes les sessions existantes de la cible après changement de mot de passe.
+      data.tokenVersion = { increment: 1 };
     }
 
     try {
@@ -529,6 +546,10 @@ router.patch(
         data,
         select: userSelect,
       });
+      // Mot de passe changé ou compte désactivé : révoque refresh tokens + sockets.
+      if (password || isActive === false) {
+        await revokeAllUserSessions(user.id);
+      }
       if (data.role !== undefined && data.role !== target.role) {
         // « Le groupe suit le rôle » + rafraîchissement instantané de la session (menus + permissions)
         await syncRolePermissionGroup(user.id, data.role);
@@ -558,8 +579,10 @@ router.post('/:id/reset-password', async (req, res) => {
 
   await prisma.user.update({
     where: { id: user.id },
-    data: { passwordHash, mustChangePassword: true },
+    // Révoque immédiatement toutes les sessions actives du compte réinitialisé.
+    data: { passwordHash, mustChangePassword: true, tokenVersion: { increment: 1 } },
   });
+  await revokeAllUserSessions(user.id);
 
   try {
     await sendTemporaryPasswordEmail({ recipientEmail: user.email, recipientName: user.fullName, temporaryPassword });

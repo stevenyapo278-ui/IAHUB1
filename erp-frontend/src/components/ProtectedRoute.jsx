@@ -38,8 +38,19 @@ function AccessDenied({ user }) {
 }
 
 export default function ProtectedRoute({ children, roles, permission }) {
-  const { user } = useAuth();
+  const { user, authReady } = useAuth();
   const location = useLocation();
+
+  // Session en cours de restauration depuis le cookie HttpOnly : ne pas rediriger
+  // vers /login tant que le refresh initial n'a pas répondu (sinon F5 = déconnexion
+  // apparente à chaque rechargement de page).
+  if (!authReady) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <div className="w-8 h-8 rounded-full border-2 border-primary/30 border-t-primary animate-spin" aria-label="Chargement de la session" />
+      </div>
+    );
+  }
 
   if (!user) {
     const from = `${location.pathname}${location.search || ''}`;

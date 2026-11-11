@@ -53,6 +53,13 @@ cp .env.example .env
 `.env` à la racine :
 ```env
 JWT_SECRET=mon_secret_jwt_tres_long_et_aleatoire
+JWT_EXPIRES_IN=15m
+AUTH_SESSION_MAX_HOURS=12
+AUTH_IDLE_TIMEOUT_MINUTES=30
+AUTH_MAX_SESSIONS=10
+AUTH_COOKIE_SAMESITE=lax
+# Générée automatiquement par start.sh (openssl rand -base64 32) — à sauvegarder
+SECRETS_ENCRYPTION_KEY=
 MICROSOFT_REDIRECT_URI=http://localhost:4000/api/oauth/outlook/callback
 VITE_API_URL=http://localhost:4000/api
 ```
@@ -352,6 +359,41 @@ Variables d'environnement (à renseigner dans Dokploy / `.env`) :
 
 Les comptes AD créés portent `authProvider: "ldap"` : leur mot de passe est celui de l'AD, jamais un
 mot de passe local (le champ `passwordHash` est aléatoire).
+
+### Sessions et rotation des jetons
+
+- **Jeton d'accès** : courte durée (`JWT_EXPIRES_IN=15m`), conservé **uniquement en mémoire** côté
+  front (jamais dans `localStorage`).
+- **Refresh token** : secret opaque aléatoire, stocké hashé (SHA-256) dans `AuthSession`, transmis
+  dans le cookie `HttpOnly` `ia_hub_refresh` (jamais lisible par JavaScript) et **tourné à chaque**
+  `POST /api/auth/refresh`.
+- **Inactivité** : déconnexion après `AUTH_IDLE_TIMEOUT_MINUTES` (30 par défaut) sans requête.
+- **Plafond absolu** : `AUTH_SESSION_MAX_HOURS` (12 h), quel que soit le nombre de renouvellements.
+- **Sessions simultanées** : `AUTH_MAX_SESSIONS` (10 par défaut) ; au-delà, la session la plus
+  ancienne est révoquée. Les sessions expirées/révoquées sont purgées toutes les 6 h.
+- **Détection de rejeu** : un refresh token déjà tourné et rejoué au-delà de 20 s révoque toute la
+  session et écrit un événement `AUTH_REFRESH_REUSED` dans le journal d'audit.
+- **Audit** : connexions, échecs, verrouillages, déconnexions et rejeux sont journalisés avec IP et
+  User-Agent.
+- **Révocation immédiate** : changement/réinitialisation de mot de passe, désactivation de compte ou
+  action admin → sessions révoquées en base et sockets coupées (`auth:revoked`).
+
+### Chiffrement des secrets au repos
+
+Les clés API (`AiKey`, `ApiConfig`) et les secrets OAuth/IMAP (`EmailAccount`) sont chiffrés en
+base avec **AES-256-GCM** dès que `SECRETS_ENCRYPTION_KEY` est définie. Le chiffrement est
+transparent côté code (middleware Prisma) : les routes lisent/écrivent toujours des valeurs en clair.
+
+```bash
+cd erp-backend
+node scripts/encryptSecrets.js status    # secrets encore en clair
+node scripts/encryptSecrets.js encrypt   # chiffre l'existant
+```
+
+> La perte de `SECRETS_ENCRYPTION_KEY` rend les secrets chiffrés irrécupérables : la sauvegarder
+> dans le secret manager / coffre-fort, séparément de la base.
+
+Rotation des tokens GLPI et des clés API : voir [`docs/ROTATION_SECRETS.md`](docs/ROTATION_SECRETS.md).
 
 ---
 

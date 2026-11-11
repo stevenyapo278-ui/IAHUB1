@@ -46,3 +46,5 @@ cookies.txt
 
 # ── Exports Excel (racine du dépôt) ──────────────────────────────────────
 /*.xlsx
+erp-backend/sbom-*.json
+erp-frontend/sbom-*.json

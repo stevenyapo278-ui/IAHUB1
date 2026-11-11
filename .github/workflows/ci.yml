@@ -44,6 +44,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Audit des dépendances (hautes et critiques)
+        run: npm audit --omit=dev --audit-level=high
+
       - name: Check Prisma schema compiles
         run: npx prisma generate
         env:
@@ -81,6 +84,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Seuil « critical » côté front : xlsx@0.18.5 porte un avis haut sans correctif npm
+      # (le paquet n'est plus publié sur npm). Les critiques restent bloquantes.
+      - name: Audit des dépendances (critiques)
+        run: npm audit --omit=dev --audit-level=critical
+
       - name: Lint
         run: npx eslint src/ --ext .js,.jsx 2>/dev/null || echo "ESLint non configuré, étape ignorée"
 
@@ -109,8 +117,49 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Audit des dépendances (hautes et critiques)
+        run: npm audit --omit=dev --audit-level=high
+
       - name: TypeScript check
         run: npx tsc --noEmit
 
       - name: Build
         run: npm run build
+
+  # ── SBOM (Software Bill of Materials) ─────────────────────────────────────
+  # Produit un inventaire CycloneDX des dépendances réellement installées et le
+  # publie comme artefact de build. Preuve d'inventaire (AI-BOM) : versions et
+  # provenance des composants, rattachées au commit qui les a introduits.
+  sbom:
+    name: SBOM — CycloneDX
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Backend — installer et générer le SBOM
+        working-directory: erp-backend
+        run: |
+          npm ci
+          npx --yes @cyclonedx/cyclonedx-npm@7 --output-file sbom-backend.json --spec-version 1.5
+
+      - name: Frontend — installer et générer le SBOM
+        working-directory: erp-frontend
+        run: |
+          npm ci
+          npx --yes @cyclonedx/cyclonedx-npm@7 --output-file sbom-frontend.json --spec-version 1.5
+
+      - name: Publier les SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-cyclonedx
+          path: |
+            erp-backend/sbom-backend.json
+            erp-frontend/sbom-frontend.json
+          retention-days: 90
+          if-no-files-found: error

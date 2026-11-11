@@ -1,7 +1,6 @@
 const express = require('express');
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
 const path = require('path');
 const fs = require('fs');
 const multer = require('multer');
@@ -12,11 +11,100 @@ const { getUserPermissions } = require('../middleware/permissions');
 const { sendPasswordResetLinkEmail } = require('../services/emailSender');
 const { auditLog } = require('../services/auditLogService');
 const { isLdapEnabled, isLdapAdminUsername, ldapEmailFor, authenticateLdap } = require('../services/ldapAuth');
-const { recordFailedLogin, clearFailedLogins, isAccountLocked, validateUpload } = require('../utils/security');
+const { recordFailedLogin, clearFailedLogins, isAccountLocked, validateUpload, validatePasswordStrength } = require('../utils/security');
+const { signAccessToken } = require('../utils/authToken');
+const {
+  createAuthSession,
+  setRefreshCookie,
+  clearRefreshCookie,
+  readRefreshToken,
+  hashRefreshToken,
+  hashOpaqueToken,
+  generateRefreshToken,
+  getIdleTimeoutMs,
+  findSessionByRefreshToken,
+  revokeSession,
+  revokeAllUserSessions,
+} = require('../utils/authSession');
 
 const router = express.Router();
 
 const PASSWORD_RESET_TOKEN_TTL_HOURS = 1; // court délai : ce token donne accès à la définition d'un nouveau mot de passe
+// Fenêtre pendant laquelle l'ancien refresh token (juste tourné) est toléré : deux onglets
+// peuvent appeler /auth/refresh en parallèle avec le même cookie. Au-delà, c'est un rejeu.
+const REFRESH_REUSE_GRACE_MS = 20 * 1000;
+
+// Contexte commun des événements d'authentification (audit).
+function authAuditContext(req, extra = {}) {
+  return {
+    ipAddress: req.ip || null,
+    metadata: {
+      ip: req.ip || null,
+      userAgent: (req.headers?.['user-agent'] || '').slice(0, 500) || null,
+      ...extra,
+    },
+  };
+}
+
+function auditAuth(action, req, { actor, targetType, targetId, targetLabel, extra } = {}) {
+  auditLog(action, {
+    actor,
+    targetType,
+    targetId,
+    targetLabel,
+    ...authAuditContext(req, extra),
+  }).catch((err) => {
+    console.error(`[auth] Échec audit ${action}:`, err.message);
+  });
+}
+
+// ── Contrôle d'origine (défense en profondeur CSRF) ──────────────────────
+// Les routes qui s'appuient sur le cookie de refresh (POST /refresh, /logout) doivent
+// vérifier que la requête vient bien d'une origine connue. SameSite=Lax protège déjà,
+// mais ce contrôle couvre le cas AUTH_COOKIE_SAMESITE=none / les navigateurs anciens.
+function allowedOriginHosts() {
+  const hosts = new Set();
+  for (const raw of [process.env.CORS_ORIGIN, process.env.FRONTEND_URL, process.env.BACKEND_URL]) {
+    if (!raw) continue;
+    for (const part of String(raw).split(',')) {
+      const value = part.trim();
+      if (!value || value === '*') continue;
+      try {
+        hosts.add(new URL(value).host);
+      } catch {
+        // Entrée non URL : ignorée.
+      }
+    }
+  }
+  return hosts;
+}
+
+function isTrustedOrigin(req) {
+  const origin = req.get('origin');
+  // Requête non navigateur (curl, health check, même origine sans Origin) : autorisée.
+  if (!origin) return true;
+
+  let originHost;
+  try {
+    originHost = new URL(origin).host;
+  } catch {
+    return false;
+  }
+
+  // Même origine que l'API (cas normal en production derrière Traefik/Dokploy).
+  const requestHost = (req.get('x-forwarded-host') || req.get('host') || '').split(',')[0].trim();
+  if (requestHost && originHost === requestHost) return true;
+
+  return allowedOriginHosts().has(originHost);
+}
+
+function requireTrustedOrigin(req, res, next) {
+  if (!isTrustedOrigin(req)) {
+    return res.status(403).json({ error: 'Origine non autorisée.' });
+  }
+  return next();
+}
+
 
 // Domaine email optionnel : permet la connexion avec l'identifiant seul (ex. « styapo »)
 // au lieu de l'adresse complète (ex. « styapo@prosuma.ci »). Vide = désactivé.
@@ -66,13 +154,11 @@ router.post(
   '/register',
   [
     body('email').trim().isEmail(),
-    body('password').isLength({ min: 8 }).custom((v) => {
-      if (!/(?=.*[a-z])/.test(v)) throw new Error('une minuscule');
-      if (!/(?=.*[A-Z])/.test(v)) throw new Error('une majuscule');
-      if (!/(?=.*\d)/.test(v)) throw new Error('un chiffre');
-      if (!/(?=.*[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?])/.test(v)) throw new Error('un caractère spécial');
+    body('password').custom((v) => {
+      const result = validatePasswordStrength(v);
+      if (!result.valid) throw new Error(result.error);
       return true;
-    }).withMessage('Le mot de passe doit contenir au moins 8 caractères avec une majuscule, une minuscule, un chiffre et un caractère spécial.'),
+    }),
     body('fullName').notEmpty(),
   ],
   async (req, res) => {
@@ -126,7 +212,12 @@ router.post(
     const { password } = req.body;
 
     // Vérifier le lockout du compte
-    if (isAccountLocked(normalizedEmail)) {
+    if (await isAccountLocked(normalizedEmail)) {
+      auditAuth('USER_LOGIN_LOCKED', req, {
+        targetType: 'User',
+        targetLabel: normalizedEmail,
+        extra: { reason: 'account_locked' },
+      });
       return res.status(429).json({ error: 'Compte temporairement verrouillé. Trop de tentatives échouées. Réessayez dans 15 minutes.' });
     }
 
@@ -138,17 +229,25 @@ router.post(
     if (user && user.isActive) {
       const valid = await bcrypt.compare(password, user.passwordHash);
       if (valid) {
-        clearFailedLogins(normalizedEmail);
+        await clearFailedLogins(normalizedEmail);
         const roles = user.roles && user.roles.length ? user.roles : [user.role];
         // Rôle actif = rôle principal en base (source de vérité), pas roles[0] : si le tableau
         // roles a dérivé (compte créé avant la migration roles, rôles édités en SQL…), roles[0]
         // peut ne pas correspondre au rôle réel du compte et le connecter sous un mauvais rôle.
         const activeRole = user.role;
-        const token = jwt.sign(
-          { sub: user.id, email: user.email, role: activeRole, roles, teamId: user.teamId },
-          process.env.JWT_SECRET,
-          { expiresIn: process.env.JWT_EXPIRES_IN || '30d' }
-        );
+        const { session, token: refreshToken, expiresAt } = await createAuthSession({
+          userId: user.id,
+          tokenVersion: user.tokenVersion,
+          activeRole,
+          req,
+        });
+        setRefreshCookie(res, refreshToken, expiresAt.getTime() - Date.now());
+        const token = signAccessToken(user, {
+          role: activeRole,
+          roles,
+          sessionId: session.id,
+          sessionStart: session.sessionStart,
+        });
 
         let permissions = null;
         if (activeRole !== 'SUPERADMIN') {
@@ -159,6 +258,14 @@ router.post(
             if (group && group.members.length > 0) permissions = group.permissions;
           }
         }
+
+        auditAuth('USER_LOGIN', req, {
+          actor: { id: user.id, email: user.email },
+          targetType: 'User',
+          targetId: user.id,
+          targetLabel: user.fullName || user.email,
+          extra: { role: activeRole, method: 'local' },
+        });
 
         return res.json({
           token,
@@ -175,7 +282,7 @@ router.post(
           },
         });
       } else {
-        recordFailedLogin(normalizedEmail);
+        await recordFailedLogin(normalizedEmail);
       }
     }
 
@@ -228,15 +335,23 @@ router.post(
           });
         }
 
-        clearFailedLogins(normalizedEmail);
+        await clearFailedLogins(normalizedEmail);
         const roles2 = account.roles && account.roles.length ? account.roles : [account.role];
         // Même règle que le login local : le rôle principal en base est la source de vérité
         const activeRole2 = account.role;
-        const token = jwt.sign(
-          { sub: account.id, email: account.email, role: activeRole2, roles: roles2, teamId: account.teamId },
-          process.env.JWT_SECRET,
-          { expiresIn: process.env.JWT_EXPIRES_IN || '30d' }
-        );
+        const { session, token: refreshToken, expiresAt } = await createAuthSession({
+          userId: account.id,
+          tokenVersion: account.tokenVersion,
+          activeRole: activeRole2,
+          req,
+        });
+        setRefreshCookie(res, refreshToken, expiresAt.getTime() - Date.now());
+        const token = signAccessToken(account, {
+          role: activeRole2,
+          roles: roles2,
+          sessionId: session.id,
+          sessionStart: session.sessionStart,
+        });
 
         let permissions = null;
         if (activeRole2 !== 'SUPERADMIN') {
@@ -247,6 +362,14 @@ router.post(
             if (group && group.members.length > 0) permissions = group.permissions;
           }
         }
+
+        auditAuth('USER_LOGIN', req, {
+          actor: { id: account.id, email: account.email },
+          targetType: 'User',
+          targetId: account.id,
+          targetLabel: account.fullName || account.email,
+          extra: { role: activeRole2, method: 'ldap' },
+        });
 
         return res.json({
           token,
@@ -264,8 +387,12 @@ router.post(
       }
     }
 
+    auditAuth('USER_LOGIN_FAILED', req, {
+      targetType: 'User',
+      targetLabel: normalizedEmail,
+      extra: { reason: 'invalid_credentials' },
+    });
     return res.status(401).json({ error: 'Identifiants invalides' });
-    auditLog('USER_LOGIN', { actor: { sub: user.id, email: user.email, role: user.role }, targetType: 'User', targetId: user.id, targetLabel: user.fullName || user.email }).catch(() => {});
   }
 );
 
@@ -279,9 +406,15 @@ router.post('/forgot-password', [body('email').trim().isEmail()], async (req, re
   const user = await prisma.user.findUnique({ where: { email } });
 
   if (user && user.isActive) {
-    const token = crypto.randomBytes(32).toString('hex');
+    const token = crypto.randomBytes(32).toString('base64url');
+    const now = new Date();
+    // Purge opportuniste des anciens liens avant d'en créer un nouveau.
+    await prisma.passwordResetToken.deleteMany({
+      where: { userId: user.id, OR: [{ usedAt: { not: null } }, { expiresAt: { lt: now } }] },
+    });
     await prisma.passwordResetToken.create({
-      data: { token, userId: user.id, expiresAt: new Date(Date.now() + PASSWORD_RESET_TOKEN_TTL_HOURS * 60 * 60 * 1000) },
+      // Seul le hash est stocké : une fuite de la base ne permet pas de réinitialiser le compte.
+      data: { tokenHash: hashOpaqueToken(token), userId: user.id, expiresAt: new Date(Date.now() + PASSWORD_RESET_TOKEN_TTL_HOURS * 60 * 60 * 1000) },
     });
     try {
       await sendPasswordResetLinkEmail({ recipientEmail: user.email, recipientName: user.fullName, resetToken: token });
@@ -296,33 +429,34 @@ router.post('/forgot-password', [body('email').trim().isEmail()], async (req, re
 // Vérifie qu'un token de réinitialisation est valide (utilisé par la page ResetPassword pour
 // afficher le formulaire ou un message d'erreur, avant même que l'utilisateur tape son nouveau mot de passe).
 router.get('/reset-password/:token', async (req, res) => {
-  const resetToken = await prisma.passwordResetToken.findUnique({ where: { token: req.params.token } });
+  const resetToken = await prisma.passwordResetToken.findUnique({ where: { tokenHash: hashOpaqueToken(req.params.token) } });
   if (!resetToken) return res.status(410).json({ error: 'Lien invalide.' });
   if (resetToken.usedAt) return res.status(410).json({ error: 'Ce lien a déjà été utilisé.' });
   if (resetToken.expiresAt < new Date()) return res.status(410).json({ error: 'Ce lien a expiré.' });
   return res.json({ ok: true });
 });
 
-router.post('/reset-password/:token', [body('password').isLength({ min: 8 }).custom((v) => {
-  if (!/(?=.*[a-z])/.test(v)) throw new Error('une minuscule');
-  if (!/(?=.*[A-Z])/.test(v)) throw new Error('une majuscule');
-  if (!/(?=.*\d)/.test(v)) throw new Error('un chiffre');
-  if (!/(?=.*[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?])/.test(v)) throw new Error('un caractère spécial');
+router.post('/reset-password/:token', [body('password').custom((v) => {
+  const result = validatePasswordStrength(v);
+  if (!result.valid) throw new Error(result.error);
   return true;
 })], async (req, res) => {
   const errors = validationResult(req);
-  if (!errors.isEmpty()) return res.status(400).json({ error: 'Le mot de passe doit contenir au moins 8 caractères.' });
+  if (!errors.isEmpty()) return res.status(400).json({ error: errors.array()[0]?.msg || 'Mot de passe invalide.' });
 
-  const resetToken = await prisma.passwordResetToken.findUnique({ where: { token: req.params.token } });
+  const resetToken = await prisma.passwordResetToken.findUnique({ where: { tokenHash: hashOpaqueToken(req.params.token) } });
   if (!resetToken) return res.status(410).json({ error: 'Lien invalide.' });
   if (resetToken.usedAt) return res.status(410).json({ error: 'Ce lien a déjà été utilisé.' });
   if (resetToken.expiresAt < new Date()) return res.status(410).json({ error: 'Ce lien a expiré.' });
 
   const passwordHash = await bcrypt.hash(req.body.password, 10);
   await prisma.$transaction([
-    prisma.user.update({ where: { id: resetToken.userId }, data: { passwordHash, mustChangePassword: false } }),
+    // Incrémente tokenVersion : toutes les sessions existantes de ce compte sont révoquées.
+    prisma.user.update({ where: { id: resetToken.userId }, data: { passwordHash, mustChangePassword: false, tokenVersion: { increment: 1 } } }),
     prisma.passwordResetToken.update({ where: { id: resetToken.id }, data: { usedAt: new Date() } }),
   ]);
+  // Révoque toutes les sessions (refresh tokens + sockets) de ce compte.
+  await revokeAllUserSessions(resetToken.userId);
 
   return res.json({ ok: true });
 });
@@ -332,16 +466,14 @@ router.post('/reset-password/:token', [body('password').isLength({ min: 8 }).cus
 router.post(
   '/change-password',
   authenticate,
-  [body('currentPassword').notEmpty(), body('newPassword').isLength({ min: 8 }).custom((v) => {
-    if (!/(?=.*[a-z])/.test(v)) throw new Error('une minuscule');
-    if (!/(?=.*[A-Z])/.test(v)) throw new Error('une majuscule');
-    if (!/(?=.*\d)/.test(v)) throw new Error('un chiffre');
-    if (!/(?=.*[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?])/.test(v)) throw new Error('un caractère spécial');
+  [body('currentPassword').notEmpty(), body('newPassword').custom((v) => {
+    const result = validatePasswordStrength(v);
+    if (!result.valid) throw new Error(result.error);
     return true;
   })],
   async (req, res) => {
     const errors = validationResult(req);
-    if (!errors.isEmpty()) return res.status(400).json({ error: 'Le nouveau mot de passe doit contenir au moins 8 caractères.' });
+    if (!errors.isEmpty()) return res.status(400).json({ error: errors.array()[0]?.msg || 'Mot de passe invalide.' });
 
     const user = await prisma.user.findUnique({ where: { id: req.user.sub } });
     if (!user) return res.status(404).json({ error: 'Utilisateur introuvable' });
@@ -350,11 +482,145 @@ router.post(
     if (!valid) return res.status(401).json({ error: 'Mot de passe actuel incorrect' });
 
     const passwordHash = await bcrypt.hash(req.body.newPassword, 10);
-    await prisma.user.update({ where: { id: user.id }, data: { passwordHash, mustChangePassword: false } });
+    // Révocation de toutes les sessions existantes, puis émission d'un nouveau jeton pour
+    // la session courante (l'utilisateur vient de prouver son mot de passe actuel).
+    const updated = await prisma.user.update({
+      where: { id: user.id },
+      data: { passwordHash, mustChangePassword: false, tokenVersion: { increment: 1 } },
+      select: { id: true, email: true, role: true, roles: true, teamId: true, tokenVersion: true },
+    });
+    // Toutes les anciennes sessions sont révoquées ; on en recrée une pour la session courante
+    // (l'utilisateur vient de prouver son mot de passe actuel) et on tourne le cookie.
+    await revokeAllUserSessions(user.id);
+    const { session, token: refreshToken, expiresAt } = await createAuthSession({
+      userId: updated.id,
+      tokenVersion: updated.tokenVersion,
+      activeRole: req.user.role,
+      req,
+    });
+    setRefreshCookie(res, refreshToken, expiresAt.getTime() - Date.now());
+    const token = signAccessToken(updated, {
+      role: req.user.role,
+      roles: req.user.roles,
+      sessionId: session.id,
+      sessionStart: session.sessionStart,
+    });
 
-    return res.json({ ok: true });
+    return res.json({ ok: true, token });
   }
 );
+
+// Renouvelle le jeton d'accès à partir du refresh token HttpOnly. Le refresh token est
+// tourné à chaque appel (rotation) et la session est vérifiée en base : révocation,
+// plafond absolu et timeout d'inactivité.
+router.post('/refresh', requireTrustedOrigin, async (req, res) => {
+  const rawToken = readRefreshToken(req);
+  if (!rawToken) return res.status(401).json({ error: 'Session absente, veuillez vous reconnecter' });
+
+  const now = new Date();
+  const presentedHash = hashRefreshToken(rawToken);
+  // Recherche par token courant OU précédent : un rejeu de l'ancien token doit être détecté,
+  // pas silencieusement traité comme « session inconnue ».
+  const session = await prisma.authSession.findFirst({
+    where: { OR: [{ tokenHash: presentedHash }, { previousTokenHash: presentedHash }] },
+    include: {
+      user: { select: { id: true, email: true, fullName: true, role: true, roles: true, teamId: true, isActive: true, tokenVersion: true } },
+    },
+  });
+
+  if (!session) {
+    clearRefreshCookie(res);
+    return res.status(401).json({ error: 'Session invalide, veuillez vous reconnecter' });
+  }
+  if (session.revokedAt || session.expiresAt <= now) {
+    clearRefreshCookie(res);
+    return res.status(401).json({ error: 'Session expirée ou révoquée, veuillez vous reconnecter' });
+  }
+  if (now.getTime() - session.lastActivityAt.getTime() > getIdleTimeoutMs()) {
+    await revokeSession(session.id);
+    clearRefreshCookie(res);
+    return res.status(401).json({ error: 'Session inactive, veuillez vous reconnecter' });
+  }
+  if (!session.user?.isActive || Number(session.tokenVersion) !== Number(session.user.tokenVersion ?? 0)) {
+    await revokeSession(session.id);
+    clearRefreshCookie(res);
+    return res.status(401).json({ error: 'Session révoquée, veuillez vous reconnecter' });
+  }
+
+  const isCurrentToken = session.tokenHash === presentedHash;
+  if (!isCurrentToken) {
+    const withinGrace = session.rotatedAt
+      && now.getTime() - session.rotatedAt.getTime() <= REFRESH_REUSE_GRACE_MS;
+    if (!withinGrace) {
+      // Rejeu d'un refresh token déjà tourné hors fenêtre de course : on révoque toute la
+      // session (l'attaquant et la victime sont déconnectés) et on trace l'incident.
+      await revokeSession(session.id);
+      auditAuth('AUTH_REFRESH_REUSED', req, {
+        actor: { id: session.user.id, email: session.user.email },
+        targetType: 'User',
+        targetId: session.user.id,
+        targetLabel: session.user.fullName || session.user.email,
+        extra: { reason: 'rotated_token_replayed' },
+      });
+      clearRefreshCookie(res);
+      return res.status(401).json({ error: 'Session révoquée : jeton de renouvellement réutilisé' });
+    }
+  }
+
+  let roles = session.user.roles && session.user.roles.length ? session.user.roles : [session.user.role];
+  if (roles.includes('SUPERADMIN') || session.user.role === 'SUPERADMIN') {
+    roles = ['SUPERADMIN', 'ADMIN', 'HOTLINE', 'TECHNICIAN', 'REQUESTER'];
+  }
+  // Conserve le rôle actif choisi via /auth/switch-role, s'il est toujours détenu.
+  const activeRole = session.activeRole && roles.includes(session.activeRole)
+    ? session.activeRole
+    : session.user.role;
+
+  const newRefreshToken = generateRefreshToken();
+  // Le renouvellement d'un jeton n'est PAS une activité utilisateur : un onglet laissé
+  // ouvert ne doit pas repousser indéfiniment le timeout d'inactivité. Seul le front,
+  // sur action réelle, envoie X-User-Activity.
+  const countsAsActivity = req.headers['x-user-activity'] === '1';
+  await prisma.authSession.update({
+    where: { id: session.id },
+    data: {
+      tokenHash: hashRefreshToken(newRefreshToken),
+      previousTokenHash: presentedHash,
+      rotatedAt: now,
+      activeRole,
+      ...(countsAsActivity ? { lastActivityAt: now } : {}),
+    },
+  });
+  setRefreshCookie(res, newRefreshToken, session.expiresAt.getTime() - now.getTime());
+
+  const token = signAccessToken(session.user, {
+    role: activeRole,
+    roles,
+    sessionId: session.id,
+    sessionStart: session.sessionStart,
+  });
+  return res.json({ token });
+});
+
+// Déconnexion : révoque la session courante et efface le cookie HttpOnly.
+// Pas d'authenticate requis : le jeton d'accès peut déjà être expiré.
+router.post('/logout', requireTrustedOrigin, async (req, res) => {
+  const rawToken = readRefreshToken(req);
+  if (rawToken) {
+    const session = await findSessionByRefreshToken(rawToken);
+    if (session) {
+      await revokeSession(session.id);
+      auditAuth('USER_LOGOUT', req, {
+        actor: { id: session.user?.id, email: session.user?.email },
+        targetType: 'User',
+        targetId: session.user?.id,
+        targetLabel: session.user?.email,
+      });
+    }
+  }
+  clearRefreshCookie(res);
+  return res.json({ ok: true });
+});
 
 // "permissions" : liste effective des clés de permission de l'utilisateur, calculée selon la même
 // règle que requirePermission() — seul SUPERADMIN a accès à tout sans condition ; pour tous les
@@ -370,7 +636,7 @@ router.get('/me', authenticate, async (req, res) => {
 
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      select: { id: true, email: true, fullName: true, role: true, roles: true, teamId: true, isActive: true, mustChangePassword: true, avatarUrl: true },
+      select: { id: true, email: true, fullName: true, role: true, roles: true, teamId: true, isActive: true, mustChangePassword: true, avatarUrl: true, tokenVersion: true },
     });
 
     if (!user) {
@@ -401,13 +667,17 @@ router.get('/me', authenticate, async (req, res) => {
       }
     }
 
-    const freshToken = jwt.sign(
-      { sub: user.id, email: user.email, role: activeRole, roles, teamId: user.teamId },
-      process.env.JWT_SECRET,
-      { expiresIn: process.env.JWT_EXPIRES_IN || '30d' }
-    );
+    // Renouvelle le jeton d'accès SANS dépasser le plafond absolu de session : sst est
+    // conservé tel quel depuis le jeton courant. Passé AUTH_SESSION_MAX_HOURS, le middleware
+    // rejette déjà la requête et l'utilisateur doit se reconnecter.
+    const freshToken = signAccessToken(user, {
+      role: activeRole,
+      roles,
+      sessionId: req.auth?.sessionId,
+      sessionStart: req.auth?.sessionStart,
+    });
 
-    const { avatarUrl, ...rest } = user;
+    const { avatarUrl, tokenVersion: _tokenVersion, ...rest } = user;
     // Le rôle exposé au front est le rôle ACTIF (celui du token), pas le rôle principal en base —
     // sinon le refresh /auth/me réécrivait user.role avec le rôle principal et re-basculait
     // l'interface sur l'ancien rôle juste après un /auth/switch-role.
@@ -457,7 +727,7 @@ router.post('/switch-role', authenticate, async (req, res) => {
   const validRoles = ['SUPERADMIN', 'ADMIN', 'HOTLINE', 'TECHNICIAN', 'REQUESTER'];
   if (!validRoles.includes(role)) return res.status(400).json({ error: 'Rôle invalide' });
 
-  const user = await prisma.user.findUnique({ where: { id: req.user.sub }, select: { id: true, email: true, fullName: true, role: true, roles: true, teamId: true, avatarUrl: true, mustChangePassword: true } });
+  const user = await prisma.user.findUnique({ where: { id: req.user.sub }, select: { id: true, email: true, fullName: true, role: true, roles: true, teamId: true, avatarUrl: true, mustChangePassword: true, tokenVersion: true } });
   if (!user) return res.status(404).json({ error: 'Utilisateur introuvable' });
 
   let ownedRoles = user.roles && user.roles.length ? user.roles : [user.role];
@@ -467,11 +737,19 @@ router.post('/switch-role', authenticate, async (req, res) => {
   if (isSuperAdmin) ownedRoles = ['SUPERADMIN', 'ADMIN', 'HOTLINE', 'TECHNICIAN', 'REQUESTER'];
   if (!ownedRoles.includes(role)) return res.status(403).json({ error: 'Vous ne possédez pas ce rôle' });
 
-  const token = jwt.sign(
-    { sub: user.id, email: user.email, role, roles: ownedRoles, teamId: user.teamId },
-    process.env.JWT_SECRET,
-    { expiresIn: process.env.JWT_EXPIRES_IN || '30d' }
-  );
+  const token = signAccessToken(user, {
+    role,
+    roles: ownedRoles,
+    sessionId: req.auth?.sessionId,
+    sessionStart: req.auth?.sessionStart,
+  });
+  // Le rôle actif est persisté dans la session : un /auth/refresh ne doit pas le réinitialiser.
+  if (req.auth?.sessionId) {
+    await prisma.authSession.update({
+      where: { id: req.auth.sessionId },
+      data: { activeRole: role },
+    }).catch(() => {});
+  }
 
   let permissions = null;
   if (role !== 'SUPERADMIN') {

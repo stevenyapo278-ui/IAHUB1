@@ -121,7 +121,7 @@ function getPageBreadcrumb(pathname) {
 }
 
 export default function MainLayout() {
-  const { user, logout } = useAuth();
+  const { user, logout, switchRole } = useAuth();
   const { theme, toggleTheme, layoutSettings } = useTheme();
   const navigate = useNavigate();
   const location = useLocation();
@@ -582,9 +582,7 @@ export default function MainLayout() {
                           e.stopPropagation();
                           if (r === user.role) { setShowUserMenu(false); return; }
                           try {
-                            const { data } = await api.post('/auth/switch-role', { role: r });
-                            localStorage.setItem('token', data.token);
-                            localStorage.setItem('user', JSON.stringify(data.user));
+                            await switchRole(r);
                             setShowUserMenu(false);
                             window.location.reload();
                           } catch (err) {

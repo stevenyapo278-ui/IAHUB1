@@ -16,7 +16,12 @@ POSTGRES_PASSWORD=erp_password
 POSTGRES_DB=erp_itsm
 DATABASE_URL=postgresql://erp_user:erp_password@localhost:5433/erp_itsm?schema=public
 JWT_SECRET=dev_jwt_secret_change_in_production_$(openssl rand -hex 8 2>/dev/null || date +%s)
-JWT_EXPIRES_IN=30d
+JWT_EXPIRES_IN=15m
+AUTH_SESSION_MAX_HOURS=12
+AUTH_IDLE_TIMEOUT_MINUTES=30
+AUTH_MAX_SESSIONS=10
+AUTH_COOKIE_SAMESITE=lax
+SECRETS_ENCRYPTION_KEY=$(openssl rand -base64 32 2>/dev/null || echo "")
 CORS_ORIGIN=*
 FRONTEND_URL=http://localhost:5173
 BACKEND_URL=http://localhost:4000
@@ -29,6 +34,18 @@ EOF
     sed -i.bak "s|^JWT_SECRET=.*|JWT_SECRET=${JWT_SECRET_VALUE}|" "$ENV_FILE" && rm -f "${ENV_FILE}.bak"
   fi
   echo "✓ Fichier .env créé avec un JWT_SECRET généré automatiquement."
+fi
+
+# Génère une clé de chiffrement des secrets si elle est absente (les secrets en base
+# resteraient sinon en clair). La clé doit être sauvegardée hors du serveur.
+if ! grep -q "^SECRETS_ENCRYPTION_KEY=." "$ENV_FILE" 2>/dev/null; then
+  SECRETS_KEY_VALUE=$(openssl rand -base64 32 2>/dev/null || head -c 32 /dev/urandom | base64 | tr -d '\n')
+  if grep -q "^SECRETS_ENCRYPTION_KEY=" "$ENV_FILE" 2>/dev/null; then
+    sed -i.bak "s|^SECRETS_ENCRYPTION_KEY=.*|SECRETS_ENCRYPTION_KEY=${SECRETS_KEY_VALUE}|" "$ENV_FILE" && rm -f "${ENV_FILE}.bak"
+  else
+    printf '\nSECRETS_ENCRYPTION_KEY=%s\n' "$SECRETS_KEY_VALUE" >> "$ENV_FILE"
+  fi
+  echo "✓ SECRETS_ENCRYPTION_KEY généré. Sauvegardez-le : sans lui, les secrets chiffrés sont irrécupérables."
 fi
 
 # Source les variables du .env pour les réutiliser dans le script
@@ -110,7 +127,8 @@ case "$choice" in
     echo ""
     echo "Démarrage avec GLPI local (conteneurs glpi + glpi-db)..."
     COMPOSE_FILES="-f docker-compose.yml -f docker-compose.glpi.yml"
-    docker compose $COMPOSE_FILES up -d --build
+    # Profil « glpi » : le pont MCP n'est démarré que sur demande explicite.
+    docker compose $COMPOSE_FILES --profile glpi up -d --build
     LAUNCH_LOCAL_GLPI=true
     ;;
   2)
@@ -134,7 +152,7 @@ case "$choice" in
     echo ""
     echo "Démarrage en mode PRODUCTION avec GLPI local..."
     COMPOSE_FILES="-f docker-compose.production.yml -f docker-compose.glpi.yml"
-    docker compose $COMPOSE_FILES up -d --build
+    docker compose $COMPOSE_FILES --profile glpi up -d --build
     LAUNCH_LOCAL_GLPI=true
     ;;
 

@@ -2,6 +2,8 @@
 // Fournit des helpers pour la validation des uploads, la sanitization HTML,
 // la protection contre le mass assignment, et le masquage des données sensibles.
 
+const prisma = require('../prismaClient');
+
 // ── 1. Validation des uploads ─────────────────────────────────────────────
 
 // Extensions dangereuses qui ne doivent JAMAIS être uploadées
@@ -260,63 +262,164 @@ function maskEmail(email) {
 }
 
 
-// ── 5. Account Lockout ──────────────────────────────────────────────────
+// ── 5. Account Lockout (persistant) ────────────────────────────────────
+// Le compteur est stocké en base (table LoginAttempt) : il survit aux redémarrages
+// et reste cohérent si plusieurs instances tournent derrière un load balancer.
+const LOCKOUT_THRESHOLD = Number.parseInt(process.env.AUTH_LOCKOUT_THRESHOLD, 10) || 10;
+const LOCKOUT_WINDOW_MS = 15 * 60 * 1000; // fenêtre d'observation des échecs
+const LOCKOUT_DURATION_MS = 15 * 60 * 1000; // durée du verrouillage
 
-// Store en mémoire pour le lockout (en production, utiliser Redis)
-const loginAttempts = new Map();
-const LOCKOUT_THRESHOLD = 10; // tentatives échouées avant lockout
-const LOCKOUT_DURATION_MS = 15 * 60 * 1000; // 15 minutes
+function normalizeLoginKey(email) {
+  return String(email || '').trim().toLowerCase();
+}
 
 /**
- * Enregistre une tentative de connexion échouée.
+ * Enregistre une tentative de connexion échouée (upsert atomique).
  */
-function recordFailedLogin(email) {
-  const key = email.toLowerCase().trim();
-  const record = loginAttempts.get(key) || { count: 0, firstAttempt: Date.now() };
-  record.count += 1;
-  record.lastAttempt = Date.now();
-  if (record.count === 1) record.firstAttempt = Date.now();
-  loginAttempts.set(key, record);
+async function recordFailedLogin(email) {
+  const key = normalizeLoginKey(email);
+  if (!key) return;
+
+  const now = new Date();
+  const windowStart = new Date(now.getTime() - LOCKOUT_WINDOW_MS);
+  const lockedUntil = new Date(now.getTime() + LOCKOUT_DURATION_MS);
+
+  try {
+    await prisma.$executeRaw`
+      INSERT INTO "LoginAttempt" ("key", "count", "firstAttemptAt", "lastAttemptAt", "lockedUntil")
+      VALUES (${key}, 1, ${now}, ${now}, NULL)
+      ON CONFLICT ("key") DO UPDATE SET
+        "count" = CASE
+          WHEN "LoginAttempt"."firstAttemptAt" < ${windowStart} THEN 1
+          ELSE "LoginAttempt"."count" + 1 END,
+        "firstAttemptAt" = CASE
+          WHEN "LoginAttempt"."firstAttemptAt" < ${windowStart} THEN ${now}
+          ELSE "LoginAttempt"."firstAttemptAt" END,
+        "lastAttemptAt" = ${now},
+        "lockedUntil" = CASE
+          WHEN "LoginAttempt"."firstAttemptAt" < ${windowStart} THEN NULL
+          WHEN "LoginAttempt"."count" + 1 >= ${LOCKOUT_THRESHOLD} THEN ${lockedUntil}
+          ELSE "LoginAttempt"."lockedUntil" END
+    `;
+  } catch (err) {
+    // Ne jamais bloquer une connexion à cause d'un incident sur le compteur.
+    console.error(`[security] Enregistrement de l'échec de connexion impossible : ${err.message}`);
+  }
 }
 
 /**
  * Réinitialise le compteur après connexion réussie.
  */
-function clearFailedLogins(email) {
-  loginAttempts.delete(email.toLowerCase().trim());
+async function clearFailedLogins(email) {
+  const key = normalizeLoginKey(email);
+  if (!key) return;
+  try {
+    await prisma.loginAttempt.deleteMany({ where: { key } });
+  } catch (err) {
+    console.error(`[security] Réinitialisation du compteur de connexion impossible : ${err.message}`);
+  }
 }
 
 /**
- * Vérifie si un compte est lockout.
+ * Vérifie si un compte est verrouillé.
  */
-function isAccountLocked(email) {
-  const key = email.toLowerCase().trim();
-  const record = loginAttempts.get(key);
-  if (!record) return false;
+async function isAccountLocked(email) {
+  const key = normalizeLoginKey(email);
+  if (!key) return false;
 
-  // Si le lockout a expiré, réinitialiser
-  if (Date.now() - record.firstAttempt > LOCKOUT_DURATION_MS) {
-    loginAttempts.delete(key);
+  try {
+    const record = await prisma.loginAttempt.findUnique({ where: { key } });
+    if (!record) return false;
+
+    const now = Date.now();
+    if (record.lockedUntil && record.lockedUntil.getTime() > now) return true;
+
+    // Fenêtre écoulée : on remet le compteur à zéro.
+    if (now - record.firstAttemptAt.getTime() > LOCKOUT_WINDOW_MS) {
+      await prisma.loginAttempt.deleteMany({ where: { key } });
+      return false;
+    }
+
+    return record.count >= LOCKOUT_THRESHOLD;
+  } catch (err) {
+    // Fail-open : une panne DB ne doit pas empêcher tout le monde de se connecter.
+    console.error(`[security] Vérification du verrouillage impossible : ${err.message}`);
     return false;
   }
-
-  return record.count >= LOCKOUT_THRESHOLD;
 }
 
 /**
- * Nettoyage périodique des entrées expirées (appeler toutes les 5 min).
+ * Nettoyage périodique des compteurs inactifs (appelé toutes les 5 min).
  */
-function cleanupLockouts() {
-  const now = Date.now();
-  for (const [key, record] of loginAttempts) {
-    if (now - record.firstAttempt > LOCKOUT_DURATION_MS) {
-      loginAttempts.delete(key);
-    }
+async function cleanupLockouts() {
+  const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  try {
+    await prisma.loginAttempt.deleteMany({ where: { lastAttemptAt: { lt: cutoff } } });
+  } catch {
+    // Nettoyage best-effort.
   }
 }
 
 // Nettoyage automatique toutes les 5 minutes
-setInterval(cleanupLockouts, 5 * 60 * 1000).unref();
+setInterval(() => { cleanupLockouts().catch(() => {}); }, 5 * 60 * 1000).unref();
+
+
+// ── 6. Politique de mot de passe ───────────────────────────────────────
+// Longueur minimale (12 par défaut) + complexité + refus des mots de passe les plus
+// courants. Appliquée à la création, la réinitialisation et le changement de mot de passe.
+const MIN_PASSWORD_LENGTH = Number.parseInt(process.env.PASSWORD_MIN_LENGTH, 10) || 12;
+
+const COMMON_PASSWORDS = new Set([
+  '12345678', '123456789', '1234567890', 'password', 'password1', 'password123',
+  'motdepasse', 'motdepasse1', 'azerty', 'azerty123', 'qwerty', 'qwerty123',
+  'admin123', 'admin1234', 'administrateur', 'welcome', 'welcome1', 'letmein',
+  'changeme', 'changezmoi', 'p@ssw0rd', 'passw0rd', 'soleil', 'bonjour',
+  'prosuma', 'prosuma123', 'ia-hub', 'iahub2024', 'iahub2025', 'iahub2026',
+  'default', 'root1234', 'superadmin', 'superadmin123', 'test1234', 'test12345',
+]);
+
+const FORBIDDEN_SEQUENCES = [
+  'azerty', 'qwerty', '123456', 'abcdef', 'motdepasse', 'password', 'letmein',
+  'welcome', 'prosuma',
+];
+
+/**
+ * Valide la robustesse d'un mot de passe.
+ * @returns {{ valid: boolean, error?: string }}
+ */
+function validatePasswordStrength(password) {
+  const value = String(password ?? '');
+
+  if (value.length < MIN_PASSWORD_LENGTH) {
+    return { valid: false, error: `Le mot de passe doit contenir au moins ${MIN_PASSWORD_LENGTH} caractères.` };
+  }
+  if (!/[a-z]/.test(value)) {
+    return { valid: false, error: 'Le mot de passe doit contenir au moins une minuscule.' };
+  }
+  if (!/[A-Z]/.test(value)) {
+    return { valid: false, error: 'Le mot de passe doit contenir au moins une majuscule.' };
+  }
+  if (!/\d/.test(value)) {
+    return { valid: false, error: 'Le mot de passe doit contenir au moins un chiffre.' };
+  }
+  if (!/[^A-Za-z0-9]/.test(value)) {
+    return { valid: false, error: 'Le mot de passe doit contenir au moins un caractère spécial.' };
+  }
+
+  const lower = value.toLowerCase();
+  if (COMMON_PASSWORDS.has(lower)) {
+    return { valid: false, error: 'Ce mot de passe est trop courant : choisissez-en un autre.' };
+  }
+  if (FORBIDDEN_SEQUENCES.some((seq) => lower.includes(seq))) {
+    return { valid: false, error: 'Le mot de passe contient une suite trop prévisible (azerty, qwerty, 123456, nom de l’organisation…).' };
+  }
+  if (/^(.)\1+$/.test(value)) {
+    return { valid: false, error: 'Le mot de passe ne peut pas être un caractère répété.' };
+  }
+
+  return { valid: true };
+}
+
 
 
 module.exports = {
@@ -344,4 +447,9 @@ module.exports = {
   recordFailedLogin,
   clearFailedLogins,
   isAccountLocked,
+  cleanupLockouts,
+
+  // Politique de mot de passe
+  MIN_PASSWORD_LENGTH,
+  validatePasswordStrength,
 };

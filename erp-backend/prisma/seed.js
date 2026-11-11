@@ -83,7 +83,11 @@ async function main() {
   const superAdminEmail = 'superadmin@prosuma.ci';
   const existingSuperAdmin = await prisma.user.findUnique({ where: { email: superAdminEmail } });
   if (!existingSuperAdmin) {
-    const passwordHash = await bcrypt.hash('12345678', 10);
+    // Mot de passe initial surchargeable : en production, fournir SEED_ADMIN_PASSWORD (12 caractères
+    // minimum, cf. PASSWORD_MIN_LENGTH) plutôt que de conserver le mot de passe de démonstration.
+    const initialPassword = process.env.SEED_ADMIN_PASSWORD?.trim() || '12345678';
+    const usesDefaultPassword = initialPassword === '12345678';
+    const passwordHash = await bcrypt.hash(initialPassword, 10);
     await prisma.user.create({
       data: {
         email: superAdminEmail,
@@ -91,9 +95,15 @@ async function main() {
         fullName: 'Super Admin Prosuma',
         role: 'SUPERADMIN',
         roles: ['SUPERADMIN'], // invariant : role ∈ roles — le switch de rôle est implicite pour SUPERADMIN
+        // Avec le mot de passe de démonstration, on impose son changement dès la première connexion.
+        mustChangePassword: usesDefaultPassword,
       },
     });
-    console.log(`Super-admin créé : ${superAdminEmail} / 12345678`);
+    console.log(
+      usesDefaultPassword
+        ? `Super-admin créé : ${superAdminEmail} / 12345678 (changement de mot de passe imposé à la première connexion)`
+        : `Super-admin créé : ${superAdminEmail} (mot de passe fourni via SEED_ADMIN_PASSWORD)`
+    );
   }
 
   const providers = [

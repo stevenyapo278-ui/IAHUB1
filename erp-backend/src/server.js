@@ -20,6 +20,7 @@ const { runSlaMonitor, realignSlaWithApproval } = require('./services/slaService
 const { runDueDateMonitor } = require('./services/dueDateService');
 const { maybeGenerateWeeklyReport } = require('./services/aiWeeklyReportScheduler');
 const { logger } = require('./utils/logger');
+const { cleanupExpiredAuthSessions } = require('./utils/authSession');
 const prisma = require('./prismaClient');
 
 // Validation des variables d'environnement critiques au démarrage
@@ -39,6 +40,17 @@ if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 16) {
 }
 if (process.env.CORS_ORIGIN === '*') {
   logger.warn('CORS_ORIGIN=* — restreignez ceci en production pour des raisons de sécurité.');
+}
+// Chiffrement des secrets en base : sans clé valide, les secrets restent en clair.
+if (!process.env.SECRETS_ENCRYPTION_KEY) {
+  logger.warn('SECRETS_ENCRYPTION_KEY absent — les clés API/tokens GLPI sont stockés en clair. Définissez la variable puis lancez scripts/encryptSecrets.js.');
+} else {
+  try {
+    require('./utils/secretsCrypto').isEncryptionEnabled();
+  } catch (err) {
+    logger.error(`SECRETS_ENCRYPTION_KEY invalide : ${err.message}`);
+    process.exit(1);
+  }
 }
 const FALLBACK_CHECK_DELAY_MS = 60 * 1000; // si l'intervalle configuré est 0 (désactivé), on revérifie le réglage chaque minute
 const DRAFT_REMINDER_CHECK_INTERVAL_MS = 5 * 60 * 1000; // vérifie toutes les 5 min quels brouillons dépassent le délai configuré (draftReminderDelayMinutes)
@@ -322,3 +334,21 @@ trackedSolvedAutoClose().catch((err) => logger.error('Erreur fermeture auto tick
 setInterval(() => {
   trackedSolvedAutoClose().catch((err) => logger.error('Erreur fermeture auto tickets résolus:', { error: err.message, stack: err.stack }));
 }, SOLVED_AUTO_CLOSE_CHECK_INTERVAL_MS);
+
+// Purge des sessions expirées/révoquées et des tokens de reset utilisés/expirés.
+// Sans ça, AuthSession et PasswordResetToken grossissent indéfiniment.
+const AUTH_CLEANUP_INTERVAL_MS = 6 * 60 * 60 * 1000; // toutes les 6 h
+const trackedAuthCleanup = withHealthTracking('purge sessions expirées', cleanupExpiredAuthSessions);
+trackedAuthCleanup().catch((err) => logger.error('Erreur purge sessions expirées:', { error: err.message, stack: err.stack }));
+setInterval(() => {
+  trackedAuthCleanup().catch((err) => logger.error('Erreur purge sessions expirées:', { error: err.message, stack: err.stack }));
+}, AUTH_CLEANUP_INTERVAL_MS);
+
+// Purge du journal d'idempotence (clés d'actions externes expirées). Même cadence que
+// la purge d'authentification : les enregistrements vivent 7 jours par défaut.
+const { cleanupExpiredIdempotency } = require('./services/idempotency');
+const trackedIdempotencyCleanup = withHealthTracking('purge journal idempotence', cleanupExpiredIdempotency);
+trackedIdempotencyCleanup().catch((err) => logger.error('Erreur purge idempotence:', { error: err.message, stack: err.stack }));
+setInterval(() => {
+  trackedIdempotencyCleanup().catch((err) => logger.error('Erreur purge idempotence:', { error: err.message, stack: err.stack }));
+}, AUTH_CLEANUP_INTERVAL_MS);

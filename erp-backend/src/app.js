@@ -180,6 +180,43 @@ const loginNetworkLimiter = rateLimit({
 });
 app.use('/api/auth/login', loginNetworkLimiter, loginAccountLimiter);
 
+// ── Limitation des demandes de réinitialisation de mot de passe ─────────────
+// Sans ça, ces routes (publiques) ne sont couvertes que par le quota global anonyme
+// (1500/15 min), ce qui permet de spammer des emails ou de brute-forcer un token.
+const passwordResetIpLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => `reset-ip:${ipKeyGenerator(req.ip || req.socket.remoteAddress || '127.0.0.1')}`,
+  message: { error: 'Trop de demandes de réinitialisation. Réessayez dans 15 minutes.' },
+});
+
+const passwordResetEmailLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 3,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => {
+    const email = String(req.body?.email || '').toLowerCase().trim();
+    return email ? `reset-email:${email}` : `reset-noemail:${ipKeyGenerator(req.ip || req.socket.remoteAddress || '127.0.0.1')}`;
+  },
+  message: { error: 'Trop de demandes pour ce compte. Réessayez dans 15 minutes.' },
+});
+
+const passwordResetSubmitLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => `reset-submit:${ipKeyGenerator(req.ip || req.socket.remoteAddress || '127.0.0.1')}`,
+  message: { error: 'Trop de tentatives. Réessayez dans 15 minutes.' },
+});
+
+app.use('/api/auth/forgot-password', passwordResetIpLimiter, passwordResetEmailLimiter);
+app.use('/api/auth/reset-password', passwordResetSubmitLimiter);
+
+
 app.use(requestId);
 
 // Middleware de logging HTTP : enregistre chaque requête avec son temps d'exécution
@@ -262,6 +299,9 @@ app.use('/api/ai-email-drafts', aiEmailDraftRoutes);
 app.use('/api/ai-ticket-suggestions', aiTicketSuggestionRoutes);
 app.use('/api/n8n-config', n8nConfigRoutes);
 app.use('/api/knowledge', knowledgeRoutes);
+// Ticket d'authentification de la WebSocket vocale (port 4001) : le front échange son
+// jeton d'accès contre un ticket à usage unique au lieu de passer le JWT en query string.
+app.use('/api/voice-live', require('./routes/voiceLive.routes').router);
 app.use('/api/draft-approval', draftApprovalRoutes); // doit être monté avant les routers génériques /api (ligne suivante), qui appliquent authenticate à toute requête entrante peu importe si une de leurs routes internes matche
 app.use('/api/approvals', approvalsRoutes); // validation hiérarchique : publique (lien email à token opaque), avant les routers /api avec authenticate
 app.use('/api', outlookOAuthRoutes);

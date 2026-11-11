@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
+import api from '../api/client';
 
 // ── Détection réelle de la chaîne vocale ──
 // `AudioWorklet` est une API [SecureContext] : sur une origine HTTP (hors localhost),
@@ -448,12 +449,17 @@ export function useVoiceLive() {
       setPlaybackAnalyserNode(playbackAnalyser);
 
       const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-      // JWT passé en query string : le backend authentifie la session vocale (filtrage par rôle
-      // dans le pipeline chatbot, "mes tickets" = ceux de l'utilisateur connecté, comme au chat).
+      // Un WebSocket ne peut pas porter d'en-tête Authorization : on échange le jeton
+      // d'accès (gardé en mémoire) contre un ticket à usage unique de 60 s. Le JWT ne
+      // transite plus en query string (fuite via logs proxy / historique du navigateur).
       // `path` = route courante : alimente le contexte de navigation (outil get_context).
-      const token = localStorage.getItem('token');
       const qs = new URLSearchParams();
-      if (token) qs.set('token', token);
+      try {
+        const { data } = await api.post('/voice-live/ticket');
+        if (data?.ticket) qs.set('ticket', data.ticket);
+      } catch {
+        // Pas de ticket : session vocale non authentifiée (comportement dégradé).
+      }
       qs.set('path', `${location.pathname}${location.search}`);
       const ws = new WebSocket(`${proto}://${location.hostname}:4001?${qs.toString()}`);
       wsRef.current = ws;

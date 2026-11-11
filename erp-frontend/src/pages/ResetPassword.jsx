@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import axios from 'axios';
+import { MIN_PASSWORD_LENGTH, validatePassword } from '../utils/passwordPolicy';
 
 const publicApi = axios.create({
   baseURL: import.meta.env.VITE_API_URL || 'http://localhost:4000/api',
@@ -37,7 +38,8 @@ export default function ResetPassword() {
   async function handleSubmit(e) {
     e.preventDefault();
     setError('');
-    if (password.length < 8) { setError('Le mot de passe doit contenir au moins 8 caractères.'); return; }
+    const strength = validatePassword(password);
+    if (!strength.valid) { setError(strength.error); return; }
     if (password !== confirmPassword) { setError('Les deux mots de passe ne correspondent pas.'); return; }
     setSubmitting(true);
     try {
@@ -129,8 +131,8 @@ export default function ResetPassword() {
                       <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-muted-foreground/70">
                         <span className="material-symbols-outlined text-[20px]">lock</span>
                       </div>
-                      <input type="password" required minLength={8} value={password} onChange={(e) => setPassword(e.target.value)}
-                        placeholder="Au moins 8 caractères"
+                      <input type="password" required minLength={MIN_PASSWORD_LENGTH} value={password} onChange={(e) => setPassword(e.target.value)}
+                        placeholder={`Au moins ${MIN_PASSWORD_LENGTH} caractères`}
                         className="w-full h-10 pl-10 bg-surface border border-outline-variant/60 rounded-xl font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all placeholder-on-surface-variant/40"
                       />
                     </div>
@@ -142,7 +144,7 @@ export default function ResetPassword() {
                       <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-muted-foreground/70">
                         <span className="material-symbols-outlined text-[20px]">lock</span>
                       </div>
-                      <input type="password" required minLength={8} value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)}
+                      <input type="password" required minLength={MIN_PASSWORD_LENGTH} value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)}
                         placeholder="Confirmez votre mot de passe"
                         className="w-full h-10 pl-10 bg-surface border border-outline-variant/60 rounded-xl font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all placeholder-on-surface-variant/40"
                       />

@@ -1,3 +1,4 @@
+const express = require('express');
 const http = require('http');
 const https = require('https');
 const fs = require('fs');
@@ -12,13 +13,38 @@ const { searchEmailRag } = require('../services/emailRagService');
 const { searchTeams, searchTickets, buildSearchQuery, findTicketsForPersonAnyRole, handleMessage, executeTool: chatbotExecuteTool, normalizeStatusFilter, OPEN_GROUP_STATUSES, buildPersonTicketSummary } = require('../services/chatbotService');
 const { buildToolResultPayload, toGeminiResponse } = require('../services/voicePayloads');
 const { trackAiUsage } = require('../services/aiUsageTracker');
-const jwt = require('jsonwebtoken');
+const { verifyAccessToken } = require('../utils/authToken');
+const { findLiveSession, findLiveSessionById } = require('../utils/authSession');
+const { authorizeToolCall, recordToolExecution, isKillSwitchActive, isIdempotentTool } = require('../services/toolPolicy');
+const { runIdempotent, hashPayload } = require('../services/idempotency');
+const { issueVoiceTicket, consumeVoiceTicket } = require('../utils/voiceTicket');
+const { authenticate } = require('../middleware/auth');
 
 // Modèle Live officiel GA (doc Google Cloud Gemini Enterprise Agent Platform) :
 // entrée attendue PCM mono 16 kHz, sortie 24 kHz.
 const LIVE_MODEL = process.env.LIVE_MODEL || 'gemini-3.8-live';
 const LIVE_VOICE = 'Aoede';
 const LIVE_PORT = process.env.VOICE_LIVE_PORT || 4001;
+
+// ── Ticket d'authentification de la WebSocket ───────────────────────────────
+// Le navigateur ne peut pas joindre d'en-tête Authorization à un handshake WebSocket :
+// le front obtient d'abord un ticket à usage unique (60 s) via cette route authentifiée,
+// puis le serveur vocal le consomme. Plus aucun JWT ne transite en query string.
+const router = express.Router();
+
+router.post('/ticket', authenticate, async (req, res) => {
+  try {
+    const { token, expiresIn } = await issueVoiceTicket({
+      userId: req.user.sub,
+      // req.auth.sessionId : session de rafraîchissement validée par le middleware authenticate.
+      sessionId: req.auth?.sessionId,
+    });
+    return res.json({ ticket: token, expiresIn });
+  } catch (err) {
+    logger.error(`[voice-live] Émission de ticket impossible : ${err.message}`);
+    return res.status(500).json({ error: 'Impossible de préparer la session vocale.' });
+  }
+});
 
 // Périmètre « UI » des compteurs, aligné sur /dashboard/stats (dashboard.routes.js).
 // Sans ça, les chiffres vocaux dépassent ceux de l'interface (ex. 48 « ouverts »
@@ -427,6 +453,15 @@ Ne réponds JAMAIS de mémoire : appelle toujours cet outil pour les chiffres.`,
 ];
 
 async function executeTool(name, args, { user = null, sessionHistory = null, ws = null, toolCtx = null } = {}) {
+  // ── Passerelle d'autorisation (politique serveur, indépendante du modèle) ──
+  // Même registre que le chatbot texte : refus par défaut d'un outil inconnu,
+  // arrêt d'urgence, écritures coupées, outil désactivé, authentification requise.
+  const decision = await authorizeToolCall({ tool: name, user, source: 'voice' });
+  if (!decision.allowed) {
+    logger.warn(`[voice-live] Outil refusé (${name}) : ${decision.code}`);
+    return { denied: true, code: decision.code, message: decision.message };
+  }
+
   try {
     switch (name) {
       case 'ask_assistant': {
@@ -1161,6 +1196,30 @@ async function fetchVoiceSnapshot(currentUser) {
   return { total, open, newCount, p1Count, solvedCount, myCount, myRecentTickets, topLocs, topCategories, teamStats, at: new Date().toISOString().slice(0, 16).replace('T', ' ') };
 }
 
+// Référence au serveur WebSocket vocal, utilisée par l'arrêt d'urgence pour couper
+// immédiatement les sessions en cours (aucune attente de fin de conversation).
+let activeWss = null;
+
+function closeAllVoiceSessions(reason = 'kill-switch') {
+  if (!activeWss) return 0;
+  let closed = 0;
+  activeWss.clients.forEach((client) => {
+    try {
+      if (client.readyState === 1) {
+        client.send(JSON.stringify({ type: 'session_closed', reason }));
+        client.close(1012, reason);
+      } else if (client.readyState !== 3) {
+        client.terminate();
+      }
+      closed += 1;
+    } catch {
+      // Best-effort : une socket déjà morte ne doit pas bloquer l'arrêt.
+    }
+  });
+  if (closed > 0) logger.warn(`[voice-live] Arrêt d'urgence : ${closed} session(s) vocale(s) fermée(s)`);
+  return closed;
+}
+
 function setupVoiceLive() {
   const tlsCertPath = process.env.TLS_CERT_PATH;
   const tlsKeyPath = process.env.TLS_KEY_PATH;
@@ -1193,6 +1252,7 @@ function setupVoiceLive() {
       zlibDeflateOptions: { level: 3 },
     },
   });
+  activeWss = wss;
   const keepAliveInterval = setInterval(() => {
     wss.clients.forEach((c) => {
       if (c.readyState === 1) { try { c.ping(); } catch {} }
@@ -1205,6 +1265,16 @@ function setupVoiceLive() {
   wss.on('connection', async (ws, req) => {
     logger.info('[voice-live] Client connected');
     let session = null;
+
+    // Arrêt d'urgence : aucune session vocale ne s'ouvre tant qu'il est actif.
+    if (await isKillSwitchActive()) {
+      logger.warn('[voice-live] Connexion refusée : arrêt d\'urgence actif');
+      try {
+        ws.send(JSON.stringify({ type: 'session_closed', reason: 'kill-switch' }));
+        ws.close(1013, 'AI kill switch active');
+      } catch { /* ignore */ }
+      return;
+    }
 
     // ── Authentification (JWT envoyé par le front via ?token=) ──
     // Même logique que utils/socket.js : le JWT n'est qu'une preuve de connexion, le rôle et
@@ -1226,22 +1296,35 @@ function setupVoiceLive() {
       const url = new URL(req.url, 'http://localhost');
       sessionNav = (url.searchParams.get('path') || '').slice(0, 300);
       toolCtx.nav = sessionNav;
-      const token = url.searchParams.get('token')
-        || (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
-      if (token) {
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        const dbUser = await prisma.user.findUnique({
-          where: { id: Number(decoded.sub) },
-          select: { id: true, email: true, role: true, teamId: true, isActive: true },
-        });
-        if (dbUser?.isActive) {
-          currentUser = { sub: dbUser.id, email: dbUser.email, role: dbUser.role, teamId: dbUser.teamId };
-          logger.info(`[voice-live] Auth OK : user #${currentUser.sub} (${currentUser.role})`);
+      // Ticket à usage unique (recommandé, utilisé par le front) ou, pour les clients
+      // non navigateur, jeton d'accès en en-tête Authorization. Aucun token en query string.
+      const ticket = url.searchParams.get('ticket');
+      const bearerToken = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+      let liveSession = null;
+      if (ticket) {
+        const consumed = await consumeVoiceTicket(ticket);
+        if (consumed) {
+          // Re-vérifie la session en base : un ticket émis il y a 60 s peut avoir été
+          // révoqué entre-temps (changement de mot de passe, déconnexion admin…).
+          liveSession = await findLiveSessionById(consumed.sessionId);
+          if (!liveSession || liveSession.userId !== consumed.userId) liveSession = null;
         } else {
-          logger.warn('[voice-live] Auth : compte inactif ou introuvable');
+          logger.warn('[voice-live] Auth : ticket invalide, expiré ou déjà utilisé');
         }
+      } else if (bearerToken) {
+        const decoded = verifyAccessToken(bearerToken);
+        // Vérifie la session de rafraîchissement (révocation, expiration, inactivité),
+        // l'état du compte et la version de jeton — comme le middleware Express.
+        liveSession = await findLiveSession(decoded);
       } else {
-        logger.warn('[voice-live] Aucun token fourni — session non authentifiée');
+        logger.warn('[voice-live] Aucun ticket fourni — session non authentifiée');
+      }
+      if (liveSession?.user) {
+        const dbUser = liveSession.user;
+        currentUser = { sub: dbUser.id, email: dbUser.email, role: dbUser.role, teamId: dbUser.teamId };
+        logger.info(`[voice-live] Auth OK : user #${currentUser.sub} (${currentUser.role})`);
+      } else if (ticket || bearerToken) {
+        logger.warn('[voice-live] Auth : session révoquée, expirée ou compte inactif');
       }
     } catch (authErr) {
       logger.warn(`[voice-live] Auth failed: ${authErr.message}`);
@@ -1583,7 +1666,29 @@ function setupVoiceLive() {
                       }
 
                       try {
-                        const result = await executeTool(fcName, fcArgs, { user: currentUser, sessionHistory, ws, toolCtx });
+                        // Idempotence des actions d'écriture/externes : un outil rejoué par le
+                        // modèle (même arguments dans la même fenêtre) renvoie le premier résultat
+                        // au lieu de créer un second ticket ou d'envoyer un second email.
+                        const execVoiceTool = () => executeTool(fcName, fcArgs, { user: currentUser, sessionHistory, ws, toolCtx });
+                        let result;
+                        if (isIdempotentTool(fcName)) {
+                          const { value } = await runIdempotent(
+                            {
+                              scope: 'tool-call',
+                              key: `${currentUser?.sub || 'anon'}:${fcName}:${hashPayload(fcArgs || {})}`,
+                              userId: currentUser?.sub || null,
+                              payload: fcArgs || {},
+                              ttlMs: 10 * 60 * 1000,
+                            },
+                            execVoiceTool
+                          );
+                          result = value;
+                        } else {
+                          result = await execVoiceTool();
+                        }
+                        if (!(result && result.denied)) {
+                          recordToolExecution({ tool: fcName, user: currentUser, source: 'voice' }).catch(() => {});
+                        }
                         // Retour visuel côté front : fin du chip « Marie utilise… » + payload
                         // sanitisé (cartes) si l'outil a un résultat affichable.
                         if (ws && ws.readyState === 1) {
@@ -1688,4 +1793,4 @@ function invalidateVoiceCache(userIds = []) {
   }
 }
 
-module.exports = { setupVoiceLive, invalidateVoiceCache, executeTool, fetchVoiceSnapshot };
+module.exports = { setupVoiceLive, router, invalidateVoiceCache, executeTool, fetchVoiceSnapshot, closeAllVoiceSessions, TOOLS };

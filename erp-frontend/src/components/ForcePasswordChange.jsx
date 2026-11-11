@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import api from '../api/client';
+import { setAccessToken } from '../api/tokenStore';
 import { useAuth } from '../context/AuthContext';
+import { MIN_PASSWORD_LENGTH, validatePassword } from '../utils/passwordPolicy';
 
 // Overlay bloquant affiché par-dessus toute l'application tant que user.mustChangePassword est
 // vrai (ex: après une réinitialisation par un admin) — force le changement avant de pouvoir
@@ -17,8 +19,9 @@ export default function ForcePasswordChange() {
   async function handleSubmit(e) {
     e.preventDefault();
     setError('');
-    if (newPassword.length < 8) {
-      setError('Le nouveau mot de passe doit contenir au moins 8 caractères.');
+    const strength = validatePassword(newPassword);
+    if (!strength.valid) {
+      setError(strength.error);
       return;
     }
     if (newPassword !== confirmPassword) {
@@ -27,7 +30,9 @@ export default function ForcePasswordChange() {
     }
     setSubmitting(true);
     try {
-      await api.post('/auth/change-password', { currentPassword, newPassword });
+      const { data } = await api.post('/auth/change-password', { currentPassword, newPassword });
+      // Le backend révoque toutes les sessions puis renvoie un jeton neuf pour celle-ci.
+      if (data?.token) setAccessToken(data.token);
       clearMustChangePassword();
     } catch (err) {
       setError(err.response?.data?.error || 'Erreur lors du changement de mot de passe.');
@@ -64,10 +69,10 @@ export default function ForcePasswordChange() {
             <input
               type="password"
               required
-              minLength={8}
+              minLength={MIN_PASSWORD_LENGTH}
               value={newPassword}
               onChange={(e) => setNewPassword(e.target.value)}
-              placeholder="Au moins 8 caractères"
+              placeholder={`Au moins ${MIN_PASSWORD_LENGTH} caractères`}
               className="w-full h-[40px] px-sm border border-outline-variant bg-surface text-on-surface font-body-md text-body-md focus:outline-none focus:border-on-surface"
             />
           </div>
@@ -76,7 +81,7 @@ export default function ForcePasswordChange() {
             <input
               type="password"
               required
-              minLength={8}
+              minLength={MIN_PASSWORD_LENGTH}
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
               className="w-full h-[40px] px-sm border border-outline-variant bg-surface text-on-surface font-body-md text-body-md focus:outline-none focus:border-on-surface"

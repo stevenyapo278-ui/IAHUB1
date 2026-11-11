@@ -12,11 +12,13 @@ const ALERT_COOLDOWN_MS = 6 * 60 * 60 * 1000; // 6 heures entre les alerts
 
 /**
  * Vérifie si l'IA est activée globalement.
- * Si le toggle aiEnabled est false, tous les appels IA doivent être bloqués.
+ * Si le toggle aiEnabled est false — ou si l'arrêt d'urgence (kill switch) est actif —
+ * tous les appels IA doivent être bloqués.
  */
 async function isAiEnabled() {
   try {
     const settings = await getSystemSettings();
+    if (settings.aiKillSwitch === true) return false;
     return settings.aiEnabled !== false; // défaut true
   } catch {
     return true; // en cas d'erreur, laisser passer (ne pas casser le pipeline)

@@ -7,6 +7,7 @@ import RealtimeToast from '../components/RealtimeToast';
 import { sendBrowserNotification, requestBrowserNotifPermission } from '../utils/browserNotification';
 import { playTicketCreated, playTicketAssigned, playTicketUpdated, playAlertP1 } from '../utils/sounds';
 import { wasRecentlyUpdatedByMe } from '../utils/recentlyUpdatedTickets';
+import { getAccessToken } from '../api/tokenStore';
 
 const SocketContext = createContext(null);
 
@@ -15,14 +16,16 @@ const SocketContext = createContext(null);
 const UPDATE_BATCH_MS = 1200;
 
 export function SocketProvider({ children }) {
-  const { user } = useAuth();
+  const { user, authReady } = useAuth();
   const navigate = useNavigate();
   const [socket, setSocket] = useState(null);
   const navigateRef = useRef(navigate);
   navigateRef.current = navigate;
 
   useEffect(() => {
-    if (!user) {
+    // On attend la restauration de session (refresh initial) ET le jeton en mémoire :
+    // sinon Socket.IO se connecte sans jeton et reste en échec jusqu'au prochain reload.
+    if (!authReady || !user) {
       if (socket) {
         socket.disconnect();
         setSocket(null);
@@ -30,7 +33,8 @@ export function SocketProvider({ children }) {
       return;
     }
 
-    const token = localStorage.getItem('token');
+    const token = getAccessToken();
+    if (!token) return;
 
     const backendUrl = import.meta.env.VITE_API_URL
       ? import.meta.env.VITE_API_URL.replace(/\/api$/, '')
@@ -56,6 +60,24 @@ export function SocketProvider({ children }) {
     newSocket.on('system-settings:updated', () => {
       window.dispatchEvent(new CustomEvent('system-settings:updated'));
     });
+
+    // Session révoquée côté serveur (mot de passe changé, compte désactivé, inactivité) :
+    // le backend a déjà coupé la socket ; on termine proprement la session locale.
+    newSocket.on('auth:revoked', () => {
+      window.dispatchEvent(new CustomEvent('auth:session-revoked'));
+    });
+
+    // Le jeton d'accès tourne toutes les 15 min : on met à jour le handshake pour que la
+    // prochaine reconnexion Socket.IO utilise le jeton courant (pas l'ancien, expiré).
+    const onTokenRefreshed = (e) => {
+      const fresh = e?.detail?.token || getAccessToken();
+      if (!fresh) return;
+      newSocket.auth = { ...(newSocket.auth || {}), token: fresh };
+      // Changement de mot de passe : le serveur a coupé la socket, on se reconnecte
+      // avec le nouveau jeton au lieu d'attendre la fin des tentatives automatiques.
+      if (!newSocket.connected) newSocket.connect();
+    };
+    window.addEventListener('auth:token-refreshed', onTokenRefreshed);
 
     // ── Ticket créé ────────────────────────────────────────────────────
     newSocket.on('ticket_created', (ticket) => {
@@ -256,6 +278,7 @@ export function SocketProvider({ children }) {
     setSocket(newSocket);
 
     return () => {
+      window.removeEventListener('auth:token-refreshed', onTokenRefreshed);
       if (updateFlushTimer) clearTimeout(updateFlushTimer);
       pendingUpdates = [];
       if (newSocket.connected || newSocket.connecting) {
@@ -264,7 +287,7 @@ export function SocketProvider({ children }) {
       }
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id]);
+  }, [user?.id, authReady]);
 
   return (
     <SocketContext.Provider value={socket}>

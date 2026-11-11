@@ -17,8 +17,8 @@ export function NotificationProvider({ children }) {
 
   // ── Chargement initial des notifications (uniquement si authentifié) ────
   const loadNotifications = useCallback(async (offset = 0, append = false) => {
-    const token = localStorage.getItem('token');
-    if (!token) {
+    // La session est en mémoire (jeton d'accès) : `user` est la source de vérité côté UI.
+    if (!user) {
       setLoading(false);
       return;
     }
@@ -49,7 +49,7 @@ export function NotificationProvider({ children }) {
       setLoading(false);
       isFetchingRef.current = false;
     }
-  }, []);
+  }, [user]);
 
   useEffect(() => {
     if (user) {

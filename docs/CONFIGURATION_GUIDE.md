@@ -4,6 +4,9 @@
 Plateforme de ticketing ITSM avec pipeline email → IA → GLPI
 ```
 
+> 🔐 **Rotation des secrets** : tokens GLPI, clés fournisseurs IA, `JWT_SECRET` et secrets
+> Outlook — procédure et outillage dans [`docs/ROTATION_SECRETS.md`](ROTATION_SECRETS.md).
+
 ---
 
 ## 1. Connexion GLPI

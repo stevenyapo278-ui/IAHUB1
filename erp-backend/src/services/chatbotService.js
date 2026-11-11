@@ -10,6 +10,8 @@ const analyticsTools = require('./analyticsTools');
 const { searchEmailRag } = require('./emailRagService');
 const { previewReport, sendTicketReportEmail } = require('./ticketReportService');
 const { hasPermission } = require('../middleware/permissions');
+const { authorizeToolCall, recordToolExecution, isKillSwitchActive, isIdempotentTool } = require('./toolPolicy');
+const { runIdempotent, hashPayload } = require('./idempotency');
 
 const SYSTEM_PROMPT = `Tu es MARIE, l'assistante IA Helpdesk IT de Prosuma. Tu es une collègue expérimentée du support IT : naturelle, chaleureuse, efficace.
 
@@ -1614,6 +1616,14 @@ function buildCapabilityLine() {
 }
 
 async function executeTool(toolName, args, user, { confirmed = false } = {}, ctx = {}) {
+  // ── Passerelle d'autorisation (politique serveur, indépendante du modèle) ──
+  // Refus par défaut pour un outil inconnu, arrêt d'urgence, écritures coupées,
+  // outil désactivé par l'admin ou permission manquante.
+  const decision = await authorizeToolCall({ tool: toolName, user, source: ctx.source || 'chat' });
+  if (!decision.allowed) {
+    return { denied: true, code: decision.code, message: decision.message };
+  }
+
   // ── Garde-fou défensif : les actions d'écriture ne sont plus exécutables par le LLM ──
   if (WRITE_ACTION_TOOLS.has(toolName)) {
     return { redirect: true, message: 'Consulte directement l\'ERP pour cette action, ou ajoute un suivi sur le ticket concerné.' };
@@ -2213,6 +2223,11 @@ async function callAIWithTools(messages, options = {}) {
       if (fnResult && fnResult.needsConfirmation) {
         pendingConfirmation = fnResult;
         break;
+      }
+
+      // Trace d'audit des exécutions sensibles (écriture / effet externe).
+      if (!(fnResult && fnResult.denied)) {
+        recordToolExecution({ tool: fnName, user: options.user, source: 'chat' }).catch(() => {});
       }
 
       const resultText = typeof fnResult === 'string' ? fnResult : JSON.stringify(fnResult, null, 2);
@@ -3676,6 +3691,23 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
 
   _stepLog('start', `msg="${message.substring(0, 80)}" userId=${userId} historyLen=${history.length}`);
 
+  // ── Arrêt d'urgence (kill switch) : aucune génération, aucun outil ─────
+  // Vérifié avant tout appel LLM : l'arrêt prend effet immédiatement, sans redémarrage.
+  if (await isKillSwitchActive()) {
+    _stepLog('kill-switch', 'blocked');
+    return {
+      reply: "L'assistant est temporairement désactivé par l'administrateur. Vous pouvez continuer à utiliser l'ERP normalement.",
+      intent: 'general',
+      action: null,
+      widget: null,
+      sources: [],
+      citedTicketIds: [],
+      citedKnowledgeIds: [],
+      pendingTicketData: null,
+      killSwitch: true,
+    };
+  }
+
   // Nettoyer d'éventuels préfixes de contexte de navigation injectés en mode vocal (ex: "[Contexte navigation — ...]")
   let cleanMessage = message || '';
   if (cleanMessage.startsWith('[Contexte navigation')) {
@@ -3741,8 +3773,31 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
       }
       _stepLog('confirm-action', `tool=${tool} args=${JSON.stringify(args || {}).substring(0, 200)}`);
       try {
-        const result = await executeTool(tool, args, currentUser, { confirmed: true });
-        const resultText = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
+        const execTool = () => executeTool(tool, args, currentUser, { confirmed: true });
+        // Idempotence : une confirmation rejouée (double clic, retry, reprise après crash)
+        // ne doit pas créer deux suivis ni envoyer deux rapports.
+        let result;
+        if (isIdempotentTool(tool)) {
+          const { value } = await runIdempotent(
+            {
+              scope: 'tool-call',
+              key: `${userId || 'anon'}:${tool}:${hashPayload(args || {})}`,
+              userId: userId || null,
+              payload: args || {},
+              ttlMs: 10 * 60 * 1000,
+            },
+            execTool
+          );
+          result = value;
+        } else {
+          result = await execTool();
+        }
+        if (!(result && result.denied)) {
+          recordToolExecution({ tool, user: currentUser, source: 'chat' }).catch(() => {});
+        }
+        const resultText = (result && result.denied)
+          ? result.message
+          : (typeof result === 'string' ? result : JSON.stringify(result, null, 2));
         // Nettoyer le state de confirmation
         await setConversationState(stateKey, 'general', {}, []);
         return {
@@ -4257,6 +4312,8 @@ module.exports = {
   resolveCanonicalTeamName,
   buildSearchQuery,
   executeTool,
+  CHATBOT_TOOLS,
+  WRITE_ACTION_TOOLS,
   parsePeriodFromText,
   normalizePeriod,
   describePeriod,

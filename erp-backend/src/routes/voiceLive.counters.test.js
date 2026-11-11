@@ -98,6 +98,10 @@ jest.mock('../services/chatbotService', () => ({
 const { __db: db } = require('../prismaClient');
 const { executeTool, fetchVoiceSnapshot } = require('./voiceLive.routes');
 
+// Les outils vocaux exigent une identité (passerelle d'autorisation) : les tests
+// de compteurs utilisent un technicien authentifié.
+const VOICE_TEST_USER = { sub: 2, role: 'TECHNICIAN', email: 'tech@prosuma.ci' };
+
 const t = (over = {}) => ({
   title: 'Ticket',
   status: 'OPEN',
@@ -144,7 +148,7 @@ describe('Voice — les chiffres annoncés à l\'oral respectent le périmètre 
   });
 
   it('get_ticket_count : « ouverts » = 5 statuts ouverts (PENDING/WAITING inclus)', async () => {
-    const r = await executeTool('get_ticket_count', {});
+    const r = await executeTool('get_ticket_count', {}, { user: VOICE_TEST_USER });
     expect(r.ouverts).toBe(4);      // ids 1, 2, 5, 7
     expect(r.enAttente).toBe(1);    // id 2 (sous-ensemble des ouverts)
     expect(r.total).toBe(5);
@@ -153,7 +157,7 @@ describe('Voice — les chiffres annoncés à l\'oral respectent le périmètre 
   });
 
   it('generate_report vocal : « ouverts » = même définition que le dashboard', async () => {
-    const r = await executeTool('generate_report', {});
+    const r = await executeTool('generate_report', {}, { user: VOICE_TEST_USER });
     expect(r.total).toBe(5);
     expect(r.ouverts).toBe(4);
     expect(r.fermes).toBe(1);
@@ -161,8 +165,8 @@ describe('Voice — les chiffres annoncés à l\'oral respectent le périmètre 
 
   it('les trois sources annoncent le même nombre d\'ouverts', async () => {
     const snap = await fetchVoiceSnapshot(null);
-    const count = await executeTool('get_ticket_count', {});
-    const report = await executeTool('generate_report', {});
+    const count = await executeTool('get_ticket_count', {}, { user: VOICE_TEST_USER });
+    const report = await executeTool('generate_report', {}, { user: VOICE_TEST_USER });
     expect(snap.open).toBe(count.ouverts);
     expect(snap.open).toBe(report.ouverts);
   });
