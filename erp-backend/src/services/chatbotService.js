@@ -1619,7 +1619,13 @@ async function executeTool(toolName, args, user, { confirmed = false } = {}, ctx
   // ── Passerelle d'autorisation (politique serveur, indépendante du modèle) ──
   // Refus par défaut pour un outil inconnu, arrêt d'urgence, écritures coupées,
   // outil désactivé par l'admin ou permission manquante.
-  const decision = await authorizeToolCall({ tool: toolName, user, source: ctx.source || 'chat' });
+  const decision = await authorizeToolCall({
+    tool: toolName,
+    user,
+    source: ctx.source || 'chat',
+    sessionKey: ctx.sessionKey,
+    confirmed,
+  });
   if (!decision.allowed) {
     return { denied: true, code: decision.code, message: decision.message };
   }
@@ -2211,7 +2217,10 @@ async function callAIWithTools(messages, options = {}) {
       let fnResult;
       try {
         emitTool(fnName, 'start');
-        fnResult = await executeTool(fnName, fnArgs, options.user, {}, { collectSource });
+        fnResult = await executeTool(fnName, fnArgs, options.user, {}, {
+          collectSource,
+          sessionKey: options._stateKey,
+        });
         emitTool(fnName, 'done');
       } catch (err) {
         emitTool(fnName, 'error');
@@ -2227,7 +2236,12 @@ async function callAIWithTools(messages, options = {}) {
 
       // Trace d'audit des exécutions sensibles (écriture / effet externe).
       if (!(fnResult && fnResult.denied)) {
-        recordToolExecution({ tool: fnName, user: options.user, source: 'chat' }).catch(() => {});
+        recordToolExecution({
+          tool: fnName,
+          user: options.user,
+          source: 'chat',
+          sessionKey: options._stateKey,
+        }).catch(() => {});
       }
 
       const resultText = typeof fnResult === 'string' ? fnResult : JSON.stringify(fnResult, null, 2);

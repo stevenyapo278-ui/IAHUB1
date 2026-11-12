@@ -128,11 +128,94 @@ async function auditGranted({ tool, user, source }) {
   }
 }
 
+// ── Contrôle des enchaînements et marquage de provenance (mesures 5.3) ──────
+// Une action autorisée isolément peut être dangereuse en séquence : lire des
+// données internes puis les envoyer à l'extérieur est le schéma type
+// d'exfiltration. On propage donc, PAR SESSION, un marquage (taint) des données
+// qui sont entrées dans le contexte, et on refuse les actions à effet externe
+// tant que ce marquage est actif — sauf confirmation humaine explicite.
+//
+// État en mémoire, volontairement non persistant : le marquage meurt avec la
+// session (TTL 30 min) et ne peut pas être réutilisé d'une conversation à l'autre.
+const TAINT_TTL_MS = 30 * 60 * 1000;
+const TAINT_STORE = new Map(); // sessionKey -> { labels: Set<string>, at: number }
+
+// Outils qui font entrer dans le contexte des données sensibles (`confidential`)
+// ou du contenu d'origine externe/non fiable (`untrusted`).
+const TAINT_RULES = Object.freeze({
+  search_emails: ['confidential', 'untrusted'],       // corps d'e-mails de demandeurs
+  get_ticket_summary: ['untrusted'],                  // contenu rédigé par des tiers
+  get_ticket_links: ['untrusted'],
+  check_ticket: ['untrusted'],
+  search_tickets: ['untrusted'],
+  find_similar_tickets: ['untrusted'],
+  search_knowledge: ['untrusted'],
+  get_ticket_time_entries: ['confidential'],          // temps passés, coûts internes
+  search_users: ['confidential'],                     // données personnelles
+  search_inventory: ['confidential'],                 // parc, numéros de série
+  analyze_root_cause: ['confidential', 'untrusted'],
+});
+
+// Marques qui interdisent une action à effet externe tant qu'elles sont actives.
+const EXTERNAL_BLOCKED_BY = Object.freeze(['confidential', 'untrusted']);
+
+function pruneTaint(now = Date.now()) {
+  for (const [key, entry] of TAINT_STORE) {
+    if (now - entry.at > TAINT_TTL_MS) TAINT_STORE.delete(key);
+  }
+}
+
+function resolveSessionKey(sessionKey, user) {
+  if (sessionKey) return String(sessionKey);
+  const id = user?.sub ?? user?.id;
+  // Repli par utilisateur : une session sans identifiant explicite (vocal, script)
+  // ne doit pas échapper au marquage.
+  return id != null ? `user:${id}` : 'anonymous';
+}
+
+/**
+ * Enregistre le marquage d'un outil qui vient d'être exécuté avec succès.
+ * @returns {string[]} labels appliqués
+ */
+function recordToolTaint({ tool, user, sessionKey } = {}) {
+  const labels = TAINT_RULES[tool];
+  if (!labels || labels.length === 0) return [];
+  const key = resolveSessionKey(sessionKey, user);
+  const now = Date.now();
+  pruneTaint(now);
+  const entry = TAINT_STORE.get(key) || { labels: new Set(), at: now };
+  for (const l of labels) entry.labels.add(l);
+  entry.at = now;
+  TAINT_STORE.set(key, entry);
+  return [...entry.labels];
+}
+
+function getSessionTaint({ user, sessionKey } = {}) {
+  const key = resolveSessionKey(sessionKey, user);
+  const entry = TAINT_STORE.get(key);
+  if (!entry) return [];
+  if (Date.now() - entry.at > TAINT_TTL_MS) {
+    TAINT_STORE.delete(key);
+    return [];
+  }
+  return [...entry.labels];
+}
+
+function resetSessionTaint({ user, sessionKey } = {}) {
+  TAINT_STORE.delete(resolveSessionKey(sessionKey, user));
+}
+
 /**
  * Évalue une demande d'exécution d'outil. Ne lève jamais : renvoie une décision.
+ * @param {object} params
+ * @param {string} params.tool
+ * @param {object} [params.user]
+ * @param {string} [params.source]
+ * @param {string} [params.sessionKey] identifiant de session/conversation
+ * @param {boolean} [params.confirmed] action confirmée explicitement par l'utilisateur
  * @returns {Promise<{allowed: boolean, code?: string, message?: string, tool?: object}>}
  */
-async function authorizeToolCall({ tool, user, source = 'chat' }) {
+async function authorizeToolCall({ tool, user, source = 'chat', sessionKey, confirmed = false }) {
   const name = String(tool || '');
   const definition = TOOL_REGISTRY[name];
   const actor = normalizeUser(user);
@@ -198,6 +281,37 @@ async function authorizeToolCall({ tool, user, source = 'chat' }) {
     }
   }
 
+  // ── Contrôle des enchaînements : lecture sensible/non fiable → action externe ──
+  if (definition.kind === EXTERNAL) {
+    const taint = getSessionTaint({ user: actor, sessionKey });
+    const blocking = taint.filter((label) => EXTERNAL_BLOCKED_BY.includes(label));
+    if (blocking.length > 0) {
+      if (!confirmed) {
+        await auditDenied({ tool: name, code: 'SEQUENCE_DENIED', user: actor, source });
+        logger.warn(
+          `[toolPolicy] Enchaînement refusé : ${name} après lecture (${blocking.join(', ')}) — source=${source}`
+        );
+        return {
+          allowed: false,
+          code: 'SEQUENCE_DENIED',
+          message:
+            "Cette session a déjà lu des données internes : je ne peux pas les envoyer à l'extérieur sans votre confirmation explicite.",
+        };
+      }
+      // Confirmation humaine : on trace le contournement pour l'audit.
+      try {
+        await auditLog('AI_SEQUENCE_CONFIRMED', {
+          actor: actor ? { id: actor.id, email: actor.email } : null,
+          targetType: 'Tool',
+          targetLabel: name,
+          metadata: { tool: name, taint: blocking, source: source || 'chat' },
+        });
+      } catch (err) {
+        logger.warn(`[toolPolicy] Audit de confirmation impossible : ${err.message}`);
+      }
+    }
+  }
+
   return { allowed: true, tool: { name, ...definition } };
 }
 
@@ -205,9 +319,18 @@ async function authorizeToolCall({ tool, user, source = 'chat' }) {
  * Variante pour les sites d'appel : journalise l'exécution des outils sensibles.
  * À appeler APRÈS une exécution réussie.
  */
-async function recordToolExecution({ tool, user, source = 'chat' }) {
+async function recordToolExecution({ tool, user, source = 'chat', sessionKey }) {
   const definition = TOOL_REGISTRY[tool];
-  if (!definition || definition.risk < 2) return;
+  if (!definition) return;
+
+  // Marquage de provenance AVANT le filtre de risque : un outil de lecture peu
+  // risqué (résumé de ticket) fait quand même entrer du contenu non fiable.
+  const labels = recordToolTaint({ tool, user, sessionKey });
+  if (labels.length > 0 && TAINT_RULES[tool]?.length) {
+    logger.info(`[toolPolicy] Taint session après ${tool} : ${labels.join(', ')}`);
+  }
+
+  if (definition.risk < 2) return;
   await auditGranted({ tool, user: normalizeUser(user), source });
 }
 
@@ -230,6 +353,10 @@ module.exports = {
   TOOL_REGISTRY,
   authorizeToolCall,
   recordToolExecution,
+  recordToolTaint,
+  getSessionTaint,
+  resetSessionTaint,
+  TAINT_RULES,
   isKillSwitchActive,
   invalidatePolicyCache,
   isKnownTool,

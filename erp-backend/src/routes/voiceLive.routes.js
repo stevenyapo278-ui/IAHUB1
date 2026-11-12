@@ -452,11 +452,22 @@ Ne réponds JAMAIS de mémoire : appelle toujours cet outil pour les chiffres.`,
   },
 ];
 
+// Identifiant de session stable par connexion WebSocket : le marquage de provenance
+// (taint) doit suivre la conversation vocale, pas seulement l'utilisateur.
+const VOICE_SESSION_KEYS = new WeakMap();
+function voiceSessionKey(ws) {
+  if (!ws) return undefined;
+  if (!VOICE_SESSION_KEYS.has(ws)) {
+    VOICE_SESSION_KEYS.set(ws, `voice:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 10)}`);
+  }
+  return VOICE_SESSION_KEYS.get(ws);
+}
+
 async function executeTool(name, args, { user = null, sessionHistory = null, ws = null, toolCtx = null } = {}) {
   // ── Passerelle d'autorisation (politique serveur, indépendante du modèle) ──
   // Même registre que le chatbot texte : refus par défaut d'un outil inconnu,
   // arrêt d'urgence, écritures coupées, outil désactivé, authentification requise.
-  const decision = await authorizeToolCall({ tool: name, user, source: 'voice' });
+  const decision = await authorizeToolCall({ tool: name, user, source: 'voice', sessionKey: voiceSessionKey(ws) });
   if (!decision.allowed) {
     logger.warn(`[voice-live] Outil refusé (${name}) : ${decision.code}`);
     return { denied: true, code: decision.code, message: decision.message };
@@ -1687,7 +1698,12 @@ function setupVoiceLive() {
                           result = await execVoiceTool();
                         }
                         if (!(result && result.denied)) {
-                          recordToolExecution({ tool: fcName, user: currentUser, source: 'voice' }).catch(() => {});
+                          recordToolExecution({
+                            tool: fcName,
+                            user: currentUser,
+                            source: 'voice',
+                            sessionKey: voiceSessionKey(ws),
+                          }).catch(() => {});
                         }
                         // Retour visuel côté front : fin du chip « Marie utilise… » + payload
                         // sanitisé (cartes) si l'outil a un résultat affichable.
