@@ -473,6 +473,66 @@ function consumeLastAiUsage() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// FILTRE DLP — appliqué une seule fois, avant tout envoi au modèle hébergé
+// ═══════════════════════════════════════════════════════════════════════════
+// Mesure ANSSI 4.5 : les données transmises à un modèle hébergé sont réputées
+// accessibles au fournisseur. Le masquage est fait ici, au point d'envoi unique,
+// donc identique pour le chat, les pipelines e-mail et les analyses de pièces jointes.
+function applyDlp({ prompt, messages, system, usage, source }) {
+  const { redactForModel, redactMessages } = require('./dlpFilter');
+
+  const merged = {};
+  const merge = (f) => {
+    for (const [k, v] of Object.entries(f || {})) merged[k] = (merged[k] || 0) + v;
+  };
+  const redactOne = (value) => {
+    if (typeof value !== 'string') return value;
+    const res = redactForModel(value);
+    merge(res.findings);
+    return res.text;
+  };
+
+  let outPrompt = prompt;
+  let outMessages = messages;
+  let outSystem = system;
+  let failed = false;
+
+  try {
+    outPrompt = redactOne(prompt);
+    outSystem = redactOne(system);
+    if (Array.isArray(messages)) {
+      const res = redactMessages(messages);
+      outMessages = res.messages;
+      merge(res.findings);
+    }
+  } catch (err) {
+    failed = true;
+    logger.error(`[DLP] Échec du filtrage (${source || usage || 'n/a'}) : ${err.message}`);
+  }
+
+  if (failed) {
+    // Fail-closed par défaut : mieux vaut refuser l'envoi que transmettre des données
+    // non filtrées. Dérogation explicite possible pour ne pas bloquer l'IA en urgence.
+    if (String(process.env.AI_DLP_FAIL_OPEN || '').toLowerCase() === 'true') {
+      logger.warn('[DLP] AI_DLP_FAIL_OPEN=true — envoi NON filtré (dérogation).');
+      return { prompt, messages, system };
+    }
+    throw new Error('Filtre DLP indisponible : envoi au modèle bloqué (AI_DLP_FAIL_OPEN pour déroger).');
+  }
+
+  const categories = Object.keys(merged);
+  if (categories.length > 0) {
+    // On journalise les CATÉGORIES et le nombre d'occurrences, jamais les valeurs.
+    logger.warn(
+      `[DLP] Données masquées avant envoi (${source || usage || 'n/a'}) : ` +
+        categories.map((c) => `${c}=${merged[c]}`).join(', ')
+    );
+  }
+
+  return { prompt: outPrompt, messages: outMessages, system: outSystem };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // FALLBACK INTER-PROVIDERS (avec skip cooldown)
 // ═══════════════════════════════════════════════════════════════════════════
 async function callProviderWithFallback(providers, prompt, usage = 'email', options = {}) {
@@ -487,6 +547,10 @@ async function callProviderWithFallback(providers, prompt, usage = 'email', opti
   }
 
   const { forcedModelId, messages, system, responseFormat, tools, toolChoice, source } = options;
+
+  // Filtre DLP : une seule passe, avant la boucle de providers.
+  const filtered = applyDlp({ prompt, messages, system, usage, source });
+
   const errors = [];
   for (const provider of providers) {
     // Skip les providers en cooldown 429
@@ -495,7 +559,9 @@ async function callProviderWithFallback(providers, prompt, usage = 'email', opti
       continue;
     }
     try {
-      const result = await callProvider(provider, prompt, usage, forcedModelId, { messages, system, responseFormat, tools, toolChoice });
+      const result = await callProvider(provider, filtered.prompt, usage, forcedModelId, {
+        messages: filtered.messages, system: filtered.system, responseFormat, tools, toolChoice,
+      });
       if (errors.length > 0) {
         logger.warn(`[AI] Fallback utilisé : "${provider.label}" a répondu après ${errors.length} échec(s)`);
       }
