@@ -36,14 +36,20 @@ export function createXmasScene(canvas, options = {}) {
     sparks: true,
     // Mode « vignette » (sidebar) : moins de particules, DPR et fps réduits.
     compact: false,
+    // Sapin seul sur fond transparent (sidebar) : pas de ciel, ni neige, ni cadeaux.
+    bare: false,
+    // Mélange des halos/guirlandes : « lighter » sur ciel nocturne, « source-over »
+    // sur fond clair où l'additif délave le sapin.
+    glowBlend: null,
     ...options,
   };
+  if (!opts.glowBlend) opts.glowBlend = opts.bare ? 'source-over' : 'lighter';
 
   if (!canvas || typeof canvas.getContext !== 'function') {
     return { destroy() {}, startMusic: () => false, stopMusic() {}, isMusicPlaying: () => false };
   }
 
-  const ctx = canvas.getContext('2d', { alpha: false });
+  const ctx = canvas.getContext('2d', opts.bare ? { alpha: true } : { alpha: false });
   const reduceMotion =
     typeof window !== 'undefined' &&
     typeof window.matchMedia === 'function' &&
@@ -94,8 +100,9 @@ export function createXmasScene(canvas, options = {}) {
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
 
     cx = W * 0.5;
-    baseY = H * 0.815;
-    treeH = Math.min(H * 0.7, W * 1.22);
+    // En mode bare, le sapin est posé plus bas pour laisser respirer l'étoile.
+    baseY = H * (opts.bare ? 0.9 : 0.815);
+    treeH = Math.min(H * (opts.bare ? 0.78 : 0.7), W * (opts.bare ? 1.06 : 1.22));
     RMAX = Math.min(treeH * 0.386, W * 0.43);
 
     buildSky();
@@ -119,6 +126,7 @@ export function createXmasScene(canvas, options = {}) {
 
   function buildStars() {
     stars = [];
+    if (opts.bare) return;
     const n = Math.min(600, Math.max(opts.compact ? 14 : 6, Math.round((W * H) / 9000)));
     for (let i = 0; i < n; i++) {
       stars.push({
@@ -134,7 +142,7 @@ export function createXmasScene(canvas, options = {}) {
 
   function buildSnow() {
     snow = [];
-    if (!opts.snow) return;
+    if (!opts.snow || opts.bare) return;
     const n = Math.round(
       clamp((W * H) / (opts.compact ? 2600 : 5200), opts.compact ? 45 : 120, 460)
     );
@@ -156,6 +164,7 @@ export function createXmasScene(canvas, options = {}) {
 
   function buildBokeh() {
     bokeh = [];
+    if (opts.bare) return;
     const count = opts.compact ? 8 : 16;
     for (let i = 0; i < count; i++) {
       bokeh.push({
@@ -173,7 +182,7 @@ export function createXmasScene(canvas, options = {}) {
   // ---------------------------------------------------------------- presents
   function buildPresents() {
     presents = [];
-    if (!opts.presents) return;
+    if (!opts.presents || opts.bare) return;
     const s = clamp(treeH * 0.055, opts.compact ? 9 : 22, 62);
     const spots = [
       { dx: -RMAX * 0.94, w: s * 1.25, h: s * 0.95, c1: '#8e1f36', c2: '#c8394f', rib: '#ffd98a' },
@@ -743,11 +752,12 @@ export function createXmasScene(canvas, options = {}) {
   }
 
   function drawLights(time, front) {
-    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalCompositeOperation = opts.glowBlend;
 
-    // tinsel (fines paillettes le long d'une spirale)
+    // tinsel (fines paillettes le long d'une spirale) — masqué en bare : ces
+    // paillettes blanches forment un voile laiteux sur un fond clair.
     const white = glowSprite('255,248,220');
-    for (const p of tinsel) {
+    for (const p of opts.bare ? [] : tinsel) {
       const x = cx + radiusAt(p.f) * Math.sin(p.a) * 0.99;
       const depth = Math.cos(p.a);
       if ((depth > 0.05) !== front) continue;
@@ -773,7 +783,9 @@ export function createXmasScene(canvas, options = {}) {
       const v = bulbIntensity(l, time) * (isFront ? 1 : 0.34);
       const s = l.size * (isFront ? 1 : 0.72);
 
-      stamp(l.sprite, x, y, s * 9 * (0.6 + 0.9 * v), 0.9 * v);
+      // Halo réduit en bare : sur du blanc, un grand halo additif délave le sapin.
+      const haloScale = opts.bare ? 3.2 : 9;
+      stamp(l.sprite, x, y, s * haloScale * (0.6 + 0.9 * v), (opts.bare ? 0.4 : 0.9) * v);
 
       ctx.globalAlpha = clamp(0.45 + v, 0, 1);
       ctx.fillStyle = l.col.c;
@@ -783,7 +795,7 @@ export function createXmasScene(canvas, options = {}) {
       ctx.globalAlpha = 1;
 
       if (isFront && v > 0.85) {
-        stamp(white, x, y, s * 2.4, (v - 0.85) * 1.6);
+        stamp(white, x, y, s * 2.4, (v - 0.85) * 1.6 * (opts.glowBlend === 'lighter' ? 1 : 0.5));
       }
     }
     ctx.globalCompositeOperation = 'source-over';
@@ -796,17 +808,26 @@ export function createXmasScene(canvas, options = {}) {
     const pulse = 0.86 + 0.14 * Math.sin(time * 2.1);
     const rot = time * 0.32;
 
-    ctx.globalCompositeOperation = 'lighter';
+    // Sur fond clair (bare), le mode additif blanchit tout : on compose normalement.
+    ctx.globalCompositeOperation = opts.bare ? 'source-over' : 'lighter';
 
-    // grand halo
-    const hg = ctx.createRadialGradient(sx, sy, 0, sx, sy, r * 8.5 * pulse);
-    hg.addColorStop(0, 'rgba(255,244,203,0.55)');
-    hg.addColorStop(0.22, 'rgba(255,206,110,0.20)');
-    hg.addColorStop(1, 'rgba(255,180,60,0)');
-    ctx.fillStyle = hg;
-    ctx.beginPath();
-    ctx.arc(sx, sy, r * 8.5 * pulse, 0, TAU);
-    ctx.fill();
+    // Dans une vignette (sidebar), le halo dépasserait du canvas : on le borne à
+    // l'espace disponible au-dessus de l'étoile pour éviter une coupure nette.
+    const room = Math.max(8, sy - 1);
+    const haloR = Math.min(r * 8.5 * pulse, opts.bare ? room : Infinity);
+    const rayLen = Math.min(r * 4.6, opts.bare ? room : Infinity);
+
+    // grand halo (inutile sur fond clair : il ne resterait qu'un voile)
+    if (!opts.bare) {
+      const hg = ctx.createRadialGradient(sx, sy, 0, sx, sy, haloR);
+      hg.addColorStop(0, 'rgba(255,244,203,0.55)');
+      hg.addColorStop(0.22, 'rgba(255,206,110,0.20)');
+      hg.addColorStop(1, 'rgba(255,180,60,0)');
+      ctx.fillStyle = hg;
+      ctx.beginPath();
+      ctx.arc(sx, sy, haloR, 0, TAU);
+      ctx.fill();
+    }
 
     // rayons tournants
     ctx.save();
@@ -814,13 +835,13 @@ export function createXmasScene(canvas, options = {}) {
     ctx.rotate(rot);
     for (let i = 0; i < 4; i++) {
       ctx.rotate(TAU / 4);
-      const rg = ctx.createLinearGradient(0, 0, r * 4.6, 0);
-      rg.addColorStop(0, 'rgba(255,235,180,0.38)');
+      const rg = ctx.createLinearGradient(0, 0, rayLen, 0);
+      rg.addColorStop(0, opts.bare ? 'rgba(230,170,50,0.40)' : 'rgba(255,235,180,0.38)');
       rg.addColorStop(1, 'rgba(255,220,140,0)');
       ctx.fillStyle = rg;
       ctx.beginPath();
       ctx.moveTo(0, -r * 0.22);
-      ctx.lineTo(r * 4.6, 0);
+      ctx.lineTo(rayLen, 0);
       ctx.lineTo(0, r * 0.22);
       ctx.closePath();
       ctx.fill();
@@ -930,7 +951,7 @@ export function createXmasScene(canvas, options = {}) {
 
   // ---------------------------------------------------------------- sparks
   function emitSparks(x, y, count) {
-    if (!opts.sparks || reduceMotion) return;
+    if (!opts.sparks || opts.bare || reduceMotion) return;
     for (let i = 0; i < count; i++) {
       const a = rand(0, TAU);
       const sp = rand(30, 300) * (Math.random() < 0.3 ? 0.4 : 1);
@@ -1000,7 +1021,32 @@ export function createXmasScene(canvas, options = {}) {
   }
 
   // ---------------------------------------------------------------- loop
+  function drawBare(time) {
+    // Fond transparent : le sapin se pose directement sur la sidebar (claire ou sombre).
+    ctx.clearRect(0, 0, W, H);
+
+    const sway = Math.sin(time * 0.42) * 0.0055;
+    ctx.save();
+    ctx.translate(cx, baseY);
+    ctx.rotate(sway);
+    ctx.translate(-cx, -baseY);
+
+    drawLights(time, false);
+
+    // le sapin (image pré-rendue, donc très fluide)
+    if (treeLayer) ctx.drawImage(treeLayer, 0, 0, W, H);
+
+    drawLights(time, true);
+    drawStar(time);
+    ctx.restore();
+  }
+
   function drawFrame(time, dt) {
+    if (opts.bare) {
+      drawBare(time);
+      return;
+    }
+
     drawSkyLayer(time);
     drawBokehMove(dt);
     drawShootingStar(dt);
@@ -1268,7 +1314,7 @@ export function createXmasScene(canvas, options = {}) {
   resize();
   start();
   // petite pluie d'étincelles d'ouverture sur l'étoile
-  if (!reduceMotion) {
+  if (!reduceMotion && !opts.bare) {
     window.setTimeout(() => {
       if (!destroyed) emitSparks(cx, baseY - treeH * 1.02, 55);
     }, 700);

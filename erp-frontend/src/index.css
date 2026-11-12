@@ -2133,23 +2133,17 @@ html.xmas-on .sidebar-item.active {
 }
 
 /* ── Sapin décoratif du thème de Noël ────────────────────────────────────────
-   Vignette canvas : la scène de `sapin-de-noel.html` (sapin procédural, neige,
-   guirlandes, cadeaux) rendue en mode compact par `createXmasScene`. Le cadre
-   arrondi fait office de « boule à neige » dans la sidebar. */
+   Le sapin de la scène `sapin-de-noel.html` (procédural, guirlandes, étoile)
+   rendu en mode « bare » : canvas transparent, donc il se pose directement sur
+   le fond de la sidebar, sans cadre ni ciel nocturne. */
 .sidebar-tree {
   position: relative;
   flex-shrink: 0;
-  width: calc(100% - 24px);
-  height: 196px;
-  margin: 6px 12px 8px;
-  border-radius: 18px;
-  overflow: hidden;
+  width: 100%;
+  height: 140px;
+  margin: 2px 0 0;
   pointer-events: none;
   z-index: 1;
-  border: 1px solid rgba(212, 175, 55, 0.22);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.07),
-    0 12px 28px -20px rgba(2, 8, 20, 0.95);
 }
 
 .sidebar-tree-canvas {
