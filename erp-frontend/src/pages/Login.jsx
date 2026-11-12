@@ -4,6 +4,7 @@ const VARIANTS = [
   { id: 'hero', loader: () => import('./login/LoginHeroGradient') },
   { id: 'minimal', loader: () => import('./login/LoginMinimalCard') },
   { id: 'particles', loader: () => import('./login/LoginParticles') },
+  { id: 'noel', loader: () => import('./login/LoginXmas') },
 ];
 
 const COMPONENT_CACHE = {};

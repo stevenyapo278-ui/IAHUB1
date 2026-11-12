@@ -14,9 +14,10 @@ import {
   Sparkles,
   Layers,
   Minus,
+  TreePine,
 } from 'lucide-react';
 
-const VALID_VARIANTS = ['hero', 'minimal', 'particles'];
+const VALID_VARIANTS = ['hero', 'minimal', 'particles', 'noel'];
 
 const VARIANT_META = {
   hero: {
@@ -39,6 +40,13 @@ const VARIANT_META = {
     desc: 'Scène WebGPU plein écran — 4096 particules liées suivant le curseur, bloom',
     icon: Atom,
     badge: 'WebGPU',
+  },
+  noel: {
+    label: 'Noël',
+    shortLabel: 'Noël',
+    desc: 'Scène canvas : sapin procédural, guirlandes, neige et cadeaux — berceuse optionnelle',
+    icon: TreePine,
+    badge: 'Saisonnier',
   },
 };
 

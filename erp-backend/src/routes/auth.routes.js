@@ -782,7 +782,7 @@ router.post('/switch-role', authenticate, async (req, res) => {
 // ── Thème de la page de connexion — public (sans auth) ──────────────────────────
 // Utilisé par Login.jsx pour savoir quelle variante afficher selon la config SUPERADMIN.
 // Réponse mise en cache côté client (60s) pour éviter de spammer la DB à chaque refresh.
-const VALID_LOGIN_VARIANTS = ['hero', 'minimal', 'particles'];
+const VALID_LOGIN_VARIANTS = ['hero', 'minimal', 'particles', 'noel'];
 const VALID_LOGIN_MODES = ['daily_rotation', 'fixed', 'random'];
 
 function getLoginDayOfYear(date) {
