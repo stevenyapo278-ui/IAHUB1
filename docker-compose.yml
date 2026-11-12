@@ -119,8 +119,15 @@ services:
       GLPI_USER_TOKEN: ${GLPI_USER_TOKEN:-}
       MCP_TRANSPORT: http
       MCP_PORT: 3333
+      # Écoute dans le conteneur : nécessaire pour être joignable via le mapping de port.
+      MCP_HOST: 0.0.0.0
+      # Authentification obligatoire (mesure ANSSI 5.4) : sans jeton, le serveur
+      # refuse de démarrer. Générer avec : openssl rand -hex 32
+      MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN:-}
     ports:
-      - "${MCP_GLPI_PORT:-3333}:3333"
+      # Exposé sur la boucle locale de l'hôte uniquement : le serveur MCP n'a pas
+      # vocation à être joint depuis le réseau. Le jeton reste la seconde barrière.
+      - "127.0.0.1:${MCP_GLPI_PORT:-3333}:3333"
     networks:
       - ia-hub-network
 

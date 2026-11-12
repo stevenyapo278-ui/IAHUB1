@@ -1,0 +1,68 @@
+{
+  "name": "mcp-glpi",
+  "version": "2.0.0",
+  "description": "Full-featured MCP Server for GLPI - Complete IT Service Management integration with Claude (Tickets, Problems, Changes, Assets, Knowledge Base, Contracts, Projects)",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "mcp-glpi": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc --watch",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts",
+    "prepublishOnly": "npm run build",
+    "lint": "eslint src/**/*.ts",
+    "test": "npm run build && node --test dist/httpAuth.test.js"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "glpi",
+    "itsm",
+    "itil",
+    "helpdesk",
+    "service-desk",
+    "tickets",
+    "incidents",
+    "problems",
+    "changes",
+    "assets",
+    "inventory",
+    "cmdb",
+    "knowledge-base",
+    "contracts",
+    "projects",
+    "claude",
+    "anthropic",
+    "ai",
+    "llm",
+    "automation"
+  ],
+  "author": "GMS64260",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/GMS64260/mcp-glpi.git"
+  },
+  "bugs": {
+    "url": "https://github.com/GMS64260/mcp-glpi/issues"
+  },
+  "homepage": "https://github.com/GMS64260/mcp-glpi#readme",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "typescript": "^5.3.0"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ]
+}
