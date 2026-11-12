@@ -13,6 +13,7 @@ import { createXmasScene } from '../lib/xmasScene';
  * @param {boolean} [props.snow]      Active la neige (défaut true).
  * @param {boolean} [props.presents]  Affiche les cadeaux au pied du sapin (défaut true).
  * @param {boolean} [props.sparks]    Étincelles au survol/clic (défaut true).
+ * @param {boolean} [props.compact]   Mode vignette (sidebar) : moins de particules, 30 fps.
  * @param {(api: object) => void} [props.onReady] Reçoit l'API (musique, resize…).
  */
 export default function XmasScene({
@@ -21,6 +22,7 @@ export default function XmasScene({
   snow = true,
   presents = true,
   sparks = true,
+  compact = false,
   onReady,
 }) {
   const canvasRef = useRef(null);
@@ -31,13 +33,13 @@ export default function XmasScene({
     const canvas = canvasRef.current;
     if (!canvas) return undefined;
 
-    const api = createXmasScene(canvas, { snow, presents, sparks });
+    const api = createXmasScene(canvas, { snow, presents, sparks, compact });
     onReadyRef.current?.(api);
 
     return () => {
       api.destroy();
     };
-  }, [snow, presents, sparks]);
+  }, [snow, presents, sparks, compact]);
 
   return (
     <div className={`xmas-scene ${className}`.trim()}>

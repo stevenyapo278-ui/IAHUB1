@@ -34,6 +34,8 @@ export function createXmasScene(canvas, options = {}) {
     snow: true,
     presents: true,
     sparks: true,
+    // Mode « vignette » (sidebar) : moins de particules, DPR et fps réduits.
+    compact: false,
     ...options,
   };
 
@@ -70,6 +72,7 @@ export function createXmasScene(canvas, options = {}) {
   let rafId = 0;
   let T = 0;
   let last = 0;
+  let lastDraw = 0;
   let destroyed = false;
 
   // ---------------------------------------------------------------- geometry
@@ -83,7 +86,7 @@ export function createXmasScene(canvas, options = {}) {
     const cssW = Math.max(1, Math.round(rect.width || canvas.clientWidth || 1));
     const cssH = Math.max(1, Math.round(rect.height || canvas.clientHeight || 1));
 
-    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    DPR = Math.min(window.devicePixelRatio || 1, opts.compact ? 1.5 : 2);
     W = cssW;
     H = cssH;
     canvas.width = Math.round(W * DPR);
@@ -116,7 +119,7 @@ export function createXmasScene(canvas, options = {}) {
 
   function buildStars() {
     stars = [];
-    const n = Math.round((W * H) / 9000);
+    const n = Math.min(600, Math.max(opts.compact ? 14 : 6, Math.round((W * H) / 9000)));
     for (let i = 0; i < n; i++) {
       stars.push({
         x: Math.random() * W,
@@ -132,7 +135,9 @@ export function createXmasScene(canvas, options = {}) {
   function buildSnow() {
     snow = [];
     if (!opts.snow) return;
-    const n = Math.round(clamp((W * H) / 5200, 120, 460));
+    const n = Math.round(
+      clamp((W * H) / (opts.compact ? 2600 : 5200), opts.compact ? 45 : 120, 460)
+    );
     for (let i = 0; i < n; i++) {
       const depth = Math.random();
       snow.push({
@@ -151,11 +156,12 @@ export function createXmasScene(canvas, options = {}) {
 
   function buildBokeh() {
     bokeh = [];
-    for (let i = 0; i < 16; i++) {
+    const count = opts.compact ? 8 : 16;
+    for (let i = 0; i < count; i++) {
       bokeh.push({
         x: Math.random() * W,
         y: Math.random() * H,
-        r: rand(28, 110),
+        r: rand(28, 110) * (opts.compact ? 0.55 : 1),
         a: rand(0.02, 0.075),
         vy: rand(-14, -3),
         ph: rand(0, TAU),
@@ -168,14 +174,15 @@ export function createXmasScene(canvas, options = {}) {
   function buildPresents() {
     presents = [];
     if (!opts.presents) return;
-    const s = clamp(treeH * 0.055, 22, 62);
+    const s = clamp(treeH * 0.055, opts.compact ? 9 : 22, 62);
     const spots = [
       { dx: -RMAX * 0.94, w: s * 1.25, h: s * 0.95, c1: '#8e1f36', c2: '#c8394f', rib: '#ffd98a' },
       { dx: -RMAX * 0.55, w: s * 0.9, h: s * 0.72, c1: '#1c5c63', c2: '#2f8f92', rib: '#ffe9b8' },
       { dx: RMAX * 0.62, w: s * 1.1, h: s * 1.02, c1: '#8a5a17', c2: '#c8973a', rib: '#f7e6c4' },
       { dx: RMAX * 1.02, w: s * 0.78, h: s * 0.62, c1: '#4a2a63', c2: '#7a4f9c', rib: '#ffd98a' },
     ];
-    presents = spots;
+    // Vignette : deux cadeaux suffisent, quatre encombreraient un sapin de 100 px.
+    presents = opts.compact ? [spots[0], spots[2]] : spots;
   }
 
   // ---------------------------------------------------------------- the fir
@@ -479,21 +486,24 @@ export function createXmasScene(canvas, options = {}) {
       ['#c48bff', '#492a72'],
       ['#ff2f4f', '#6d0a1d'],
     ];
-    const n = 14;
+    // Les boules suivent la taille du sapin : à 133 px de haut (sidebar), des boules
+    // de 9 px de rayon écraseraient les branches.
+    const k = clamp(treeH / 630, 0.18, 1);
+    const n = opts.compact ? 9 : 14;
     for (let i = 0; i < n; i++) {
       const f = 0.22 + 0.7 * Math.random();
       const side = Math.random() < 0.5 ? -1 : 1;
       const x = side * radiusAt(f) * rand(0.34, 0.86);
       const y = localY(f) + rand(-treeH * 0.012, treeH * 0.012);
-      const r = rand(5.0, 9.6) * clamp(f + 0.5, 0.72, 1.25);
+      const r = rand(5.0, 9.6) * clamp(f + 0.5, 0.72, 1.25) * k;
       const [hi, lo] = pick(palette);
 
       // fil
       c.strokeStyle = 'rgba(255,240,200,0.20)';
-      c.lineWidth = 0.8;
+      c.lineWidth = Math.max(0.4, 0.8 * k);
       c.beginPath();
       c.moveTo(x, y - r);
-      c.lineTo(x + rand(-3, 3), y - r - rand(5, 11));
+      c.lineTo(x + rand(-3, 3) * k, y - r - rand(5, 11) * k);
       c.stroke();
 
       const gr = c.createRadialGradient(x - r * 0.36, y - r * 0.42, r * 0.08, x, y, r * 1.12);
@@ -523,7 +533,7 @@ export function createXmasScene(canvas, options = {}) {
   // ---------------------------------------------------------------- lights
   function buildLights() {
     lights = [];
-    const n = Math.round(clamp(RMAX * 0.55, 90, 190));
+    const n = Math.round(clamp(RMAX * 0.55, opts.compact ? 30 : 90, 190));
     const turns = 8.2;
     for (let i = 0; i < n; i++) {
       const u = i / n;
@@ -544,7 +554,7 @@ export function createXmasScene(canvas, options = {}) {
     }
 
     tinsel = [];
-    const m = Math.round(clamp(RMAX * 0.7, 110, 240));
+    const m = Math.round(clamp(RMAX * 0.7, opts.compact ? 40 : 110, 240));
     for (let i = 0; i < m; i++) {
       const u = i / m;
       const a = u * 11.5 * TAU + 2.2;
@@ -1041,6 +1051,14 @@ export function createXmasScene(canvas, options = {}) {
   function frame(now) {
     if (destroyed) return;
     if (!last) last = now;
+
+    // Vignette de sidebar : 30 fps suffisent et divisent la charge CPU par deux.
+    if (opts.compact && now - lastDraw < 1000 / 30) {
+      rafId = window.requestAnimationFrame(frame);
+      return;
+    }
+    lastDraw = now;
+
     let dt = (now - last) / 1000;
     last = now;
     dt = clamp(dt, 0, 0.05);

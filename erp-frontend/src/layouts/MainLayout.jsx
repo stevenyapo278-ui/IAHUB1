@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense } fro
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import MarieLoader from '../components/MarieLoader';
-import XmasTree from '../components/XmasTree';
+import XmasScene from '../components/XmasScene';
 import {
   LayoutDashboard,
   Ticket,
@@ -515,16 +515,11 @@ export default function MainLayout() {
           )}
         </nav>
 
-        {/* Sapin décoratif (thème de Noël) */}
+        {/* Sapin décoratif (thème de Noël) — même scène canvas que la page de connexion,
+            en mode compact : sapin procédural, neige et guirlandes animées. */}
         {xmas.active && (
           <div className="sidebar-tree" aria-hidden="true">
-            {/* SVG et non emoji 🎄 : le rendu d'un emoji dépend de la police du système
-                (Apple/Segoe/Noto) et change donc d'une machine à l'autre. */}
-            <XmasTree className="sidebar-tree-svg" />
-            <span className="sidebar-tree-bulb sidebar-tree-bulb--1" />
-            <span className="sidebar-tree-bulb sidebar-tree-bulb--2" />
-            <span className="sidebar-tree-bulb sidebar-tree-bulb--3" />
-            <span className="sidebar-tree-bulb sidebar-tree-bulb--4" />
+            <XmasScene compact sparks={false} className="sidebar-tree-canvas" />
           </div>
         )}
 
