@@ -1,0 +1,44 @@
+# =============================================================================
+# IA Hub — Budibase (miroir des déclarations de comptes applicatifs)
+# =============================================================================
+# Overlay optionnel : ajoute Budibase à la stack IA Hub sur le MÊME réseau Docker,
+# sans exposer l'interface au public. L'ERP joint Budibase par son nom de service
+# (http://budibase:80), donc aucun TLS interne n'est nécessaire.
+#
+# Usage (toujours avec le compose principal, même projet) :
+#   docker compose -f docker-compose.yml -f docker-compose.budibase.yml up -d
+#   docker compose -f docker-compose.production.yml -f docker-compose.budibase.yml up -d
+#   docker compose -f docker-compose.dokploy.yml -f docker-compose.budibase.yml up -d
+#
+# Accès administrateur au builder (sans exposer le port) :
+#   ssh -L 10000:127.0.0.1:10000 <user>@<hôte>
+#   puis http://localhost:10000/builder
+#
+# IMPORTANT :
+#   • Épingler l'image après validation (BUDIBASE_IMAGE=budibase/budibase:<tag>).
+#     `latest` peut casser l'API publique entre deux redéploiements.
+#   • Le volume `budibase_data` contient CouchDB + MinIO + Redis : à sauvegarder.
+#   • Ne pas publier le port sur 0.0.0.0 : l'API publique contourne l'authentification
+#     prévue pour les utilisateurs de l'app.
+# =============================================================================
+
+services:
+  budibase:
+    image: ${BUDIBASE_IMAGE:-budibase/budibase:latest}
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Africa/Abidjan}
+    volumes:
+      - budibase_data:/data
+    networks:
+      - ia-hub-network
+    ports:
+      # Écoute uniquement sur la boucle locale de l'hôte : accès admin par tunnel SSH.
+      - "127.0.0.1:${BUDIBASE_PORT:-10000}:80"
+
+networks:
+  ia-hub-network:
+    driver: bridge
+
+volumes:
+  budibase_data:

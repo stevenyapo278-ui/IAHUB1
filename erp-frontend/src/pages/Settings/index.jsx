@@ -19,11 +19,11 @@ import AppearanceTab from './AppearanceTab';
 const BASE_TABS = [
   { id: 'ai', label: 'Intelligence Artificielle', desc: 'Fournisseurs, modèles et clés API Gemini', icon: Cpu, permission: 'settings.ai' },
   { id: 'email', label: 'Comptes Emails', desc: 'Outlook, Microsoft 365, IMAP / SMTP', icon: Mail, permission: 'settings.email' },
-  { id: 'other', label: 'Autres intégrations', desc: 'GLPI, Supabase et webhooks n8n', icon: Globe, permission: 'settings.integrations' },
+  { id: 'other', label: 'Autres intégrations', desc: 'Services & APIs, Supabase et webhooks n8n', icon: Globe, permission: 'settings.integrations' },
   { id: 'automation', label: 'Automatisation', desc: 'Relances, intelligence IA & triage', icon: Zap, permission: 'automation.manage' },
   { id: 'notifications', label: 'Notifications', desc: 'Contenus des emails, toggles, récapitulatif, sons', icon: Bell, permission: 'automation.manage' },
   { id: 'templates', label: 'Modèles de tickets', desc: 'Modèles réutilisables + champs du formulaire des demandes de reporting', icon: FileText, permission: 'tickets.assign' },
-  { id: 'custom-fields', label: 'Champs personnalisés', desc: 'Champs dynamiques par catégorie (équivalent GLPI Forms)', icon: ListChecks, permission: 'tickets.manage' },
+  { id: 'custom-fields', label: 'Champs personnalisés', desc: 'Champs dynamiques par catégorie', icon: ListChecks, permission: 'tickets.manage' },
 ];
 
 export default function Settings() {
@@ -131,11 +131,11 @@ export default function Settings() {
               <p className="text-xs text-on-surface-variant mt-0.5 leading-relaxed">
                 {activeTab === 'ai' && "Configurez les fournisseurs d'IA, leurs modèles, et les clés API associées (rotation de clés, Gemini)."}
                 {activeTab === 'email' && "Configurez les boîtes mail utilisées pour la réception/réponse aux tickets (Outlook / M365, IMAP/SMTP)."}
-                {activeTab === 'other' && "Gérez les autres intégrations externes (Supabase, GLPI) et connectez des webhooks n8n."}
+                {activeTab === 'other' && "Gérez les services externes (Supabase, APIs) et connectez des webhooks n8n."}
                 {activeTab === 'automation' && "Configurez l'intelligence IA de triage, les relances automatiques et la clôture de tickets."}
                 {activeTab === 'notifications' && "Personnalisez le contenu de chaque email (accusé, signature, gabarits), puis gérez les toggles par type, le récapitulatif, le navigateur et les sons."}
                 {activeTab === 'templates' && "Modèles de tickets réutilisables par l'équipe, et configuration des sections/champs des demandes de reporting."}
-                {activeTab === 'custom-fields' && "Définissez des champs personnalisés rendus à la création d'un ticket selon la catégorie (équivalent GLPI Forms)."}
+                {activeTab === 'custom-fields' && "Définissez des champs personnalisés rendus à la création d'un ticket selon la catégorie."}
                 {activeTab === 'appearance' && "Gérez l'apparence de la page de connexion : rotation quotidienne, thème fixe ou aléatoire (réservé SUPERADMIN)."}
                 {activeTab === 'navigation' && "Configurez quels éléments de navigation chaque rôle peut voir dans la barre latérale."}
                 {activeTab === 'advanced' && "Réglages système avancés réservés au super-administrateur (intervalles de sync, durées de rétention)."}

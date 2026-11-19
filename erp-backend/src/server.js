@@ -19,6 +19,7 @@ const { seedPermissionGroups } = require('./services/permissionGroupSeeder');
 const { runSlaMonitor, realignSlaWithApproval } = require('./services/slaService');
 const { runDueDateMonitor } = require('./services/dueDateService');
 const { maybeGenerateWeeklyReport } = require('./services/aiWeeklyReportScheduler');
+const { retryPendingBudibase } = require('./services/accountProvisioning');
 const { logger } = require('./utils/logger');
 const { cleanupExpiredAuthSessions } = require('./utils/authSession');
 const prisma = require('./prismaClient');
@@ -132,6 +133,10 @@ function scheduleSync(name, syncFn, getIntervalSeconds) {
 
 scheduleSync('emails entrants', runEmailPipeline, (s) => s.emailSyncIntervalSeconds);
 scheduleSync('modèles IA', syncAllProviders, (s) => s.aiModelsSyncIntervalHours * 3600);
+
+// Rejeu des déclarations de comptes applicatifs non synchronisées avec Budibase.
+// Fréquence configurable (SystemSettings.accountProvisioningRetrySeconds, 0 = désactivé).
+scheduleSync('comptes applicatifs → Budibase', retryPendingBudibase, (s) => s.accountProvisioningRetrySeconds);
 
 // ── Retry automatique des emails DEAD_LETTER (toutes les 30 minutes) ─────────
 // Relance les emails en échec définitif : l'erreur initiale était peut-être temporaire

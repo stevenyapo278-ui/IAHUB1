@@ -50,6 +50,7 @@ const { allBreakerStatuses } = require('./utils/circuitBreaker');
 const aiWeeklyReportRoutes = require('./routes/aiweeklyreport.routes');
 const formRequestRoutes = require('./routes/formRequest.routes');
 const formDefinitionRoutes = require('./routes/formDefinition.routes');
+const accountProvisioningRoutes = require('./routes/accountprovisioning.routes');
 
 const { requestId } = require('./middleware/requestId');
 const { logger, childLogger } = require('./utils/logger');
@@ -330,6 +331,7 @@ app.use('/api/graph', graphRoutes);
 app.use('/api/ai-weekly-reports', aiWeeklyReportRoutes);
 app.use('/api/form-requests', formRequestRoutes);
 app.use('/api/form-definitions', formDefinitionRoutes);
+app.use('/api/account-provisioning', accountProvisioningRoutes);
 app.use('/api/chat', chatbotRoutes);
 app.use('/api/voice', voiceRoutes);
 app.use('/api/logs', logsRoutes);

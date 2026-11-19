@@ -45,7 +45,7 @@ const EMPTY_ASSIGNMENT = {
 const sortByRow = (questions) =>
   [...(questions || [])].sort((a, b) => ((a.row || 0) - (b.row || 0)) || ((a.col || 0) - (b.col || 0)));
 
-// values (JSON string GLPI) ↔ une option par ligne dans la textarea
+// values (tableau JSON sérialisé) ↔ une option par ligne dans la textarea
 function optionsToLines(values) {
   if (!values) return '';
   if (Array.isArray(values)) return values.join('\n');
@@ -107,7 +107,7 @@ export default function ReportingFormsSection() {
       assignment: { ...EMPTY_ASSIGNMENT, ...(f.assignment || {}) },
       approval: f.approval || null,
       // Trier par champ `order` : c'est lui qui pilote l'affichage dans
-      // /formRequest (le tableau JSON GLPI n'est pas forcément trié)
+      // /formRequest (le tableau JSON source n'est pas forcément trié)
       sections: (f.sections || [])
         .slice()
         .sort((a, b) => (a.order || 0) - (b.order || 0))
@@ -603,8 +603,8 @@ export default function ReportingFormsSection() {
                     <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-surface-container-high text-on-surface-variant">{f.category}</span>
                   )}
                   {f.glpiUuid && (
-                    <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-purple-500/10 text-purple-500" title="Importé depuis GLPI FormCreator — les éditions locales sont conservées">
-                      GLPI
+                    <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-purple-500/10 text-purple-500" title="Formulaire importé — les éditions locales sont conservées">
+                      Importé
                     </span>
                   )}
                   {!f.isActive && <span className="text-[9px] font-bold text-on-surface-variant uppercase">Inactif</span>}

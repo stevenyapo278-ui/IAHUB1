@@ -1,0 +1,151 @@
+{
+  "_comment": "Jeu d'évaluation hors ligne du pré-remplissage déterministe (alias du catalogue). Les cas 'attendu false' couvrent les demandes, négations et tickets hors sujet. À enrichir avec des tickets réels anonymisés.",
+  "catalog": [
+    { "id": 1, "name": "Microsoft 365", "aliases": ["m365", "office 365", "o365", "outlook", "exchange", "teams"] },
+    { "id": 2, "name": "Sage X3", "aliases": ["x3", "sage x3"] },
+    { "id": 3, "name": "Sage Paie", "aliases": ["sage paie", "paie"] },
+    { "id": 4, "name": "Odoo", "aliases": ["odoo", "erp odoo"] },
+    { "id": 5, "name": "GLPI", "aliases": ["glpi"] },
+    { "id": 6, "name": "Active Directory", "aliases": ["ad", "active directory", "annuaire", "domaine"] }
+  ],
+  "cases": [
+    {
+      "name": "demande de création Sage X3",
+      "title": "Création de compte Sage X3",
+      "content": "Merci de créer un compte Sage X3 pour M. Doe.",
+      "expect": { "isAccountProvisioning": false, "applications": ["Sage X3"] }
+    },
+    {
+      "name": "création Sage X3 attestée",
+      "title": "Compte Sage X3 créé",
+      "content": "Le compte Sage X3 a été créé pour M. Doe, identifiants remis en main propre.",
+      "expect": { "isAccountProvisioning": true, "applications": ["Sage X3"] }
+    },
+    {
+      "name": "chevauchement Sage Paie / Sage X3",
+      "title": "Compte Sage Paie",
+      "content": "Merci de créer un compte Sage Paie pour la paie de juillet.",
+      "expect": { "isAccountProvisioning": false, "applications": ["Sage Paie"] }
+    },
+    {
+      "name": "Sage Paie attesté ne remonte pas Sage X3",
+      "title": "Sage Paie",
+      "content": "Le compte Sage Paie a été créé pour la comptabilité.",
+      "expect": { "isAccountProvisioning": true, "applications": ["Sage Paie"] }
+    },
+    {
+      "name": "négation explicite",
+      "title": "Aucun compte créé",
+      "content": "Aucun compte créé, l'utilisateur avait déjà un accès.",
+      "expect": { "isAccountProvisioning": false, "applications": [] }
+    },
+    {
+      "name": "compte déjà existant",
+      "title": "Compte Odoo existant",
+      "content": "Le compte Odoo existe déjà, aucune création nécessaire.",
+      "expect": { "isAccountProvisioning": false, "applications": ["Odoo"] }
+    },
+    {
+      "name": "ticket hors sujet",
+      "title": "Imprimante hors service",
+      "content": "L'imprimante du 2e étage ne répond plus.",
+      "expect": { "isAccountProvisioning": false, "applications": [] }
+    },
+    {
+      "name": "création multiple M365 avec quantité",
+      "title": "Comptes M365",
+      "content": "Les 5 comptes m365 du service ont été ouverts.",
+      "expect": { "isAccountProvisioning": true, "applications": ["Microsoft 365"] }
+    },
+    {
+      "name": "demande AD",
+      "title": "Compte AD",
+      "content": "Créer un compte AD pour le nouvel arrivant.",
+      "expect": { "isAccountProvisioning": false, "applications": ["Active Directory"] }
+    },
+    {
+      "name": "deux applications attestées",
+      "title": "AD et M365",
+      "content": "Compte AD créé et accès m365 ouvert pour M. Kone.",
+      "expect": { "isAccountProvisioning": true, "applications": ["Active Directory", "Microsoft 365"] }
+    },
+    {
+      "name": "GLPI attesté",
+      "title": "Compte GLPI",
+      "content": "Compte GLPI ajouté pour le prestataire.",
+      "expect": { "isAccountProvisioning": true, "applications": ["GLPI"] }
+    },
+    {
+      "name": "réinitialisation de mot de passe (pas une création)",
+      "title": "Mot de passe Outlook",
+      "content": "Réinitialisation du mot de passe Outlook demandée par l'utilisateur.",
+      "expect": { "isAccountProvisioning": false, "applications": ["Microsoft 365"] }
+    },
+    {
+      "name": "ouverture de compte Teams (demande)",
+      "title": "Ouverture de compte Teams",
+      "content": "Ouverture de compte Teams pour le service.",
+      "expect": { "isAccountProvisioning": false, "applications": ["Microsoft 365"] }
+    },
+    {
+      "name": "compte Teams ouvert",
+      "title": "Teams",
+      "content": "Le compte Teams a été ouvert pour la direction.",
+      "expect": { "isAccountProvisioning": true, "applications": ["Microsoft 365"] }
+    },
+    {
+      "name": "sans compte à créer",
+      "title": "Sans compte applicatif",
+      "content": "Sans compte applicatif à créer, simple remplacement de matériel.",
+      "expect": { "isAccountProvisioning": false, "applications": [] }
+    },
+    {
+      "name": "identifiants transmis",
+      "title": "Transmission des identifiants",
+      "content": "Les identifiants ont été transmis après création du compte.",
+      "expect": { "isAccountProvisioning": true, "applications": [] }
+    },
+    {
+      "name": "paramétrage Odoo",
+      "title": "Odoo",
+      "content": "Un compte a été paramétré sur Odoo pour le service achats.",
+      "expect": { "isAccountProvisioning": true, "applications": ["Odoo"] }
+    },
+    {
+      "name": "fragment de mot ignoré",
+      "title": "Message",
+      "content": "message passage prudent sans signification technique.",
+      "expect": { "isAccountProvisioning": false, "applications": [] }
+    },
+    {
+      "name": "mise à jour de droits attestée",
+      "title": "Droits Sage Paie",
+      "content": "Les droits de validation ont été ajoutés au compte de j.doe sur Sage Paie.",
+      "expect": { "isAccountProvisioning": true, "applications": ["Sage Paie"] }
+    },
+    {
+      "name": "demande de droits sans preuve",
+      "title": "Demande d'accès Odoo",
+      "content": "Merci de donner les droits de consultation Odoo à M. Doe.",
+      "expect": { "isAccountProvisioning": false, "applications": ["Odoo"] }
+    },
+    {
+      "name": "négation portant sur les droits",
+      "title": "Aucun droit accordé",
+      "content": "Aucun droit ajouté sur Sage X3, le profil actuel suffit.",
+      "expect": { "isAccountProvisioning": false, "applications": ["Sage X3"] }
+    },
+    {
+      "name": "retrait de droits attesté",
+      "title": "Retrait d'accès Odoo",
+      "content": "Les droits de validation ont été retirés au compte de j.doe sur Odoo.",
+      "expect": { "isAccountProvisioning": true, "applications": ["Odoo"] }
+    },
+    {
+      "name": "demande de retrait sans preuve",
+      "title": "Retirer les droits",
+      "content": "Merci de retirer les droits de validation de j.doe sur Odoo.",
+      "expect": { "isAccountProvisioning": false, "applications": ["Odoo"] }
+    }
+  ]
+}

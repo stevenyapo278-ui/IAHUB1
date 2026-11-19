@@ -233,8 +233,26 @@ async function main() {
     }
   }
 
-  console.log('Seed terminé.');
+  // ── Catalogue des applications (module « Création de comptes applicatifs ») ─
+  // Idempotent et non destructif : les personnalisations faites dans l'UI
+  // (alias, champs, désactivation) sont préservées à chaque re-seed.
+  const DEFAULT_APPLICATIONS = [
+    { name: 'Microsoft 365', aliases: ['m365', 'office 365', 'o365', 'outlook', 'exchange', 'teams'] },
+    { name: 'Sage X3', aliases: ['x3', 'sage x3'] },
+    { name: 'Sage Paie', aliases: ['sage paie', 'paie'] },
+    { name: 'Odoo', aliases: ['odoo', 'erp odoo'] },
+    { name: 'GLPI', aliases: ['glpi'] },
+    { name: 'Active Directory', aliases: ['ad', 'active directory', 'annuaire', 'domaine'] },
+  ];
+  for (const app of DEFAULT_APPLICATIONS) {
+    await prisma.applicationCatalog.upsert({
+      where: { name: app.name },
+      update: {}, // ne pas écraser les alias/champs ajustés par le SUPERADMIN
+      create: { name: app.name, aliases: app.aliases, fields: [] },
+    });
+  }
 
+  console.log('Seed terminé.');
   // ── Import formulaire GLPI FormCreator (idempotent) ────────────────────────
   try {
     const fs = require('fs');

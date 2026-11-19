@@ -1,10 +1,8 @@
 import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import api from '../../api/client';
-import { useAuth } from '../../context/AuthContext';
-import { hasPermission } from '../../utils/permissions';
-import useSystemSettings from '../../hooks/useSystemSettings';
 import ConfirmDialog from '../../components/ConfirmDialog';
+import BudibaseConfigCard from './BudibaseConfigCard';
 
 const inputClass =
   'bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300';
@@ -15,17 +13,11 @@ const itemVariants = {
 };
 
 export default function OtherApisTab() {
-  const { user } = useAuth();
-  const { autonomousMode } = useSystemSettings();
-  const canManageGlpi = hasPermission(user, 'glpi.manage');
   const [configs, setConfigs] = useState([]);
-  const [form, setForm] = useState({ serviceName: '', baseUrl: '', apiKey: '', appToken: '' });
+  const [form, setForm] = useState({ serviceName: '', baseUrl: '', apiKey: '' });
   const [workflows, setWorkflows] = useState([]);
   const [workflowForm, setWorkflowForm] = useState({ name: '', webhookUrl: '', description: '' });
   const [triggering, setTriggering] = useState(null);
-  const [syncingGlpi, setSyncingGlpi] = useState(null); // 'tickets' | 'locations' | 'users' | null
-  const [testingId, setTestingId] = useState(null);
-  const [connectionStatus, setConnectionStatus] = useState({}); // { [configId]: { connected, error } }
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
   const [pendingDelete, setPendingDelete] = useState(null); // { type: 'workflow'|'config', id }
@@ -41,51 +33,11 @@ export default function OtherApisTab() {
     setShowSecrets((p) => ({ ...p, [key]: !p[key] }));
   }
 
-  const GLPI_FIELDS = [
-    { key: 'baseUrl', label: 'URL de base' },
-    { key: 'apiKey', label: 'Clé API (User Token)' },
-    { key: 'appToken', label: 'App Token' },
-  ];
-  const REQUIRED_FIELDS = {
-    glpi: GLPI_FIELDS,
-  };
-  const isGlpi = (name) => name === 'glpi';
-
-  function getMissingFields(config) {
-    const required = REQUIRED_FIELDS[config.serviceName];
-    if (!required) return [];
-    const values = { baseUrl: config.baseUrl, apiKey: config.apiKey, appToken: config.extra?.appToken };
-    return required.filter((f) => !values[f.key]).map((f) => f.label);
-  }
-
-  async function handleTestConnection(config) {
-    const missing = getMissingFields(config);
-    if (missing.length > 0) {
-      setConnectionStatus((s) => ({ ...s, [config.id]: { connected: false, error: `Champ(s) manquant(s) : ${missing.join(', ')}` } }));
-      return;
-    }
-    setTestingId(config.id);
-    try {
-      const { data } = await api.post(`/api-configs/${config.id}/test-connection`);
-      setConnectionStatus((s) => ({ ...s, [config.id]: data }));
-    } catch (err) {
-      setConnectionStatus((s) => ({
-        ...s,
-        [config.id]: { connected: false, error: err.response?.data?.error || 'Erreur lors du test de connexion' },
-      }));
-    } finally {
-      setTestingId(null);
-    }
-  }
-
   function load() {
     api
       .get('/api-configs')
       .then(({ data }) => {
         setConfigs(data);
-        if (!autonomousMode) {
-          data.filter((c) => c.isActive && REQUIRED_FIELDS[c.serviceName]).forEach((c) => handleTestConnection(c));
-        }
       })
       .catch((err) => setError(err.response?.data?.error || 'Erreur de chargement'));
   }
@@ -154,45 +106,18 @@ export default function OtherApisTab() {
     }
   }
 
-  async function handleSyncGlpi(type) {
-    setError('');
-    setInfo('');
-    setSyncingGlpi(type);
-    const labels = { tickets: 'tickets', locations: 'lieux', users: 'utilisateurs' };
-    const endpoints = { tickets: '/glpi/sync', locations: '/glpi/sync-locations', users: '/glpi/sync-users' };
-    try {
-      const payload = type === 'users' ? { createMissing: true } : {};
-      const { data } = await api.post(endpoints[type], payload);
-      if (type === 'tickets') {
-        setInfo(`Synchronisation GLPI : ${data.imported} ticket(s) importé(s), ${data.updated} mis à jour.`);
-      } else {
-        setInfo(`${data.synced} ${labels[type]} synchronisé(s) depuis GLPI.`);
-      }
-    } catch (err) {
-      setError(err.response?.data?.error || `Erreur lors de la synchronisation des ${labels[type]}`);
-    } finally {
-      setSyncingGlpi(null);
-    }
-  }
-
   async function handleCreate(e) {
     e.preventDefault();
     setError('');
 
-    const required = REQUIRED_FIELDS[form.serviceName];
-    if (required) {
-      const missing = required.filter((f) => !form[f.key]).map((f) => f.label);
-      if (missing.length > 0) {
-        setError(`Champ(s) manquant(s) : ${missing.join(', ')}`);
-        return;
-      }
+    if (!form.serviceName.trim()) {
+      setError('Renseignez le nom du service.');
+      return;
     }
 
     try {
-      const { appToken, ...rest } = form;
-      const payload = { ...rest, ...(appToken ? { extra: { appToken } } : {}) };
-      await api.post('/api-configs', payload);
-      setForm({ serviceName: '', baseUrl: '', apiKey: '', appToken: '' });
+      await api.post('/api-configs', form);
+      setForm({ serviceName: '', baseUrl: '', apiKey: '' });
       load();
     } catch (err) {
       setError(err.response?.data?.error || 'Erreur lors de la création');
@@ -203,27 +128,10 @@ export default function OtherApisTab() {
     setError('');
     setInfo('');
     try {
-      const { data } = await api.patch(`/api-configs/${id}`, { [field]: value });
-      if (data.glpiLinksReset) {
-        const { tickets, teams, categories } = data.glpiLinksReset;
-        setInfo(
-          `Changement d'instance GLPI détecté : ${tickets} ticket(s) et ${teams} équipe(s) détachés de l'ancien GLPI, ${categories} catégorie(s) supprimée(s). ` +
-          `Cliquez « Synchroniser GLPI » pour récupérer les données de la nouvelle instance.`
-        );
-      }
+      await api.patch(`/api-configs/${id}`, { [field]: value });
       load();
     } catch (err) {
       setError(err.response?.data?.error || 'Erreur lors de la mise à jour');
-    }
-  }
-
-  async function handleUpdateAppToken(id, currentExtra, appToken) {
-    if (!appToken) return;
-    try {
-      await api.patch(`/api-configs/${id}`, { extra: { ...currentExtra, appToken } });
-      load();
-    } catch (err) {
-      setError(err.response?.data?.error || "Erreur lors de la mise à jour de l'App Token");
     }
   }
 
@@ -279,20 +187,13 @@ export default function OtherApisTab() {
         )}
       </AnimatePresence>
 
-      {/* Mode autonome : GLPI désactivé */}
-      {autonomousMode && (
-        <motion.div
-          variants={itemVariants}
-          className="bento-card p-lg flex items-start gap-md border border-amber-500/20 bg-amber-500/5"
-        >
-          <span className="material-symbols-outlined text-[22px] text-amber-500 shrink-0">auto_mode</span>
-          <div className="text-sm text-on-surface-variant leading-relaxed">
-            <strong className="text-on-surface">Mode autonome actif</strong> — la plateforme fonctionne comme e-ticketing sans GLPI.
-            La configuration GLPI est ignorée : les synchronisations et écritures GLPI sont désactivées.
-            Désactivez le mode autonome dans <strong>Paramètres → Avancé</strong> pour réactiver l'intégration GLPI.
-          </div>
-        </motion.div>
-      )}
+      {/* ═══════════════════════════════════════════════════════════════════════ */}
+      {/* SECTION 0 : BUDIBASE (module comptes applicatifs) */}
+      {/* ═══════════════════════════════════════════════════════════════════════ */}
+      <BudibaseConfigCard
+        config={configs.find((c) => c.serviceName === 'budibase') || null}
+        onReload={load}
+      />
 
       {/* ═══════════════════════════════════════════════════════════════════════ */}
       {/* SECTION 1 : SERVICES & APIS */}
@@ -341,17 +242,9 @@ export default function OtherApisTab() {
                     className={inputClass}
                     value={form.serviceName}
                     onChange={(e) => setForm({ ...form, serviceName: e.target.value })}
-                    placeholder="glpi, supabase…"
+                    placeholder="supabase, n8n…"
                     required
                   />
-                  {form.serviceName === 'glpi' && (
-                    <div className="flex items-start gap-1.5 mt-1.5 p-2 rounded-lg" style={{ backgroundColor: 'rgba(59,130,246,0.06)', border: '1px solid rgba(59,130,246,0.15)' }}>
-                      <span className="material-symbols-outlined text-[14px] shrink-0 mt-px" style={{ color: '#3b82f6' }}>info</span>
-                      <div className="text-[10px] leading-relaxed" style={{ color: 'var(--color-on-surface-variant)' }}>
-                        <strong style={{ color: '#3b82f6' }}>GLPI Production</strong> — utilisez <code className="bg-surface-container-high px-1 rounded font-mono">glpi</code> pour l'instance de production de l'entreprise.
-                      </div>
-                    </div>
-                  )}
                 </label>
                 <label className="flex flex-col gap-xs">
                   <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">URL de base</span>
@@ -359,7 +252,7 @@ export default function OtherApisTab() {
                 </label>
                 <label className="flex flex-col gap-xs">
                   <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">
-                    Clé API{isGlpi(form.serviceName) ? ' (User Token)' : ''}
+                    Clé API
                   </span>
                   <div className="relative flex items-center w-full">
                     <input
@@ -379,29 +272,6 @@ export default function OtherApisTab() {
                     </button>
                   </div>
                 </label>
-                {isGlpi(form.serviceName) && (
-                  <label className="flex flex-col gap-xs">
-                    <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">App Token (GLPI)</span>
-                    <div className="relative flex items-center w-full">
-                      <input
-                        className={`${inputClass} w-full pr-10`}
-                        type={showSecrets['new-appToken'] ? 'text' : 'password'}
-                        value={form.appToken}
-                        onChange={(e) => setForm({ ...form, appToken: e.target.value })}
-                        placeholder="Jeton du client API GLPI"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => toggleSecretVisibility('new', 'appToken')}
-                        className="absolute right-3 text-on-surface-variant/80 hover:text-on-surface select-none flex items-center"
-                      >
-                        <span className="material-symbols-outlined text-[18px]">
-                          {showSecrets['new-appToken'] ? 'visibility_off' : 'visibility'}
-                        </span>
-                      </button>
-                    </div>
-                  </label>
-                )}
                 <div className="md:col-span-3 flex justify-end mt-2">
                   <motion.button
                     type="submit"
@@ -426,10 +296,7 @@ export default function OtherApisTab() {
                   <th className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold p-3 w-32">Service</th>
                   <th className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold p-3">URL de base</th>
                   <th className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold p-3 w-44">Clé API</th>
-                  <th className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold p-3 w-44">App Token</th>
-                  <th className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold p-3 w-36">Statut</th>
                   <th className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold p-3 w-24 text-center">Active</th>
-                  <th className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold p-3 w-40 text-center">Actions</th>
                   <th className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold p-3 w-16"></th>
                 </tr>
               </thead>
@@ -441,15 +308,7 @@ export default function OtherApisTab() {
                     className="hover:bg-surface-container-low/40 transition-colors"
                   >
                     <td className="p-3">
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold uppercase text-primary">{c.serviceName}</span>
-                        {c.serviceName === 'glpi' && (
-                          <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-full" style={{ backgroundColor: 'rgba(22,163,74,0.1)', color: '#16a34a' }}>PROD</span>
-                        )}
-                      </div>
-                      {c.serviceName === 'glpi' && (
-                        <div className="text-[9px] mt-0.5" style={{ color: 'var(--color-on-surface-variant)' }}>Instance de production</div>
-                      )}
+                      <span className="font-bold uppercase text-primary">{c.serviceName}</span>
                     </td>
                     <td className="p-3">
                       <input
@@ -479,74 +338,6 @@ export default function OtherApisTab() {
                         </button>
                       </div>
                     </td>
-                    <td className="p-3">
-                      {isGlpi(c.serviceName) ? (
-                        <div className="relative flex items-center">
-                          <input
-                            className={`${inputClass} w-full pr-10`}
-                            type={showSecrets[`${c.id}-appToken`] ? 'text' : 'password'}
-                            placeholder={c.extra?.appToken ? '••••••••••••••••' : 'Non défini'}
-                            onBlur={(e) => handleUpdateAppToken(c.id, c.extra, e.target.value)}
-                          />
-                          <button
-                            type="button"
-                            onClick={() => toggleSecretVisibility(c.id, 'appToken')}
-                            className="absolute right-3 text-on-surface-variant/80 hover:text-on-surface select-none flex items-center"
-                          >
-                            <span className="material-symbols-outlined text-[16px]">
-                              {showSecrets[`${c.id}-appToken`] ? 'visibility_off' : 'visibility'}
-                            </span>
-                          </button>
-                        </div>
-                      ) : (
-                        <span className="text-on-surface-variant/60 italic p-2 block">-</span>
-                      )}
-                    </td>
-                    <td className="p-3">
-                      {REQUIRED_FIELDS[c.serviceName] && (
-                        <motion.button
-                          onClick={() => handleTestConnection(c)}
-                          disabled={testingId === c.id}
-                          title="Tester la connexion"
-                          whileHover={{ scale: 1.03 }}
-                          whileTap={{ scale: 0.96 }}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-outline-variant/60 rounded-xl text-[11px] font-semibold bg-surface hover:bg-surface-container-high transition-colors disabled:opacity-50 shadow-sm"
-                        >
-                          {testingId === c.id ? (
-                            <span className="text-on-surface-variant">Test...</span>
-                          ) : connectionStatus[c.id]?.connected ? (
-                            <motion.span
-                              initial={{ scale: 0 }}
-                              animate={{ scale: 1 }}
-                              className="flex items-center gap-1.5"
-                            >
-                              <motion.span
-                                animate={{ scale: [1, 1.3, 1] }}
-                                transition={{ duration: 0.5, ease: 'easeInOut' }}
-                                className="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-sm shadow-emerald-500/20"
-                              />
-                              <span className="text-on-surface">Connecté</span>
-                            </motion.span>
-                          ) : connectionStatus[c.id] ? (
-                            <>
-                              <span className="w-2.5 h-2.5 rounded-full bg-red-500 shadow-sm shadow-red-500/20"></span>
-                              <span className="text-error" title={connectionStatus[c.id].error}>Échec</span>
-                            </>
-                          ) : (
-                            <span className="text-on-surface-variant">Tester</span>
-                          )}
-                        </motion.button>
-                      )}
-                      {connectionStatus[c.id]?.error && (
-                        <motion.div
-                          initial={{ opacity: 0, y: -4 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          className="text-[10px] text-error mt-1 max-w-[180px] bg-error/5 border border-error/15 px-2 py-0.5 rounded-lg font-medium"
-                        >
-                          {connectionStatus[c.id].error}
-                        </motion.div>
-                      )}
-                    </td>
                     <td className="p-3 text-center">
                       <motion.input
                         type="checkbox"
@@ -555,36 +346,6 @@ export default function OtherApisTab() {
                         onChange={(e) => handleUpdate(c.id, 'isActive', e.target.checked)}
                         whileTap={{ scale: 1.2 }}
                       />
-                    </td>
-                    <td className="p-3 text-center">
-                      {!autonomousMode && isGlpi(c.serviceName) && canManageGlpi && (
-                        <div className="flex items-center justify-center gap-1.5">
-                          {[
-                            { type: 'tickets', icon: 'sync', tooltip: 'Synchroniser les tickets', color: '#3b82f6' },
-                            { type: 'locations', icon: 'pin_drop', tooltip: 'Synchroniser les lieux', color: '#f59e0b' },
-                            { type: 'users', icon: 'people', tooltip: 'Synchroniser les utilisateurs', color: '#16a34a' },
-                          ].map(({ type, icon, tooltip, color }) => (
-                            <motion.button
-                              key={type}
-                              onClick={() => handleSyncGlpi(type)}
-                              disabled={syncingGlpi !== null}
-                              title={tooltip}
-                              whileHover={{ scale: 1.1 }}
-                              whileTap={{ scale: 0.9 }}
-                              className="w-8 h-8 flex items-center justify-center rounded-xl border border-outline-variant/60 hover:bg-surface-container-high transition-colors disabled:opacity-40 shadow-sm"
-                            >
-                              <motion.span
-                                animate={syncingGlpi === type ? { rotate: 360 } : { rotate: 0 }}
-                                transition={syncingGlpi === type ? { repeat: Infinity, duration: 1, ease: 'linear' } : { duration: 0.3 }}
-                                className="material-symbols-outlined text-[16px]"
-                                style={{ color: syncingGlpi === type ? 'var(--color-on-surface-variant)' : color }}
-                              >
-                                {syncingGlpi === type ? 'sync' : icon}
-                              </motion.span>
-                            </motion.button>
-                          ))}
-                        </div>
-                      )}
                     </td>
                     <td className="p-3 text-right">
                       <motion.button
@@ -600,7 +361,7 @@ export default function OtherApisTab() {
                 ))}
                 {configs.length === 0 && (
                   <tr>
-                    <td colSpan={8} className="p-6 text-center text-on-surface-variant italic font-body-md">Aucune intégration configurée.</td>
+                    <td colSpan={5} className="p-6 text-center text-on-surface-variant italic font-body-md">Aucune intégration configurée.</td>
                   </tr>
                 )}
               </tbody>
@@ -656,7 +417,7 @@ export default function OtherApisTab() {
                     className={inputClass}
                     value={workflowForm.name}
                     onChange={(e) => setWorkflowForm({ ...workflowForm, name: e.target.value })}
-                    placeholder="ex: Synchro GLPI"
+                    placeholder="ex: Synchronisation CRM"
                     required
                   />
                 </label>

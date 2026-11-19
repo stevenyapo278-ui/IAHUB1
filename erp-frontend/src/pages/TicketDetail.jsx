@@ -43,6 +43,7 @@ import RichTextEditor from '../components/RichTextEditor';
 import FollowupTemplateDialog from '../components/FollowupTemplateDialog';
 import AttachmentIndexBadge, { isIndexingBusy, canReindex } from '../components/AttachmentIndexBadge';
 import ExtractedTextPanel from '../components/ExtractedTextPanel';
+import AccountProvisioningModal from '../components/AccountProvisioningModal';
 
 function extractCleanTextAndImages(content) {
   if (!content || typeof content !== 'string') return { text: '', images: [] };
@@ -374,6 +375,8 @@ export default function TicketDetail() {
   const [editingTitleValue, setEditingTitleValue] = useState('');
   const [showSaveLocationModal, setShowSaveLocationModal] = useState(false);
   const [newLocationName, setNewLocationName] = useState('');
+  // Module « Création de comptes applicatifs » : modale bloquante avant SOLVED.
+  const [accountProvisioningOpen, setAccountProvisioningOpen] = useState(false);
   const [editingFollowupId, setEditingFollowupId] = useState(null);
   const [editingFollowupContent, setEditingFollowupContent] = useState('');
   const [editingFollowupImages, setEditingFollowupImages] = useState([]);
@@ -884,7 +887,20 @@ export default function TicketDetail() {
     api.get('/teams').then(({ data }) => setTeams(data)).catch(() => {});
   }, [canAssign]);
 
-  async function updateField(field, value) {
+  async function updateField(field, value, options = {}) {
+    // Un technicien ne peut pas résoudre un ticket sans déclarer les comptes créés
+    // quand le module est actif. On ouvre la modale AVANT l'appel PATCH ; le backend
+    // reste le filet de sécurité (409 ACCOUNT_PROVISIONING_REQUIRED).
+    if (
+      !options.skipAccountGate &&
+      field === 'status' &&
+      value === 'SOLVED' &&
+      user?.role === 'TECHNICIAN' &&
+      systemSettings?.accountProvisioningEnabled
+    ) {
+      setAccountProvisioningOpen(true);
+      return;
+    }
     try {
       setSavingField(field);
       markTicketUpdated(Number(id));
@@ -893,10 +909,21 @@ export default function TicketDetail() {
       if (field === 'status' && (value === 'SOLVED' || value === 'CLOSED')) celebrate();
       load();
     } catch (err) {
+      // Filet de sécurité : même si le réglage local n'était pas encore chargé,
+      // le backend refuse la résolution et on ouvre le formulaire.
+      if (err.response?.data?.code === 'ACCOUNT_PROVISIONING_REQUIRED') {
+        setAccountProvisioningOpen(true);
+        return;
+      }
       setError(err.response?.data?.error || 'Erreur lors de la mise à jour');
     } finally {
       setSavingField(null);
     }
+  }
+
+  async function handleAccountProvisioningSaved() {
+    setAccountProvisioningOpen(false);
+    await updateField('status', 'SOLVED', { skipAccountGate: true });
   }
 
   // Extrait le nom du lieu (partie avant ":", "-", "/", "|") d'un titre
@@ -5145,6 +5172,13 @@ export default function TicketDetail() {
         );
       })()}
 
+      <AccountProvisioningModal
+        open={accountProvisioningOpen}
+        ticketId={id}
+        ticketTitle={ticket?.title}
+        onClose={() => setAccountProvisioningOpen(false)}
+        onSaved={handleAccountProvisioningSaved}
+      />
 
     </div>
   );

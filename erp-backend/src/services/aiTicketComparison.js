@@ -183,7 +183,7 @@ async function fetchTicketsFromInstance(instanceName, limit = 20) {
 
 /* ── Appel IA via le provider configuré (avec fallback multi-clés) ────── */
 
-async function callAI(prompt, maxTokens = 2048) {
+async function callAI(prompt, maxTokens = 2048, options = {}) {
   const providers = await prisma.aiProvider.findMany({
     where: { isActive: true, isDeleted: false },
     include: {
@@ -211,7 +211,7 @@ async function callAI(prompt, maxTokens = 2048) {
 
     for (const key of provider.keys) {
       try {
-        return await makeAIRequest(provider.name, baseUrl, key.apiKey, model, prompt, maxTokens);
+        return await makeAIRequest(provider.name, baseUrl, key.apiKey, model, prompt, maxTokens, options);
       } catch (err) {
         lastError = err.message;
         continue;
@@ -222,7 +222,10 @@ async function callAI(prompt, maxTokens = 2048) {
   throw new Error(lastError ? compactErrorMessage(lastError, 500) : 'Tous les providers IA ont échoué');
 }
 
-async function makeAIRequest(providerName, baseUrl, apiKey, model, prompt, maxTokens) {
+async function makeAIRequest(providerName, baseUrl, apiKey, model, prompt, maxTokens, options = {}) {
+  // Sortie structurée : quand un schéma est fourni, on demande au provider de
+  // contraindre sa réponse (plus aucun JSON libre à parser de façon tolérante).
+  const jsonSchema = options?.jsonSchema || null;
   if (providerName === 'anthropic') {
     const start = Date.now();
     const res = await fetch(`${baseUrl}/v1/messages`, {
@@ -267,7 +270,11 @@ async function makeAIRequest(providerName, baseUrl, apiKey, model, prompt, maxTo
           headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
           body: JSON.stringify({
             contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: { temperature: 0.1, maxOutputTokens: maxTokens },
+            generationConfig: {
+              temperature: 0.1,
+              maxOutputTokens: maxTokens,
+              ...(jsonSchema ? { responseMimeType: 'application/json', responseSchema: jsonSchema } : {}),
+            },
           }),
         });
         if (!res.ok) {
@@ -300,6 +307,10 @@ async function makeAIRequest(providerName, baseUrl, apiKey, model, prompt, maxTo
       messages: [{ role: 'user', content: prompt }],
       temperature: 0.1,
       max_tokens: maxTokens,
+      // `json_object` est le format structuré le plus largement supporté par les
+      // API compatibles OpenAI (OpenAI, Mistral, NVIDIA…). Le schéma complet n'est
+      // pas garanti partout : on s'appuie sur la validation applicative ensuite.
+      ...(jsonSchema ? { response_format: { type: 'json_object' } } : {}),
     }),
   });
   if (!res.ok) {

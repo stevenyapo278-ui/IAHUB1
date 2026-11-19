@@ -187,6 +187,7 @@ model User {
   ticketsDeleted               Ticket[]                @relation("TicketDeletedBy")
   ticketsObserved              Ticket[]                @relation("TicketObservers")
   ticketAttachmentsUploaded    TicketAttachment[]      @relation("TicketAttachmentUploader")
+  accountProvisioningRecords   AccountProvisioningRecord[] @relation("AccountProvisioningCreator")
   followups                    Followup[]
   aiEmailDraftsReviewed        AiEmailDraft[]
   knowledgeDraftsReviewed      KnowledgeDraft[]
@@ -516,6 +517,7 @@ model Ticket {
   problems         ProblemTicket[]
   formSubmission   FormSubmission?
   approvals        TicketApproval[]
+  accountProvisioning AccountProvisioningRecord?
 
   @@index([requesterId])
   @@index([secondaryRequesterId])
@@ -693,6 +695,14 @@ model SystemSettings {
   // Extrait le contenu des pièces jointes (texte ou OCR Vision) et l'indexe dans le RAG du chatbot.
   // Désactivé : plus aucune extraction (les nouvelles PJ restent PENDING), réactivable sans redémarrage.
   attachmentIndexEnabled  Boolean @default(true)
+
+  // ── Module « Création de comptes applicatifs » (Paramètres > Avancé, SUPERADMIN) ──
+  // Quand il est actif, un technicien doit renseigner les comptes créés (application,
+  // identifiants, profil…) avant de pouvoir passer un ticket à SOLVED. Les enregistrements
+  // sont conservés en base (source de vérité) puis poussés vers Budibase.
+  accountProvisioningEnabled      Boolean @default(false) // master switch du module
+  accountProvisioningAiPrefill    Boolean @default(true)  // pré-remplissage IA du formulaire (jamais bloquant)
+  accountProvisioningRetrySeconds Int     @default(300)   // rejeu des écritures Budibase en échec (0 = désactivé)
 
   // ── Contrôle global de l'IA (Paramètres > Intelligence Artificielle) ──────
   aiEnabled              Boolean  @default(true) // toggle global : désactive tous les appels IA (pipeline, chatbot, scanner, etc.)
@@ -2026,4 +2036,61 @@ model IdempotencyRecord {
 
   @@index([expiresAt])
   @@index([scope])
+}
+
+// ── Module « Création de comptes applicatifs » ────────────────────────────────
+// Référentiel fermé des applications pour lesquelles un technicien peut déclarer
+// des comptes créés. Les alias servent au pré-filtre déterministe et au mapping de
+// la réponse IA : une application hors catalogue n'est jamais acceptée telle quelle,
+// elle doit être choisie manuellement par le technicien.
+model ApplicationCatalog {
+  id        Int      @id @default(autoincrement())
+  name      String   @unique // libellé affiché, ex. "Sage X3"
+  aliases   String[] @default([]) // formes reconnues dans les tickets
+  fields    Json? // schéma des champs propres à l'application [{ key, label, type, required, options }]
+  isActive  Boolean  @default(true)
+  records   AccountProvisioningRecord[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isActive])
+}
+
+// Déclaration des comptes créés pour un ticket. Un enregistrement par ticket
+// (contrainte unique) : il contient un ou plusieurs comptes, éventuellement sur
+// plusieurs applications différentes. L'écriture en base est la source de vérité,
+// Budibase n'est qu'un miroir asynchrone (statut PENDING/SYNCED/FAILED).
+model AccountProvisioningRecord {
+  id            Int      @id @default(autoincrement())
+  ticket        Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  ticketId      Int      @unique
+  application   ApplicationCatalog? @relation(fields: [applicationId], references: [id], onDelete: SetNull)
+  applicationId Int? // application principale (1re entrée) — pour les filtres et stats
+  applications  Json     @default("[]") // snapshot [{ id, name }] de toutes les applications concernées
+  accounts      Json     // [{ applicationId, applicationName, login, email, profile, type, quantity }]
+  accountsCount Int      @default(1) // somme des quantités déclarées
+  source        String   @default("MANUAL") // MANUAL | AI_PREFILL | NOT_APPLICABLE
+  aiConfidence  Float?
+  // Télémétrie de qualité : ce que le pré-remplissage avait proposé, ce qui permet
+  // de mesurer le taux d'acceptation et les applications corrigées.
+  prefillSource       String? // AI | DETERMINISTIC
+  prefillConfidence   Float?
+  prefillSnapshot     Json?
+  ignoredApplications Json    @default("[]") // applications citées hors catalogue (à ajouter ?)
+  createdBy     User?    @relation("AccountProvisioningCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  createdById   Int?
+  budibaseStatus   String    @default("PENDING") // PENDING | SYNCED | FAILED | SKIPPED
+  budibaseRowId    String?
+  budibaseSyncedAt DateTime?
+  idempotencyKey   String    @unique
+  syncAttempts     Int       @default(0)
+  lastError        String?   @db.Text
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([budibaseStatus])
+  @@index([createdById])
+  @@index([applicationId])
+  @@index([createdAt])
 }

@@ -5,7 +5,7 @@ const multer = require('multer');
 const { body, validationResult } = require('express-validator');
 const prisma = require('../prismaClient');
 const { authenticate } = require('../middleware/auth');
-const { requirePermission } = require('../middleware/permissions');
+const { requirePermission, requireSuperAdmin } = require('../middleware/permissions');
 const { sendDailySummary } = require('../services/dailySummary');
 const { runSolvedAutoCloseScheduler } = require('../services/solvedAutoCloseScheduler');
 const { resolveBackendUrl, resolveFrontendUrl } = require('../services/systemSettings');
@@ -113,6 +113,47 @@ function normalizeSignatureLogos(raw) {
     .slice(0, 10);
   return cleaned;
 }
+
+// ── Module « Création de comptes applicatifs » ─────────────────────────────
+// Activation strictement réservée au SUPERADMIN (pas de délégation par permission) :
+// c'est ce toggle qui décide si un technicien peut clôturer un ticket sans déclarer
+// les comptes créés. Séparé du PATCH global pour ne pas l'exposer aux ADMIN.
+router.patch(
+  '/account-provisioning',
+  requireSuperAdmin,
+  [
+    body('accountProvisioningEnabled').optional().isBoolean(),
+    body('accountProvisioningAiPrefill').optional().isBoolean(),
+    body('accountProvisioningRetrySeconds').optional().isInt({ min: 0, max: 86400 }),
+  ],
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
+    await getOrCreateSettings();
+
+    const data = {};
+    if (req.body.accountProvisioningEnabled !== undefined) data.accountProvisioningEnabled = req.body.accountProvisioningEnabled;
+    if (req.body.accountProvisioningAiPrefill !== undefined) data.accountProvisioningAiPrefill = req.body.accountProvisioningAiPrefill;
+    if (req.body.accountProvisioningRetrySeconds !== undefined) data.accountProvisioningRetrySeconds = req.body.accountProvisioningRetrySeconds;
+
+    if (Object.keys(data).length === 0) {
+      return res.status(400).json({ error: 'Aucun réglage à mettre à jour.' });
+    }
+
+    const updated = await prisma.systemSettings.update({ where: { id: 1 }, data });
+    cacheStore.clear();
+    auditLog('ACCOUNT_PROVISIONING_SETTINGS_UPDATED', {
+      actor: req.user,
+      targetType: 'SystemSettings',
+      targetId: 1,
+      targetLabel: 'Module comptes applicatifs',
+      metadata: { changedFields: Object.keys(data), values: data },
+    }).catch(() => {});
+
+    return res.json(updated);
+  }
+);
 
 router.patch(
   '/',

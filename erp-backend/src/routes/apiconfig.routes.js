@@ -3,6 +3,7 @@ const { body, validationResult } = require('express-validator');
 const prisma = require('../prismaClient');
 const { authenticate } = require('../middleware/auth');
 const { requirePermission } = require('../middleware/permissions');
+const { DEFAULT_BUDIBASE_ROWS_PATH } = require('../services/accountProvisioning');
 
 const router = express.Router();
 router.use(authenticate);
@@ -33,13 +34,19 @@ const GLPI_REQUIRED = [
 ];
 const REQUIRED_FIELDS = {
   glpi: GLPI_REQUIRED,
+  budibase: [
+    { key: 'baseUrl', label: 'URL de base' },
+    { key: 'apiKey', label: 'Clé API' },
+    { key: 'extra.appId', label: 'App ID' },
+    { key: 'extra.tableId', label: 'Table ID' },
+  ],
 };
 const isGlpi = (name) => name === 'glpi';
 
 function getMissingFields(serviceName, { baseUrl, apiKey, extra }) {
   const required = REQUIRED_FIELDS[serviceName];
   if (!required) return [];
-  const values = { baseUrl, apiKey, 'extra.appToken': extra?.appToken };
+  const values = { baseUrl, apiKey, 'extra.appToken': extra?.appToken, 'extra.tableId': extra?.tableId, 'extra.appId': extra?.appId };
   return required.filter((f) => !values[f.key]).map((f) => f.label);
 }
 
@@ -134,6 +141,40 @@ router.post('/:id/test-connection', async (req, res) => {
       await fetch(`${config.baseUrl}/killSession`, {
         headers: { 'App-Token': appToken, 'Session-Token': data.session_token },
       }).catch(() => {});
+      return res.json({ connected: true });
+    } catch (err) {
+      return res.status(502).json({ connected: false, error: err.message || 'Connexion impossible' });
+    }
+  }
+
+  // Budibase : lecture d'une ligne de la table cible (vérifie URL + clé + app + table).
+  // L'API publique v4 n'autorise pas le GET sur /rows : on interroge `POST /rows/search`.
+  if (config.serviceName === 'budibase') {
+    try {
+      const baseUrl = String(config.baseUrl || '').replace(/\/+$/, '');
+      const tableId = String(config.extra?.tableId || '');
+      const appId = String(config.extra?.appId || '').trim();
+      const rowsPath = String(config.extra?.rowsPath || DEFAULT_BUDIBASE_ROWS_PATH).replace('{tableId}', encodeURIComponent(tableId));
+      // Un chemin saisi avec `/rows` devient `/rows/search` ; un chemin déjà
+      // terminé par `/search` est utilisé tel quel.
+      const searchPath = /\/search$/.test(rowsPath) ? rowsPath : `${rowsPath.replace(/\/+$/, '')}/search`;
+      const headers = { 'Content-Type': 'application/json', 'x-budibase-api-key': config.apiKey };
+      if (appId) headers['x-budibase-app-id'] = appId;
+      const bbRes = await fetch(`${baseUrl}${searchPath}`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ limit: 1 }),
+      });
+      if (!bbRes.ok) {
+        const body = await bbRes.text().catch(() => '');
+        const hint = bbRes.status === 400 && /app id/i.test(body)
+          ? ' — l’App ID Budibase est requis (champ « App ID » de la configuration).'
+          : '';
+        return res.status(422).json({
+          connected: false,
+          error: `Budibase HTTP ${bbRes.status}${body ? ` — ${body.slice(0, 200)}` : ''}${hint}`,
+        });
+      }
       return res.json({ connected: true });
     } catch (err) {
       return res.status(502).json({ connected: false, error: err.message || 'Connexion impossible' });

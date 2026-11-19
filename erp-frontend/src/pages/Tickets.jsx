@@ -2009,6 +2009,10 @@ export default function Tickets() {
       if (newStatus === 'SOLVED' || newStatus === 'CLOSED') celebrate(e);
       refreshTicketsSilently();
     } catch (err) {
+      if (err.response?.data?.code === 'ACCOUNT_PROVISIONING_REQUIRED') {
+        toast.error('Ouvrez la fiche du ticket et déclarez les opérations sur comptes applicatifs (création ou droits) avant de le résoudre.');
+        return;
+      }
       toast.error(err.response?.data?.error || 'Échec mise à jour statut');
     }
   }, []);

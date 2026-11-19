@@ -120,6 +120,8 @@ const PUT_FIELDS = [
   'portalAllowNewRequest',
   'loginThemeMode', 'loginThemeFixedVariant', 'loginThemeEnabledVariants',
   'aiEnabled', 'aiDailyTokenBudget', 'aiTokenAlertThreshold', 'aiTokenAlertRecipients',
+  // Module « Création de comptes applicatifs » (page Avancé, SUPERADMIN uniquement)
+  'accountProvisioningEnabled', 'accountProvisioningAiPrefill', 'accountProvisioningRetrySeconds',
 ];
 
 async function handleSaveSettings(req, res) {

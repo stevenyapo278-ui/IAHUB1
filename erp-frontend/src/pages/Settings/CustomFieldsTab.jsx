@@ -123,8 +123,8 @@ export default function CustomFieldsTab() {
             Champs personnalisés
           </h3>
           <p className="text-xs text-on-surface-variant mt-1">
-            Définissez des champs supplémentaires rendus à la création d'un ticket, selon la catégorie
-            (équivalent du plugin GLPI « Forms »). Un champ sans catégorie s'applique à tous les tickets.
+            Définissez des champs supplémentaires rendus à la création d'un ticket, selon la catégorie.
+            Un champ sans catégorie s'applique à tous les tickets.
           </p>
         </div>
         <button

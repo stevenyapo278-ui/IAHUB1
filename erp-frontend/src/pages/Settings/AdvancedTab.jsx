@@ -4,6 +4,8 @@ import api from '../../api/client';
 import Toggle from '../../components/Toggle';
 import { Component } from 'react';
 import { SettingRow, IntervalRow, inputClass, itemVariants } from './SettingsComponents';
+import AccountProvisioningCard from './AccountProvisioningCard';
+import AccountProvisioningSupervisionCard from './AccountProvisioningSupervisionCard';
 
 // Mini ErrorBoundary pour isoler chaque section — si une section plante, les autres continuent de fonctionner
 class SectionErrorBoundary extends Component {
@@ -49,16 +51,11 @@ export default function AdvancedTab() {
   const [frontendUrlDraft, setFrontendUrlDraft] = useState('');
   const [effectiveServerUrls, setEffectiveServerUrls] = useState(null);
 
-  const [glpiInstances, setGlpiInstances] = useState([]);
-
   function load() {
     api.get('/advanced-settings').then(({ data }) => {
       setSettings(data);
     }).catch((err) => setError(err.response?.data?.error || 'Erreur de chargement'));
     api.get('/advanced-settings/server-urls/effective').then(({ data }) => setEffectiveServerUrls(data)).catch(() => {});
-    api.get('/api-configs').then(({ data }) => {
-      setGlpiInstances(data.filter((c) => c.serviceName?.startsWith('glpi')));
-    }).catch(() => {});
   }
 
   useEffect(load, []);
@@ -152,15 +149,6 @@ export default function AdvancedTab() {
           Désactivées, les actions correspondantes passent par le <strong>Centre de Validation</strong>.
         </p>
 
-        {/* Mode autonome : la plateforme fonctionne comme e-ticketing sans GLPI */}
-        <SettingRow
-          title="Mode autonome (sans GLPI)"
-          description="Utilise la plateforme comme outil d'e-ticketing complet, sans dépendre de GLPI. Toutes les synchronisations et écritures GLPI sont désactivées ; les catégories se gèrent localement (page Catégories). Réactivable à tout moment."
-          checked={settings.autonomousMode === true}
-          onChange={(v) => updateSetting('autonomousMode', v)}
-          disabled={saving}
-        />
-
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-md">
           <SettingRow
             title="Auto-envoi des emails IA"
@@ -185,71 +173,19 @@ export default function AdvancedTab() {
             onChange={(v) => updateSetting('portalAllowNewRequest', v)}
             disabled={saving}
           />
-
-          {settings.autonomousMode !== true && (
-            <>
-              <SettingRow
-                title="Auto-approbation GLPI"
-                description="Valide automatiquement la solution ERP quand le technicien résout le ticket dans GLPI — supprime la relecture manuelle."
-                checked={settings.autoApproveGlpiSolutions}
-                onChange={(v) => updateSetting('autoApproveGlpiSolutions', v)}
-                disabled={saving}
-              />
-
-              <SettingRow
-                title="Création GLPI automatique"
-                description="Crée un ticket correspondant dans GLPI dès qu'un ticket est approuvé dans l'ERP."
-                checked={settings.enableGlpiTicketCreation !== false}
-                onChange={(v) => updateSetting('enableGlpiTicketCreation', v)}
-                disabled={saving}
-              />
-
-              <SettingRow
-                title="Dry Run Mode (simulation)"
-                description="Mode simulation : aucune action n'est réellement écrite dans GLPI (création, mise à jour, suivi). Les tickets reçoivent un ID fictif négatif. À désactiver en production."
-                checked={settings.dryRunMode === true}
-                onChange={(v) => updateSetting('dryRunMode', v)}
-                disabled={saving}
-              />
-            </>
-          )}
         </div>
-
-        {/* Instance GLPI active */}
-        {settings.autonomousMode !== true && (
-          <motion.div variants={itemVariants} className="bento-card flex flex-col sm:flex-row sm:items-center justify-between gap-4 sm:gap-lg p-lg">
-            <div className="min-w-0 flex-1">
-              <div className="font-headline-sm text-headline-sm text-on-surface font-semibold flex items-center gap-2">
-                <span className="material-symbols-outlined text-[20px] text-primary">database</span>
-                Instance GLPI active
-              </div>
-              <p className="font-body-sm text-body-sm text-on-surface-variant mt-1.5 break-words">
-                Instance GLPI utilisée pour créer les tickets approuvés.
-                Les instances disponibles se configurent dans <strong>Paramètres → Autre → Services &amp; APIs</strong>.
-              </p>
-            </div>
-            <div className="shrink-0">
-              {glpiInstances.length === 0 ? (
-                <span className="text-xs text-on-surface-variant italic">Aucune instance configurée</span>
-              ) : (
-                <select
-                  value={settings.activeGlpiInstance || 'glpi'}
-                  onChange={(e) => updateSetting('activeGlpiInstance', e.target.value)}
-                  disabled={saving}
-                  className={`${inputClass} min-w-[200px] disabled:opacity-50`}
-                >
-                  {glpiInstances.map((inst) => (
-                    <option key={inst.id} value={inst.serviceName}>
-                      {inst.serviceName === 'glpi' ? 'GLPI Production' : inst.serviceName}
-                      {inst.baseUrl ? ` (${inst.baseUrl.replace(/^https?:\/\//, '').slice(0, 40)})` : ''}
-                    </option>
-                  ))}
-                </select>
-              )}
-            </div>
-          </motion.div>
-        )}
       </div>
+
+      {/* ═══════════════════════════════════════════════════════════════════════ */}
+      {/* SECTION 1bis : MODULE COMPTES APPLICATIFS */}
+      {/* ═══════════════════════════════════════════════════════════════════════ */}
+      <SectionErrorBoundary label="Comptes applicatifs">
+        <AccountProvisioningCard settings={settings} updateSetting={updateSetting} saving={saving} />
+      </SectionErrorBoundary>
+
+      <SectionErrorBoundary label="Supervision comptes applicatifs">
+        <AccountProvisioningSupervisionCard />
+      </SectionErrorBoundary>
 
       {/* ═══════════════════════════════════════════════════════════════════════ */}
       {/* SECTION 2 : CONFIGURATION RESEAU & SERVEUR */}
@@ -408,7 +344,7 @@ function CacheSection() {
         <div className="flex flex-wrap items-start justify-between gap-md">
           <p className="font-body-sm text-body-sm text-on-surface-variant leading-relaxed max-w-2xl">
             Le cache mémoire accélère le chargement des listes à forte lecture (utilisateurs,
-            équipes, référentiels GLPI, modèles, réglages). Chaque réponse est conservée quelques
+            équipes, référentiels métier, modèles, réglages). Chaque réponse est conservée quelques
             secondes seulement (TTL court) puis rafraîchie — aucune donnée n'est obsolète. Les
             écritures ne sont jamais mises en cache.
           </p>

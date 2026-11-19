@@ -21,6 +21,7 @@ const { normalizeLinkType, normalizeLinkEndpoints, normalizeParentChildType, res
 const { formatTicketTitle, UNDETERMINED } = require('../utils/ticketTitle');
 const { resolveLocationFromRequesterLinks } = require('../services/locationDetector');
 const { sanitizeTicketHtml } = require('../utils/security');
+const { assertProvisioningComplete, findTicketsMissingProvisioning } = require('../services/accountProvisioning');
 const { loadCidMap, resolveHtml } = require('../services/emailHtml');
 const multer = require('multer');
 const { validateUpload, safeFilename: makeSafeFilename } = require('../utils/security');
@@ -494,6 +495,19 @@ router.post(
     }
     if (priority && !VALID_PRIORITIES.includes(priority)) {
       return res.status(400).json({ error: `Priorité invalide : ${priority}. Valeurs acceptées : ${VALID_PRIORITIES.join(', ')}` });
+    }
+
+    // Module « Création de comptes applicatifs » : empêche un technicien de contourner
+    // la déclaration obligatoire via l'action groupée (résolution en masse).
+    if (status === 'SOLVED') {
+      const missing = await findTicketsMissingProvisioning(req.user, ids);
+      if (missing.length > 0) {
+        return res.status(409).json({
+          error: `Déclarez les opérations sur comptes applicatifs (création ou droits) avant de résoudre ces ${missing.length} ticket(s).`,
+          code: 'ACCOUNT_PROVISIONING_REQUIRED',
+          details: { missingTicketIds: missing },
+        });
+      }
     }
 
     const data = {};
@@ -1980,6 +1994,20 @@ router.patch('/:id', allowTechnicianStatusOnly, requireTicketAssignOrTechnicianS
       return res.status(400).json({
         error: `Transition invalide : ${STATUS_LABELS[current.status] || current.status} → ${STATUS_LABELS[status] || status}. Transitions autorisées : ${(VALID_TRANSITIONS[current.status] || []).map((s) => STATUS_LABELS[s] || s).join(', ') || 'aucune'}`,
       });
+    }
+  }
+
+  // Module « Création de comptes applicatifs » : quand il est actif, un technicien
+  // doit avoir déclaré les comptes créés avant de passer le ticket à SOLVED.
+  // Filet de sécurité backend : même un appel API direct ne contourne pas la règle.
+  if (status === 'SOLVED') {
+    try {
+      await assertProvisioningComplete(req.user, id);
+    } catch (err) {
+      if (err?.statusCode === 409) {
+        return res.status(409).json({ error: err.message, code: err.code });
+      }
+      throw err;
     }
   }
 

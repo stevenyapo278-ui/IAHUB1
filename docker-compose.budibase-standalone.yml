@@ -1,0 +1,51 @@
+# =============================================================================
+# IA Hub — Budibase autonome (serveur dédié, ERP sur une autre machine)
+# =============================================================================
+# À déployer SUR LE SERVEUR BUDIBASE, indépendamment de la stack ERP.
+#
+#   BUDIBASE_BIND=10.0.70.20 BUDIBASE_PORT=10000 \
+#     docker compose -f docker-compose.budibase-standalone.yml up -d
+#
+# Le projet (`ia-hub-budibase`) et le volume (`budibase_data`) ont un nom fixe :
+# le dossier courant n'influence plus les noms créés. Surcharge possible avec
+# BUDIBASE_PROJECT / BUDIBASE_VOLUME.
+#
+# Puis, depuis le serveur ERP (ou n'importe quelle machine avec Node 18+) :
+#
+#   cd erp-backend
+#   BUDIBASE_URL=http://10.0.70.20:10000 \
+#   BUDIBASE_EMAIL=<admin> BUDIBASE_PASSWORD='...' \
+#     npm run budibase:setup
+#
+# SÉCURITÉ :
+#   • Sans reverse proxy, l'API publique circule en HTTP : la clé API transite en
+#     clair. Utiliser HTTPS (ou un réseau privé/VPN) dès que le réseau n'est pas
+#     totalement de confiance.
+#   • Restreindre le pare-feu au serveur ERP : seule la source ERP doit joindre
+#     BUDIBASE_PORT. Le builder (interface d'admin) n'a pas à être public.
+#   • Pour n'exposer que le proxy : BUDIBASE_BIND=127.0.0.1 puis reverse proxy
+#     HTTPS sur la même machine.
+#   • Épingler l'image après validation (BUDIBASE_IMAGE=budibase/budibase:<tag>).
+# =============================================================================
+
+# Nom de projet fixe : le nom du volume ne dépend donc pas du dossier depuis
+# lequel la commande est lancée (sinon `docker compose` utilise le nom du dossier).
+name: ${BUDIBASE_PROJECT:-ia-hub-budibase}
+
+services:
+  budibase:
+    image: ${BUDIBASE_IMAGE:-budibase/budibase:latest}
+    container_name: ${BUDIBASE_CONTAINER:-budibase}
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Africa/Abidjan}
+    volumes:
+      # CouchDB + MinIO + Redis + LiteLLM : tout l'état de l'instance.
+      - budibase_data:/data
+    ports:
+      # BUDIBASE_BIND=127.0.0.1 si un reverse proxy HTTPS est placé devant.
+      - "${BUDIBASE_BIND:-0.0.0.0}:${BUDIBASE_PORT:-10000}:80"
+
+volumes:
+  budibase_data:
+    name: ${BUDIBASE_VOLUME:-budibase_data}
