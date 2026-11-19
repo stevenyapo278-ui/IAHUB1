@@ -291,6 +291,12 @@ automatiquement (AES-256-GCM) par le middleware Prisma :
      `API` de l'application.
 4. Renseigner **Paramètres → Autres intégrations → Budibase** puis cliquer **Tester**.
 
+> **Automatisation.** `npm run budibase:setup` (ou `node scripts/setupBudibase.js`) crée
+> l'application et la table, répare le schéma et génère la clé, puis affiche les valeurs à
+> saisir. Le plan Budibase est limité à **une application** : si elle existe déjà mais n'est
+> pas retrouvée par son nom (espace, casse), passer `BUDIBASE_APP_ID=app_dev_...`. En cas
+> d'échec, le script affiche le corps de la réponse (`usage_limit_exceeded` inclus).
+
 > **Piège des colonnes JSON/datetime (Budibase v4.0.1).** La validation de ligne passe
 > les contraintes à `validate.js`, qui ne connaît que `string`, `number`, `boolean`,
 > `object`, `array` et `date`. Une colonne `json` ou `datetime` dont les contraintes

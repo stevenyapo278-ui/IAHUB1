@@ -13,6 +13,7 @@
  *   BUDIBASE_EMAIL     compte admin du builder
  *   BUDIBASE_PASSWORD  mot de passe du compte admin
  *   BUDIBASE_APP_NAME  défaut : Comptes applicatifs
+ *   BUDIBASE_APP_ID    cible une application existante (sinon recherche par nom)
  *   BUDIBASE_TABLE     défaut : declarations
  *
  * Piège v4.0.1 : la validation de ligne utilise validate.js, qui ne connaît pas les
@@ -64,14 +65,31 @@ async function login() {
 }
 
 async function ensureApp() {
+  // Cible directe : indispensable quand le plan limite le nombre d'applications
+  // (une deuxième création renvoie 500 « Usage limit exceeded ») ou quand le nom
+  // saisi dans le builder diffère légèrement (espace, casse, espace insécable).
+  const forcedAppId = String(process.env.BUDIBASE_APP_ID || '').trim();
+  if (forcedAppId) return forcedAppId;
+
   // `status=all` est indispensable : sans filtre, Budibase ne liste que les apps publiées.
   const res = await api('/api/applications?status=all');
-  if (!res.ok) throw new Error(`Liste des applications indisponible (${res.status}).`);
-  const existing = (res.data || []).find((app) => app.name === APP_NAME);
-  if (existing) return existing.instance?._id || existing.appId;
+  if (!res.ok) throw new Error(`Liste des applications indisponible (${res.status}) : ${JSON.stringify(res.data).slice(0, 300)}`);
+  const normalize = (value) => String(value || '').replace(/\s+/g, ' ').trim().toLowerCase();
+  const existing = (Array.isArray(res.data) ? res.data : []).find((app) => normalize(app.name) === normalize(APP_NAME));
+  if (existing) {
+    const appId = existing.instance?._id || existing.appId;
+    if (appId) return appId;
+    throw new Error(`Application « ${existing.name} » trouvée mais sans identifiant exploitable.`);
+  }
 
   const created = await api('/api/applications', { method: 'POST', body: { name: APP_NAME } });
-  if (!created.ok) throw new Error(`Création de l’application échouée (${created.status}).`);
+  if (!created.ok) {
+    const detail = JSON.stringify(created.data).slice(0, 300);
+    const hint = created.data?.error?.code === 'usage_limit_exceeded'
+      ? ' — une application existe déjà (plan limité à 1 app) : renseigne BUDIBASE_APP_ID avec son identifiant.'
+      : '';
+    throw new Error(`Création de l’application échouée (${created.status}) : ${detail}${hint}`);
+  }
   return created.data.appId;
 }
 
