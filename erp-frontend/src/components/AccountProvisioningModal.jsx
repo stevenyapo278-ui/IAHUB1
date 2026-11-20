@@ -470,7 +470,9 @@ export default function AccountProvisioningModal({ open, ticketId, ticketTitle, 
                     )}
                     {Array.isArray(prefill.ignoredApplications) && prefill.ignoredApplications.length > 0 && (
                       <span className="block mt-1 text-amber-600 dark:text-amber-400">
-                        Applications ignorées (hors catalogue) : {prefill.ignoredApplications.join(', ')}.
+                        Applications citées hors catalogue : {prefill.ignoredApplications.join(', ')}.
+                        {' '}Elles ne sont pas proposées ici et ont été signalées à un administrateur —
+                        choisissez l’application correspondante dans la liste, ou « Autre ».
                       </span>
                     )}
                   </div>

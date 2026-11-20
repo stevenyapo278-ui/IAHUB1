@@ -2094,3 +2094,22 @@ model AccountProvisioningRecord {
   @@index([applicationId])
   @@index([createdAt])
 }
+
+// Applications citées dans les tickets mais absentes du catalogue.
+// File de validation SUPERADMIN : l'IA ne crée jamais une application, elle
+// propose seulement un candidat que l'administrateur promeut (ou ignore).
+// Une ligne par nom normalisé (casse, accents et ponctuation neutralisés).
+model ApplicationCandidate {
+  id                Int      @id @default(autoincrement())
+  name              String // libellé tel que vu dans le ticket
+  normalizedName    String   @unique
+  occurrences       Int      @default(1)
+  status            String   @default("PENDING") // PENDING | PROMOTED | IGNORED
+  lastTicketId      Int?
+  promotedCatalogId Int?
+  createdAt         DateTime @default(now())
+  lastSeenAt        DateTime @default(now())
+
+  @@index([status])
+  @@index([lastSeenAt])
+}

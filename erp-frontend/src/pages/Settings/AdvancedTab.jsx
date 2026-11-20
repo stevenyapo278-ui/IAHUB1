@@ -5,6 +5,7 @@ import Toggle from '../../components/Toggle';
 import { Component } from 'react';
 import { SettingRow, IntervalRow, inputClass, itemVariants } from './SettingsComponents';
 import AccountProvisioningCard from './AccountProvisioningCard';
+import AccountProvisioningCandidatesCard from './AccountProvisioningCandidatesCard';
 import AccountProvisioningSupervisionCard from './AccountProvisioningSupervisionCard';
 
 // Mini ErrorBoundary pour isoler chaque section — si une section plante, les autres continuent de fonctionner
@@ -181,6 +182,10 @@ export default function AdvancedTab() {
       {/* ═══════════════════════════════════════════════════════════════════════ */}
       <SectionErrorBoundary label="Comptes applicatifs">
         <AccountProvisioningCard settings={settings} updateSetting={updateSetting} saving={saving} />
+      </SectionErrorBoundary>
+
+      <SectionErrorBoundary label="Applications hors catalogue">
+        <AccountProvisioningCandidatesCard />
       </SectionErrorBoundary>
 
       <SectionErrorBoundary label="Supervision comptes applicatifs">

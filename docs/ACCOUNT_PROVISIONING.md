@@ -32,7 +32,12 @@ Champs `SystemSettings` :
 ## Modèle de données
 
 - `ApplicationCatalog` : liste **fermée** des applications autorisées (`name`, `aliases`, `fields`, `isActive`).
-  Le seed crée Microsoft 365, Sage X3, Sage Paie, Odoo, GLPI, Active Directory (upsert non destructif).
+  Le seed amorce Microsoft 365, Sage X3, Sage Paie, Odoo, GLPI, Active Directory **uniquement si le
+  catalogue est vide** : une application supprimée par le SUPERADMIN n'est jamais recréée.
+- `ApplicationCandidate` : file de validation des applications **citées hors catalogue**
+  (`name`, `normalizedName` unique, `occurrences`, `status` `PENDING|PROMOTED|IGNORED`,
+  `lastTicketId`, `promotedCatalogId`). L'IA ne crée jamais une application : elle propose,
+  le SUPERADMIN promeut (ou fusionne, ou ignore).
 - `AccountProvisioningRecord` : **un enregistrement par ticket** (`ticketId` unique).
   - `accounts` : `[{ applicationId, applicationName, operation, login, email, profile, rights, type, quantity, passwordDeliveryChannel, note }]`
     où `operation` vaut `CREATION` (défaut) ou `DROITS`.
@@ -65,6 +70,10 @@ canal de remise (« remis en main propre », « appel téléphonique »…).
 | `POST` | `/api/account-provisioning/catalog` | SUPERADMIN | Créer une application |
 | `PATCH` | `/api/account-provisioning/catalog/:id` | SUPERADMIN | Modifier une application |
 | `DELETE` | `/api/account-provisioning/catalog/:id` | SUPERADMIN | Désactivation logique |
+| `DELETE` | `/api/account-provisioning/catalog/:id/permanent` | SUPERADMIN | Suppression définitive (refusée si des déclarations la référencent) |
+| `GET` | `/api/account-provisioning/candidates?status=PENDING` | SUPERADMIN | Applications citées hors catalogue |
+| `POST` | `/api/account-provisioning/candidates/:id/promote` | SUPERADMIN | Ajouter / fusionner dans le catalogue |
+| `POST` | `/api/account-provisioning/candidates/:id/ignore` | SUPERADMIN | Ignorer définitivement |
 | `GET` | `/api/account-provisioning/ticket/:ticketId` | authentifié | État (`required`, `completed`, `record`) |
 | `GET` | `/api/account-provisioning/ticket/:ticketId/prefill` | TECHNICIAN+ | Proposition IA / déterministe |
 | `POST` | `/api/account-provisioning/ticket/:ticketId` | TECHNICIAN+ | Déclarer les comptes |
@@ -221,8 +230,13 @@ aussi des bases existantes.
   La modale affiche la preuve textuelle de l'IA, la confiance, un bandeau « confiance faible »
   le cas échéant, et les avertissements de doublons.
 - **Paramètres → Avancé (SUPERADMIN)** : carte « Comptes applicatifs » (activation, pré-remplissage
-  IA, fréquence de rejeu, catalogue avec alias et profils) et carte **« Supervision des
-  déclarations »**.
+  IA, fréquence de rejeu, catalogue avec alias et profils), carte **« Applications citées hors
+  catalogue »** (promotion / fusion / ignorer) et carte **« Supervision des déclarations »**.
+  Le catalogue affiche par défaut les seules applications actives ; le bouton
+  « Afficher les désactivées (n) » révèle les autres. Chaque application est éditable
+  (nom, alias, profils). La corbeille **désactive** une application active ; sur une application
+  déjà désactivée elle propose la **suppression définitive**, refusée (409) si des déclarations
+  y font référence — l'historique et les statistiques restent alors intacts.
 - **Paramètres → Autres intégrations** : carte « Budibase » (URL, clé API chiffrée, App ID,
   Table ID, chemin des lignes, test de connexion).
 - **Liste des tickets** : la résolution rapide affiche un message explicite invitant à ouvrir la
@@ -498,6 +512,33 @@ Le script est idempotent, réutilise la clé existante, vérifie l'écriture/lec
 valeurs à saisir. Terminer par **Tester** dans l'UI, puis déclarer une opération sur un ticket
 et vérifier la ligne dans la table `declarations`.
 
+## Détection des applications
+
+**Entrées analysées** — au moment où la modale s'ouvre (donc au passage en `SOLVED`) :
+
+1. le **titre** du ticket ;
+2. son **contenu** (HTML converti en texte) ;
+3. les **8 derniers suivis** (`Followup`), du plus ancien au plus récent.
+
+Les **pièces jointes ne sont pas analysées** (ni images, ni PDF, ni documents). Le texte total
+est tronqué à 6 000 caractères. La détection n'est pas recalculée à chaque nouvel envoi : elle
+reflète l'état de la conversation au moment de l'ouverture de la modale.
+
+**Chaîne de traitement** :
+
+1. **Pré-filtre déterministe** — mots-clés « compte / accès / identifiant / login / droits… » et
+   preuve au passé, en écartant négations et demandes. Sans pré-filtre ni alias détecté : aucun
+   appel IA.
+2. **Alias du catalogue** — correspondance sur mot entier, l'alias le plus long gagne
+   (« Sage Paie » ne déclenche pas « Sage X3 »).
+3. **IA contrainte** — un seul appel, sortie JSON validée contre le catalogue fermé.
+4. **File de candidats** — les noms cités mais absents du catalogue sont renvoyés dans
+   `unknownApplications`, écartés de la proposition, puis enregistrés dans `ApplicationCandidate`
+   (une ligne par nom normalisé : casse, accents et ponctuation neutralisés). Le SUPERADMIN les
+   promeut depuis **Paramètres → Avancé → Applications citées hors catalogue**, avec alias et
+   profils, ou les fusionne avec une application existante, ou les ignore. Un candidat déjà
+   promu ou ignoré n'est jamais ré-ouvert.
+
 ## IA : ce qui est fiable, ce qui ne l'est pas
 
 Le pré-remplissage est **une aide, jamais une décision** :
@@ -511,9 +552,11 @@ Le pré-remplissage est **une aide, jamais une décision** :
    `responseSchema` (Gemini) ou `response_format: json_object` (API compatibles OpenAI).
    Le schéma `AI_RESPONSE_SCHEMA` impose `isAccountProvisioning`, `confidence`, `reason`,
    `evidence` et `accounts[]` (`application` + `operation`, puis `login`, `email`, `profile`,
-   `rights`, `type`, `quantity`).
+   `rights`, `type`, `quantity`), et accepte `unknownApplications[]` pour les logiciels cités
+   hors catalogue.
 3. **Validation stricte contre le catalogue** : une application inventée est ignorée
-   (`ignoredApplications`), elle ne peut pas être enregistrée.
+   (`ignoredApplications`), elle ne peut pas être enregistrée ; elle alimente la file de
+   candidats validée par un administrateur.
 4. **Preuve et seuil** : la réponse doit citer un extrait exact (`evidence`). En dessous de
    `MIN_ACCOUNTS_CONFIDENCE = 0.6`, les **comptes** ne sont pas pré-remplis (seules les
    applications sont proposées) et l'UI affiche un bandeau explicite.

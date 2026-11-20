@@ -12,6 +12,11 @@ const {
   ProvisioningError,
 } = require('./accountProvisioning');
 const { parseAiSuggestion, detectApplications, buildDeterministicPrefill } = require('./accountProvisioningAi');
+const {
+  normalizeCandidateName,
+  cleanAliases,
+  fieldsFromProfiles,
+} = require('./accountProvisioningCandidates');
 
 const CATALOG = [
   {
@@ -369,10 +374,46 @@ describe('parseAiSuggestion', () => {
     const result = parseAiSuggestion(raw, CATALOG);
     expect(result.accounts.map((account) => account.operation)).toEqual(['CREATION', 'CREATION']);
   });
+
+  it('collecte les applications hors catalogue signalées par l’IA', () => {
+    const raw = JSON.stringify({
+      isAccountProvisioning: true,
+      confidence: 0.6,
+      accounts: [{ application: 'SAP R/3', operation: 'CREATION', login: 'j.doe' }],
+      unknownApplications: ['SAP R/3', 'CRM maison', 'm365'],
+    });
+    const result = parseAiSuggestion(raw, CATALOG);
+    expect(result.accounts).toHaveLength(0);
+    // Dédupliqué, et jamais une application du catalogue (« m365 » est un alias).
+    expect(result.ignoredApplications).toEqual(['SAP R/3', 'CRM maison']);
+  });
 });
 
-describe('détection déterministe', () => {
-  it('détecte un alias avec accents et frontières de mots', () => {
+describe('applications candidates', () => {
+  it('normalise casse, accents et ponctuation pour dédupliquer', () => {
+    expect(normalizeCandidateName('Sage-X3')).toBe('sage x3');
+    expect(normalizeCandidateName('  SAGE   X3 ')).toBe('sage x3');
+    expect(normalizeCandidateName('SAP R/3')).toBe('sap r 3');
+    expect(normalizeCandidateName('SAP R3')).toBe('sap r3');
+    expect(normalizeCandidateName('')).toBe('');
+  });
+
+  it('déduplique les alias sans tenir compte de la casse ni des espaces', () => {
+    expect(cleanAliases(['Zoho Test', 'zoho test', '  Zoho   TEST ', 'ztest', '']))
+      .toEqual(['Zoho Test', 'ztest']);
+    expect(cleanAliases(null)).toEqual([]);
+  });
+
+  it('construit un schéma de profils fermé et dédupliqué', () => {
+    expect(fieldsFromProfiles(['Comptable', ' comptable ', 'Acheteur'])).toEqual([
+      { key: 'profile', label: 'Profil', type: 'select', options: ['Comptable', 'Acheteur'] },
+    ]);
+    expect(fieldsFromProfiles([])).toEqual([]);
+    expect(fieldsFromProfiles(null)).toEqual([]);
+  });
+});
+
+describe('détection déterministe', () => {  it('détecte un alias avec accents et frontières de mots', () => {
     const apps = detectApplications('J’ai créé un accès à M365 pour le service comptabilité', CATALOG);
     expect(apps).toEqual([{ id: 2, name: 'Microsoft 365' }]);
   });

@@ -18,6 +18,12 @@ const {
   getProvisioningStats,
 } = require('../services/accountProvisioning');
 const { suggestProvisioning } = require('../services/accountProvisioningAi');
+const {
+  recordApplicationCandidates,
+  listApplicationCandidates,
+  promoteApplicationCandidate,
+  ignoreApplicationCandidate,
+} = require('../services/accountProvisioningCandidates');
 
 const router = express.Router();
 router.use(authenticate);
@@ -156,6 +162,64 @@ router.delete('/catalog/:id', requireSuperAdmin, async (req, res) => {
   }
 });
 
+// Suppression définitive : uniquement si aucune déclaration ne référence
+// l'application comme application principale (sinon l'historique et les stats
+// perdraient leur lien). Les snapshots JSON des comptes restent lisibles.
+router.delete('/catalog/:id/permanent', requireSuperAdmin, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Identifiant invalide.' });
+    const existing = await prisma.applicationCatalog.findUnique({ where: { id } });
+    if (!existing) return res.status(404).json({ error: 'Application introuvable.' });
+
+    const referenced = await prisma.accountProvisioningRecord.count({ where: { applicationId: id } });
+    if (referenced > 0) {
+      return res.status(409).json({
+        error: `« ${existing.name} » est référencée par ${referenced} déclaration(s) : désactivez-la au lieu de la supprimer.`,
+        code: 'ACCOUNT_PROVISIONING_APP_IN_USE',
+        details: { records: referenced },
+      });
+    }
+
+    await prisma.applicationCatalog.delete({ where: { id } });
+    return res.json({ deleted: true, id });
+  } catch (err) {
+    return sendError(res, err, 'Impossible de supprimer définitivement l’application.');
+  }
+});
+
+// ── Applications détectées hors catalogue ───────────────────────────────────
+// File de validation : l'IA ne crée jamais une application, elle propose un nom.
+router.get('/candidates', requireSuperAdmin, async (req, res) => {
+  try {
+    const candidates = await listApplicationCandidates({
+      status: req.query.status || 'PENDING',
+      limit: req.query.limit,
+    });
+    return res.json(candidates);
+  } catch (err) {
+    return sendError(res, err, 'Impossible de charger les applications candidates.');
+  }
+});
+
+router.post('/candidates/:id/promote', requireSuperAdmin, async (req, res) => {
+  try {
+    const result = await promoteApplicationCandidate(req.params.id, req.body || {});
+    return res.json(result);
+  } catch (err) {
+    return sendError(res, err, 'Impossible d’ajouter l’application au catalogue.');
+  }
+});
+
+router.post('/candidates/:id/ignore', requireSuperAdmin, async (req, res) => {
+  try {
+    const candidate = await ignoreApplicationCandidate(req.params.id);
+    return res.json(candidate);
+  } catch (err) {
+    return sendError(res, err, 'Impossible d’ignorer l’application candidate.');
+  }
+});
+
 // ── Déclaration par ticket ──────────────────────────────────────────────────
 
 // État du module pour un ticket : le frontend s'en sert pour décider d'ouvrir
@@ -174,6 +238,19 @@ router.get('/ticket/:ticketId/prefill', async (req, res) => {
   try {
     if (!canDeclare(req.user)) return res.status(403).json({ error: 'Accès refusé.' });
     const suggestion = await suggestProvisioning({ ticketId: req.params.ticketId, user: req.user });
+
+    // File de validation : les noms hors catalogue sont conservés pour que le
+    // SUPERADMIN puisse enrichir le référentiel. Jamais bloquant.
+    try {
+      if (Array.isArray(suggestion.ignoredApplications) && suggestion.ignoredApplications.length > 0) {
+        await recordApplicationCandidates(suggestion.ignoredApplications, {
+          ticketId: Number(req.params.ticketId) || null,
+        });
+      }
+    } catch (err) {
+      console.error('[account-provisioning] enregistrement des candidats:', err.message);
+    }
+
     return res.json(suggestion);
   } catch (err) {
     return sendError(res, err, 'Impossible de générer la proposition de pré-remplissage.');

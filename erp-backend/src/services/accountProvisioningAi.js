@@ -179,6 +179,7 @@ function buildDeterministicPrefill(ticket, followups, catalog) {
     confidence,
     accounts: [],
     applications,
+    ignoredApplications: [],
     aiUsed: false,
     reason,
   };
@@ -229,13 +230,25 @@ function parseAiSuggestion(raw, catalog) {
   const rawAccounts = Array.isArray(parsed.accounts) ? parsed.accounts : [];
   const accounts = [];
   const ignoredApplications = [];
+  // Noms vus deux fois (ligne de compte + champ dédié) : on ne les répète pas.
+  const seenIgnored = new Set();
+  const pushIgnored = (value) => {
+    const name = String(value || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+    if (!name) return;
+    const key = normalizeForMatch(name);
+    if (!key || seenIgnored.has(key)) return;
+    // Une application connue du catalogue n'est jamais un candidat.
+    if (mapApplication(name, catalog)) return;
+    seenIgnored.add(key);
+    ignoredApplications.push(name);
+  };
 
   for (const raw of rawAccounts.slice(0, 50)) {
     if (!raw || typeof raw !== 'object') continue;
     const appName = raw.application || raw.applicationName || raw.applicatif || '';
     const application = mapApplication(appName, catalog);
     if (!application) {
-      if (appName) ignoredApplications.push(String(appName).slice(0, 120));
+      pushIgnored(appName);
       continue;
     }
 
@@ -267,6 +280,12 @@ function parseAiSuggestion(raw, catalog) {
     applicationsMap.set(account.applicationId, { id: account.applicationId, name: account.applicationName });
   }
 
+  // Applications explicitement citées mais absentes du catalogue : collectées à
+  // part pour alimenter la file de candidats (l'IA ne les crée jamais).
+  for (const value of Array.isArray(parsed.unknownApplications) ? parsed.unknownApplications.slice(0, 20) : []) {
+    pushIgnored(value && typeof value === 'object' ? (value.name || value.application) : value);
+  }
+
   return {
     ok: true,
     // Un booléen explicite fait foi ; sinon on retombe sur la présence de comptes.
@@ -276,7 +295,7 @@ function parseAiSuggestion(raw, catalog) {
     confidence: clampConfidence(parsed.confidence) ?? (accounts.length > 0 ? 0.7 : 0.3),
     accounts,
     applications: Array.from(applicationsMap.values()),
-    ignoredApplications,
+    ignoredApplications: ignoredApplications.slice(0, 30),
     // Preuve textuelle : affichée au technicien, elle rend la proposition vérifiable.
     evidence: String(parsed.evidence || parsed.preuve || '').trim().slice(0, 500),
     reason: String(parsed.reason || parsed.evidence || '').slice(0, 500),
@@ -308,6 +327,10 @@ const AI_RESPONSE_SCHEMA = {
         },
         required: ['application', 'operation'],
       },
+    },
+    unknownApplications: {
+      type: 'ARRAY',
+      items: { type: 'STRING' },
     },
   },
   required: ['isAccountProvisioning', 'confidence', 'accounts'],
@@ -344,6 +367,7 @@ CONSIGNES :
 6. N'inclus JAMAIS de mot de passe, même si le texte en contient.
 7. "evidence" doit citer MOT POUR MOT l'extrait du texte qui prouve l'opération. Chaîne vide si aucune preuve.
 8. "confidence" est un nombre entre 0 et 1.
+9. "unknownApplications" liste les logiciels explicitement nommés dans le texte qui ne figurent PAS dans le catalogue et pour lesquels une opération de compte a réellement eu lieu (ex. « SAP R/3 », « CRM maison »). Reprends le nom tel qu'écrit. Tableau vide si tout est au catalogue. N'y mets jamais un nom du catalogue.
 
 EXEMPLES :
 - « Merci de créer un compte Sage X3 pour M. Doe » (demande du demandeur, aucun suivi) → isAccountProvisioning=false, evidence="".
@@ -352,6 +376,7 @@ EXEMPLES :
 - « Droits de validation ajoutés à j.doe sur Sage Paie » → isAccountProvisioning=true, accounts=[{application:"Sage Paie", operation:"DROITS", login:"j.doe", rights:"Validation des bulletins", quantity:1}], evidence="Droits de validation ajoutés à j.doe sur Sage Paie".
 - « Merci de donner les droits de consultation Odoo à j.doe » (demande sans suivi) → isAccountProvisioning=false.
 - « L'utilisateur avait déjà un compte Odoo, rien créé » → isAccountProvisioning=false.
+- « Compte SAP R/3 créé pour j.doe » → isAccountProvisioning=true, accounts=[{application:"", operation:"CREATION", login:"j.doe", quantity:1}], unknownApplications=["SAP R/3"], confidence=0.6, evidence="Compte SAP R/3 créé pour j.doe".
 
 Réponds UNIQUEMENT avec ce JSON, sans commentaire :
 {
@@ -370,7 +395,8 @@ Réponds UNIQUEMENT avec ce JSON, sans commentaire :
       "type": "NOMINAL|ADMIN|SERVICE|PARTAGE|AUTRE",
       "quantity": 1
     }
-  ]
+  ],
+  "unknownApplications": ["logiciel cité hors catalogue"]
 }`;
 }
 

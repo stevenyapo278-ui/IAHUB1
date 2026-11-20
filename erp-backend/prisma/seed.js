@@ -234,22 +234,25 @@ async function main() {
   }
 
   // ── Catalogue des applications (module « Création de comptes applicatifs ») ─
-  // Idempotent et non destructif : les personnalisations faites dans l'UI
-  // (alias, champs, désactivation) sont préservées à chaque re-seed.
-  const DEFAULT_APPLICATIONS = [
-    { name: 'Microsoft 365', aliases: ['m365', 'office 365', 'o365', 'outlook', 'exchange', 'teams'] },
-    { name: 'Sage X3', aliases: ['x3', 'sage x3'] },
-    { name: 'Sage Paie', aliases: ['sage paie', 'paie'] },
-    { name: 'Odoo', aliases: ['odoo', 'erp odoo'] },
-    { name: 'GLPI', aliases: ['glpi'] },
-    { name: 'Active Directory', aliases: ['ad', 'active directory', 'annuaire', 'domaine'] },
-  ];
-  for (const app of DEFAULT_APPLICATIONS) {
-    await prisma.applicationCatalog.upsert({
-      where: { name: app.name },
-      update: {}, // ne pas écraser les alias/champs ajustés par le SUPERADMIN
-      create: { name: app.name, aliases: app.aliases, fields: [] },
-    });
+  // Amorçage uniquement : si le catalogue contient déjà au moins une ligne, on ne
+  // touche à rien. Sinon une application supprimée définitivement par le
+  // SUPERADMIN serait recréée à chaque redéploiement (le seed tourne au démarrage).
+  const catalogCount = await prisma.applicationCatalog.count();
+  if (catalogCount === 0) {
+    const DEFAULT_APPLICATIONS = [
+      { name: 'Microsoft 365', aliases: ['m365', 'office 365', 'o365', 'outlook', 'exchange', 'teams'] },
+      { name: 'Sage X3', aliases: ['x3', 'sage x3'] },
+      { name: 'Sage Paie', aliases: ['sage paie', 'paie'] },
+      { name: 'Odoo', aliases: ['odoo', 'erp odoo'] },
+      { name: 'GLPI', aliases: ['glpi'] },
+      { name: 'Active Directory', aliases: ['ad', 'active directory', 'annuaire', 'domaine'] },
+    ];
+    for (const app of DEFAULT_APPLICATIONS) {
+      await prisma.applicationCatalog.create({
+        data: { name: app.name, aliases: app.aliases, fields: [] },
+      });
+    }
+    console.log(`${DEFAULT_APPLICATIONS.length} applications par défaut créées.`);
   }
 
   console.log('Seed terminé.');
