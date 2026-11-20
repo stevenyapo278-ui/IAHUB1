@@ -1,3 +1,9 @@
+// La politique de session lit Prisma : mock partiel pour garder ce test unitaire
+// sans base (aucune surcharge UI → fallback environnement).
+jest.mock('../prismaClient', () => ({
+  systemSettings: { findUnique: jest.fn().mockResolvedValue(null) },
+}));
+
 const jwt = require('jsonwebtoken');
 const { signAccessToken, verifyAccessToken, getAccessTokenTtl, getSessionMaxAgeMs } = require('./authToken');
 

@@ -704,6 +704,14 @@ model SystemSettings {
   accountProvisioningAiPrefill    Boolean @default(true)  // pré-remplissage IA du formulaire (jamais bloquant)
   accountProvisioningRetrySeconds Int     @default(300)   // rejeu des écritures Budibase en échec (0 = désactivé)
 
+  // ── Politique de session (Paramètres > Avancé > Sessions) ────────────────
+  // Réglages modifiables sans redémarrage. `null` = utiliser la variable
+  // d'environnement correspondante, puis le défaut codé en dur. `0` = contrôle
+  // désactivé (inactivité : session sans limite d'inactivité ; plafond : session
+  // sans limite absolue, bornée techniquement à 10 ans).
+  sessionIdleTimeoutMinutes Int? // AUTH_IDLE_TIMEOUT_MINUTES, défaut 480 (8 h)
+  sessionMaxHours           Int? // AUTH_SESSION_MAX_HOURS, défaut 12
+
   // ── Contrôle global de l'IA (Paramètres > Intelligence Artificielle) ──────
   aiEnabled              Boolean  @default(true) // toggle global : désactive tous les appels IA (pipeline, chatbot, scanner, etc.)
   aiDailyTokenBudget     Int      @default(100000) // budget journalier en tokens (0 = illimité)

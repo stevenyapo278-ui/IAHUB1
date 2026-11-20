@@ -12,7 +12,7 @@ const { sendPasswordResetLinkEmail } = require('../services/emailSender');
 const { auditLog } = require('../services/auditLogService');
 const { isLdapEnabled, isLdapAdminUsername, ldapEmailFor, authenticateLdap } = require('../services/ldapAuth');
 const { recordFailedLogin, clearFailedLogins, isAccountLocked, validateUpload, validatePasswordStrength } = require('../utils/security');
-const { signAccessToken } = require('../utils/authToken');
+const { signAccessToken, getSessionMaxAgeMs } = require('../utils/authToken');
 const {
   createAuthSession,
   setRefreshCookie,
@@ -581,6 +581,13 @@ router.post('/refresh', requireTrustedOrigin, async (req, res) => {
   // ouvert ne doit pas repousser indéfiniment le timeout d'inactivité. Seul le front,
   // sur action réelle, envoie X-User-Activity.
   const countsAsActivity = req.headers['x-user-activity'] === '1';
+
+  // La politique de session a pu changer depuis le login (Paramètres > Avancé > Sessions).
+  // On étend l'échéance absolue si le plafond a été augmenté ou désactivé ; on ne la
+  // raccourcit pas ici car verifyAccessToken applique déjà le plafond courant via `sst`.
+  const policyExpiresAt = new Date(session.sessionStart.getTime() + getSessionMaxAgeMs());
+  const expiresAt = policyExpiresAt > session.expiresAt ? policyExpiresAt : session.expiresAt;
+
   await prisma.authSession.update({
     where: { id: session.id },
     data: {
@@ -588,10 +595,11 @@ router.post('/refresh', requireTrustedOrigin, async (req, res) => {
       previousTokenHash: presentedHash,
       rotatedAt: now,
       activeRole,
+      expiresAt,
       ...(countsAsActivity ? { lastActivityAt: now } : {}),
     },
   });
-  setRefreshCookie(res, newRefreshToken, session.expiresAt.getTime() - now.getTime());
+  setRefreshCookie(res, newRefreshToken, expiresAt.getTime() - now.getTime());
 
   const token = signAccessToken(session.user, {
     role: activeRole,

@@ -4,6 +4,7 @@ const prisma = require('../prismaClient');
 const { authenticate } = require('../middleware/auth');
 const { requireSuperAdmin } = require('../middleware/permissions');
 const { normalizeHost, resolveBackendUrl, resolveFrontendUrl } = require('../services/systemSettings');
+const { getSessionPolicy, applySessionPolicy } = require('../services/sessionPolicy');
 const { auditLog } = require('../services/auditLogService');
 const { purgeTickets, freshStart } = require('../services/ticketPurge');
 const cacheStore = require('../services/cacheStore');
@@ -24,9 +25,16 @@ async function getOrCreateSettings() {
   });
 }
 
+// Ajoute la politique de session EFFECTIVE (UI > env > défaut) à la réponse :
+// le front peut ainsi afficher la valeur réellement appliquée et sa provenance,
+// même quand la colonne UI est vide (null = valeur héritée de l'environnement).
+function withSessionPolicy(settings) {
+  return { ...settings, sessionPolicy: getSessionPolicy() };
+}
+
 router.get('/', async (req, res) => {
   const settings = await getOrCreateSettings();
-  return res.json(settings);
+  return res.json(withSessionPolicy(settings));
 });
 
 // ── Purge tickets ───────────────────────────────────────────────────────
@@ -122,7 +130,26 @@ const PUT_FIELDS = [
   'aiEnabled', 'aiDailyTokenBudget', 'aiTokenAlertThreshold', 'aiTokenAlertRecipients',
   // Module « Création de comptes applicatifs » (page Avancé, SUPERADMIN uniquement)
   'accountProvisioningEnabled', 'accountProvisioningAiPrefill', 'accountProvisioningRetrySeconds',
+  // Politique de session (page Avancé) — null = hériter de l'environnement
+  'sessionIdleTimeoutMinutes', 'sessionMaxHours',
 ];
+
+// Bornes de sécurité des réglages de session. 0 = contrôle désactivé.
+const SESSION_POLICY_BOUNDS = {
+  sessionIdleTimeoutMinutes: { min: 0, max: 100000, label: "Délai d'inactivité (minutes)" },
+  sessionMaxHours: { min: 0, max: 8760, label: 'Durée maximale de session (heures)' },
+};
+
+// `null`/vide = remise à la valeur héritée (env puis défaut). Sinon entier >= 0.
+function normalizeSessionPolicyField(field, raw) {
+  const bounds = SESSION_POLICY_BOUNDS[field];
+  if (raw === null || raw === undefined || raw === '') return { value: null };
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed < bounds.min || parsed > bounds.max) {
+    return { error: `${bounds.label} : valeur entière entre ${bounds.min} et ${bounds.max} attendue` };
+  }
+  return { value: parsed };
+}
 
 async function handleSaveSettings(req, res) {
   const data = {};
@@ -133,12 +160,23 @@ async function handleSaveSettings(req, res) {
     return res.status(400).json({ error: 'Aucun réglage à sauvegarder (champs non reconnus)' });
   }
 
+  for (const field of Object.keys(SESSION_POLICY_BOUNDS)) {
+    if (data[field] === undefined) continue;
+    const { value, error } = normalizeSessionPolicyField(field, data[field]);
+    if (error) return res.status(400).json({ error });
+    data[field] = value;
+  }
+
   try {
     const settings = await prisma.systemSettings.upsert({
       where: { id: 1 },
       update: data,
       create: { id: 1, ...data },
     });
+
+    // Applique immédiatement la nouvelle politique : la session en cours et les
+    // suivantes utilisent les valeurs enregistrées, sans redémarrage.
+    applySessionPolicy(settings);
 
     // Les réglages (dont navigationConfig, qui pilote la sidebar de tous les utilisateurs) sont
     // servis via GET /api/system-settings derrière un cache TTL 30s : on l'invalide pour que la
@@ -156,7 +194,7 @@ async function handleSaveSettings(req, res) {
       metadata: { fields: Object.keys(data) },
     }).catch(() => {});
 
-    return res.json(settings);
+    return res.json(withSessionPolicy(settings));
   } catch (err) {
     console.error('[advancedsettings.routes] Erreur sauvegarde réglages:', err);
     return res.status(500).json({ error: 'Erreur lors de la sauvegarde des réglages : ' + err.message });

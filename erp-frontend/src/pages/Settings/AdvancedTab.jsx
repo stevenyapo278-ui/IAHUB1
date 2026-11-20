@@ -7,6 +7,7 @@ import { SettingRow, IntervalRow, inputClass, itemVariants } from './SettingsCom
 import AccountProvisioningCard from './AccountProvisioningCard';
 import AccountProvisioningCandidatesCard from './AccountProvisioningCandidatesCard';
 import AccountProvisioningSupervisionCard from './AccountProvisioningSupervisionCard';
+import SessionPolicyCard from './SessionPolicyCard';
 
 // Mini ErrorBoundary pour isoler chaque section — si une section plante, les autres continuent de fonctionner
 class SectionErrorBoundary extends Component {
@@ -175,6 +176,32 @@ export default function AdvancedTab() {
             disabled={saving}
           />
         </div>
+      </div>
+
+      {/* ═══════════════════════════════════════════════════════════════════════ */}
+      {/* SECTION 1ter : SESSIONS & SÉCURITÉ */}
+      {/* ═══════════════════════════════════════════════════════════════════════ */}
+      <div className="space-y-md">
+        <div className="flex items-center gap-2 border-b border-outline-variant/40 pb-sm">
+          <span className="material-symbols-outlined text-primary text-2xl">shield_person</span>
+          <h4 className="font-headline-md text-headline-md text-on-surface font-bold">Sessions & Sécurité</h4>
+        </div>
+
+        <p className="text-xs text-on-surface-variant leading-relaxed max-w-2xl">
+          Réglages appliqués immédiatement, sans redémarrage du serveur. Ils remplacent les
+          variables d'environnement <code className="font-mono">AUTH_IDLE_TIMEOUT_MINUTES</code> et{' '}
+          <code className="font-mono">AUTH_SESSION_MAX_HOURS</code> quand une valeur est saisie ici.
+        </p>
+
+        <SectionErrorBoundary label="Politique de session">
+          <SessionPolicyCard
+            settings={settings}
+            onSaved={setSettings}
+            setSaving={setSaving}
+            setError={setError}
+            saving={saving}
+          />
+        </SectionErrorBoundary>
       </div>
 
       {/* ═══════════════════════════════════════════════════════════════════════ */}

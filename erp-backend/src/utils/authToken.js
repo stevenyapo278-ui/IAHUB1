@@ -1,24 +1,18 @@
 const jwt = require('jsonwebtoken');
+const {
+  DEFAULT_SESSION_MAX_HOURS,
+  getSessionMaxAgeMs,
+} = require('../services/sessionPolicy');
 
 // Durée de vie du jeton d'ACCÈS (Bearer envoyé à chaque requête). Courte par défaut :
 // un jeton volé n'est exploitable que pendant cette fenêtre. Le renouvellement se fait
 // via /auth/refresh (cookie HttpOnly) tant que la session n'est ni inactive ni expirée
-// (voir AUTH_IDLE_TIMEOUT_MINUTES et AUTH_SESSION_MAX_HOURS).
+// (voir AUTH_IDLE_TIMEOUT_MINUTES et AUTH_SESSION_MAX_HOURS, surchargeables depuis
+// Paramètres > Avancé > Sessions).
 const DEFAULT_ACCESS_TTL = '15m';
-
-// Plafond ABSOLU d'une session, quel que soit le nombre de renouvellements du jeton.
-// Empêche une session de vivre indéfiniment via /auth/me (l'ancien comportement
-// réémettait un jeton toutes les 2 minutes sans limite).
-const DEFAULT_SESSION_MAX_HOURS = 12;
 
 function getAccessTokenTtl() {
   return process.env.JWT_EXPIRES_IN || DEFAULT_ACCESS_TTL;
-}
-
-function getSessionMaxAgeMs() {
-  const parsed = Number.parseFloat(process.env.AUTH_SESSION_MAX_HOURS);
-  const hours = Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_SESSION_MAX_HOURS;
-  return hours * 60 * 60 * 1000;
 }
 
 // Signe un jeton d'accès en y attachant :

@@ -22,6 +22,7 @@ const { maybeGenerateWeeklyReport } = require('./services/aiWeeklyReportSchedule
 const { retryPendingBudibase } = require('./services/accountProvisioning');
 const { logger } = require('./utils/logger');
 const { cleanupExpiredAuthSessions } = require('./utils/authSession');
+const { refreshSessionPolicy } = require('./services/sessionPolicy');
 const prisma = require('./prismaClient');
 
 // Validation des variables d'environnement critiques au démarrage
@@ -84,6 +85,10 @@ if (tlsCertPath && tlsKeyPath && fs.existsSync(tlsCertPath) && fs.existsSync(tls
 }
 initSocket(server);
 setupVoiceLive();
+
+// Charge la politique de session (UI > env > défaut) avant les premières requêtes :
+// évite qu'un redémarrage fasse brièvement appliquer l'environnement au lieu du réglage UI.
+refreshSessionPolicy().catch((err) => logger.warn(`[Session] Politique non préchargée: ${err.message}`));
 
 server.listen(PORT, () => {
   logger.info(`Backend ERP démarré (${protocol}) sur le port ${PORT}`);
