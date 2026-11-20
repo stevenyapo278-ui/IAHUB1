@@ -2134,19 +2134,16 @@ html.xmas-on .sidebar-item.active {
 
 /* ── Sapin décoratif du thème de Noël ────────────────────────────────────────
    Vignette canvas transparente : le sapin, la neige et les guirlandes de
-   `sapin-de-noel.html` se posent directement sur le fond de la sidebar (aucun
-   ciel nocturne). Le cadre arrondi reste, sans fond ni ombre. */
+   `sapin-de-noel.html` se posent directement sur le fond de la sidebar, sans
+   cadre ni ciel nocturne. */
 .sidebar-tree {
   position: relative;
   flex-shrink: 0;
   width: calc(100% - 24px);
   height: 196px;
   margin: 6px 12px 8px;
-  border-radius: 18px;
-  overflow: hidden;
   pointer-events: none;
   z-index: 1;
-  border: 1px solid rgba(212, 175, 55, 0.22);
 }
 
 .sidebar-tree-canvas {
