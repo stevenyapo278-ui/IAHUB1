@@ -36,6 +36,10 @@ export function createXmasScene(canvas, options = {}) {
     sparks: true,
     // Mode « vignette » (sidebar) : moins de particules, DPR et fps réduits.
     compact: false,
+    // Fond transparent : le sapin se pose directement sur la sidebar (claire ou
+    // sombre), sans ciel nocturne. Les effets liés au ciel (étoiles, bokeh,
+    // cadeaux, sol, vignettage) sont alors désactivés.
+    transparent: false,
     ...options,
   };
 
@@ -43,7 +47,10 @@ export function createXmasScene(canvas, options = {}) {
     return { destroy() {}, startMusic: () => false, stopMusic() {}, isMusicPlaying: () => false };
   }
 
-  const ctx = canvas.getContext('2d', { alpha: false });
+  const ctx = canvas.getContext('2d', { alpha: opts.transparent === true });
+  // Thème courant : sert à teinter la neige pour qu'elle reste visible sur un
+  // fond clair comme sur un fond sombre.
+  let isDark = typeof document !== 'undefined' && document.documentElement.classList.contains('dark');
   const reduceMotion =
     typeof window !== 'undefined' &&
     typeof window.matchMedia === 'function' &&
@@ -94,9 +101,13 @@ export function createXmasScene(canvas, options = {}) {
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
 
     cx = W * 0.5;
-    baseY = H * 0.815;
-    treeH = Math.min(H * 0.7, W * 1.22);
+    // En mode transparent, le sapin est posé plus bas pour laisser respirer l'étoile
+    // (aucun ciel ni sol ne cadre la scène).
+    baseY = H * (opts.transparent ? 0.9 : 0.815);
+    treeH = Math.min(H * (opts.transparent ? 0.78 : 0.7), W * (opts.transparent ? 1.06 : 1.22));
     RMAX = Math.min(treeH * 0.386, W * 0.43);
+
+    isDark = typeof document !== 'undefined' && document.documentElement.classList.contains('dark');
 
     buildSky();
     buildStars();
@@ -119,6 +130,7 @@ export function createXmasScene(canvas, options = {}) {
 
   function buildStars() {
     stars = [];
+    if (opts.transparent) return;
     const n = Math.min(600, Math.max(opts.compact ? 14 : 6, Math.round((W * H) / 9000)));
     for (let i = 0; i < n; i++) {
       stars.push({
@@ -156,6 +168,7 @@ export function createXmasScene(canvas, options = {}) {
 
   function buildBokeh() {
     bokeh = [];
+    if (opts.transparent) return;
     const count = opts.compact ? 8 : 16;
     for (let i = 0; i < count; i++) {
       bokeh.push({
@@ -173,7 +186,7 @@ export function createXmasScene(canvas, options = {}) {
   // ---------------------------------------------------------------- presents
   function buildPresents() {
     presents = [];
-    if (!opts.presents) return;
+    if (!opts.presents || opts.transparent) return;
     const s = clamp(treeH * 0.055, opts.compact ? 9 : 22, 62);
     const spots = [
       { dx: -RMAX * 0.94, w: s * 1.25, h: s * 0.95, c1: '#8e1f36', c2: '#c8394f', rib: '#ffd98a' },
@@ -636,15 +649,21 @@ export function createXmasScene(canvas, options = {}) {
   }
 
   function drawSnowLayer(dt, time, front) {
+    // Sur fond clair, des flocons blancs seraient invisibles : on les teinte en
+    // bleu ardoise. Sur fond sombre (ou en scène complète), on garde le blanc.
+    const lightFlakes = opts.transparent && !isDark;
+    const flakeColor = lightFlakes ? 'rgba(96,140,196,0.9)' : front ? '#ffffff' : '#dbe9ff';
+    const flakeGlow = lightFlakes ? 'rgba(110,150,205,0.35)' : 'rgba(200,230,255,0.55)';
+
     for (const s of snow) {
       if ((s.depth > 0.55) !== front) continue;
       const sway = Math.sin(time * s.sp + s.ph) * s.sway;
-      ctx.globalAlpha = s.a * (front ? 1 : 0.75);
-      ctx.fillStyle = front ? '#ffffff' : '#dbe9ff';
+      ctx.globalAlpha = s.a * (front ? 1 : 0.75) * (opts.transparent ? 0.85 : 1);
+      ctx.fillStyle = flakeColor;
       if (s.r > 1.9) {
         ctx.save();
         ctx.shadowBlur = s.r * 3.2;
-        ctx.shadowColor = 'rgba(200,230,255,0.55)';
+        ctx.shadowColor = flakeGlow;
         ctx.beginPath();
         ctx.arc(s.x + sway, s.y, s.r, 0, TAU);
         ctx.fill();
@@ -743,11 +762,15 @@ export function createXmasScene(canvas, options = {}) {
   }
 
   function drawLights(time, front) {
-    ctx.globalCompositeOperation = 'lighter';
+    // Sur fond clair, l'additif délave le sapin : on compose normalement et on
+    // réduit les halos.
+    const soft = opts.transparent;
+    ctx.globalCompositeOperation = soft ? 'source-over' : 'lighter';
 
-    // tinsel (fines paillettes le long d'une spirale)
+    // tinsel (fines paillettes le long d'une spirale) — masqué sur fond clair :
+    // ces paillettes blanches y forment un voile laiteux.
     const white = glowSprite('255,248,220');
-    for (const p of tinsel) {
+    for (const p of (soft && !isDark) ? [] : tinsel) {
       const x = cx + radiusAt(p.f) * Math.sin(p.a) * 0.99;
       const depth = Math.cos(p.a);
       if ((depth > 0.05) !== front) continue;
@@ -773,7 +796,8 @@ export function createXmasScene(canvas, options = {}) {
       const v = bulbIntensity(l, time) * (isFront ? 1 : 0.34);
       const s = l.size * (isFront ? 1 : 0.72);
 
-      stamp(l.sprite, x, y, s * 9 * (0.6 + 0.9 * v), 0.9 * v);
+      const haloScale = soft ? 3.2 : 9;
+      stamp(l.sprite, x, y, s * haloScale * (0.6 + 0.9 * v), (soft ? 0.42 : 0.9) * v);
 
       ctx.globalAlpha = clamp(0.45 + v, 0, 1);
       ctx.fillStyle = l.col.c;
@@ -783,7 +807,7 @@ export function createXmasScene(canvas, options = {}) {
       ctx.globalAlpha = 1;
 
       if (isFront && v > 0.85) {
-        stamp(white, x, y, s * 2.4, (v - 0.85) * 1.6);
+        stamp(white, x, y, s * 2.4, (v - 0.85) * 1.6 * (soft ? 0.55 : 1));
       }
     }
     ctx.globalCompositeOperation = 'source-over';
@@ -796,17 +820,27 @@ export function createXmasScene(canvas, options = {}) {
     const pulse = 0.86 + 0.14 * Math.sin(time * 2.1);
     const rot = time * 0.32;
 
-    ctx.globalCompositeOperation = 'lighter';
+    // Sur fond clair, l'additif blanchit tout : on compose normalement et on borne
+    // le halo/les rayons à l'espace disponible au-dessus de l'étoile pour éviter
+    // une coupure nette au bord du canvas.
+    const soft = opts.transparent;
+    ctx.globalCompositeOperation = soft ? 'source-over' : 'lighter';
 
-    // grand halo
-    const hg = ctx.createRadialGradient(sx, sy, 0, sx, sy, r * 8.5 * pulse);
-    hg.addColorStop(0, 'rgba(255,244,203,0.55)');
-    hg.addColorStop(0.22, 'rgba(255,206,110,0.20)');
-    hg.addColorStop(1, 'rgba(255,180,60,0)');
-    ctx.fillStyle = hg;
-    ctx.beginPath();
-    ctx.arc(sx, sy, r * 8.5 * pulse, 0, TAU);
-    ctx.fill();
+    const room = soft ? Math.max(8, sy - 1) : Infinity;
+    const rayLen = Math.min(r * 4.6, room);
+
+    // grand halo (inutile sur fond clair : il ne resterait qu'un voile)
+    if (!soft) {
+      const haloR = Math.min(r * 8.5 * pulse, room);
+      const hg = ctx.createRadialGradient(sx, sy, 0, sx, sy, haloR);
+      hg.addColorStop(0, 'rgba(255,244,203,0.55)');
+      hg.addColorStop(0.22, 'rgba(255,206,110,0.20)');
+      hg.addColorStop(1, 'rgba(255,180,60,0)');
+      ctx.fillStyle = hg;
+      ctx.beginPath();
+      ctx.arc(sx, sy, haloR, 0, TAU);
+      ctx.fill();
+    }
 
     // rayons tournants
     ctx.save();
@@ -814,13 +848,13 @@ export function createXmasScene(canvas, options = {}) {
     ctx.rotate(rot);
     for (let i = 0; i < 4; i++) {
       ctx.rotate(TAU / 4);
-      const rg = ctx.createLinearGradient(0, 0, r * 4.6, 0);
-      rg.addColorStop(0, 'rgba(255,235,180,0.38)');
+      const rg = ctx.createLinearGradient(0, 0, rayLen, 0);
+      rg.addColorStop(0, soft ? 'rgba(230,170,50,0.40)' : 'rgba(255,235,180,0.38)');
       rg.addColorStop(1, 'rgba(255,220,140,0)');
       ctx.fillStyle = rg;
       ctx.beginPath();
       ctx.moveTo(0, -r * 0.22);
-      ctx.lineTo(r * 4.6, 0);
+      ctx.lineTo(rayLen, 0);
       ctx.lineTo(0, r * 0.22);
       ctx.closePath();
       ctx.fill();
@@ -1001,6 +1035,11 @@ export function createXmasScene(canvas, options = {}) {
 
   // ---------------------------------------------------------------- loop
   function drawFrame(time, dt) {
+    if (opts.transparent) {
+      drawTransparentFrame(time, dt);
+      return;
+    }
+
     drawSkyLayer(time);
     drawBokehMove(dt);
     drawShootingStar(dt);
@@ -1032,6 +1071,30 @@ export function createXmasScene(canvas, options = {}) {
     drawSnowLayer(dt, time, true);
     updateSparks(dt);
     drawVignette();
+  }
+
+  function drawTransparentFrame(time, dt) {
+    // Canvas transparent : on efface chaque image pour laisser voir la sidebar.
+    ctx.clearRect(0, 0, W, H);
+
+    // neige derrière le sapin
+    if (opts.snow) drawSnowLayer(dt, time, false);
+
+    ctx.save();
+    const sway = Math.sin(time * 0.42) * 0.0055;
+    ctx.translate(cx, baseY);
+    ctx.rotate(sway);
+    ctx.translate(-cx, -baseY);
+
+    drawLights(time, false);
+    if (treeLayer) ctx.drawImage(treeLayer, 0, 0, W, H);
+    drawLights(time, true);
+    drawStar(time);
+    ctx.restore();
+
+    // neige devant le sapin
+    if (opts.snow) drawSnowLayer(dt, time, true);
+    updateSparks(dt);
   }
 
   function drawBokehMove(dt) {

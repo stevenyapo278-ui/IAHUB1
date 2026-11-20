@@ -515,11 +515,12 @@ export default function MainLayout() {
           )}
         </nav>
 
-        {/* Sapin décoratif (thème de Noël) — même scène canvas que la page de connexion,
-            en mode compact : sapin procédural, neige et guirlandes animées. */}
+        {/* Sapin décoratif (thème de Noël) — scène canvas en mode compact et fond
+            transparent : le sapin, la neige et les guirlandes se posent directement
+            sur le fond de la sidebar, sans ciel nocturne. */}
         {xmas.active && (
           <div className="sidebar-tree" aria-hidden="true">
-            <XmasScene compact sparks={false} className="sidebar-tree-canvas" />
+            <XmasScene compact transparent sparks={false} className="sidebar-tree-canvas" />
           </div>
         )}
 
