@@ -4,14 +4,30 @@ const prisma = require('../prismaClient');
 const { getSessionMaxAgeMs } = require('./authToken');
 
 const REFRESH_COOKIE = 'ia_hub_refresh';
-const DEFAULT_IDLE_TIMEOUT_MINUTES = 30;
+// 8 h : un utilisateur devant son écran reste connecté toute sa journée de travail.
+// Le plafond absolu AUTH_SESSION_MAX_HOURS (12 h) borne de toute façon la session,
+// et `AUTH_IDLE_TIMEOUT_MINUTES=0` désactive totalement le contrôle d'inactivité.
+const DEFAULT_IDLE_TIMEOUT_MINUTES = 480;
 const DEFAULT_MAX_SESSIONS = 10;
 const SESSION_RETENTION_DAYS = 7;
 
+/**
+ * Délai d'inactivité en millisecondes.
+ *   • non renseigné / invalide → 8 h (défaut) ;
+ *   • `0` (ou négatif)        → contrôle désactivé (`Infinity`) ;
+ *   • valeur positive          → minutes demandées.
+ * Tous les appelants comparent `now - lastActivityAt > getIdleTimeoutMs()` :
+ * `Infinity` rend la comparaison toujours fausse, sans branche supplémentaire.
+ */
 function getIdleTimeoutMs() {
-  const parsed = Number.parseFloat(process.env.AUTH_IDLE_TIMEOUT_MINUTES);
-  const minutes = Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_IDLE_TIMEOUT_MINUTES;
-  return minutes * 60 * 1000;
+  const raw = process.env.AUTH_IDLE_TIMEOUT_MINUTES;
+  if (raw === undefined || raw === null || String(raw).trim() === '') {
+    return DEFAULT_IDLE_TIMEOUT_MINUTES * 60 * 1000;
+  }
+  const parsed = Number.parseFloat(raw);
+  if (!Number.isFinite(parsed)) return DEFAULT_IDLE_TIMEOUT_MINUTES * 60 * 1000;
+  if (parsed <= 0) return Number.POSITIVE_INFINITY;
+  return parsed * 60 * 1000;
 }
 
 function getMaxSessions() {

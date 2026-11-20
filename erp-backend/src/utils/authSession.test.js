@@ -69,10 +69,18 @@ describe('authSession — hachage et configuration', () => {
 
   it('lit le timeout d’inactivité depuis l’environnement', () => {
     delete process.env.AUTH_IDLE_TIMEOUT_MINUTES;
-    expect(getIdleTimeoutMs()).toBe(30 * 60 * 1000);
+    // Défaut : 8 h, pour ne pas couper un utilisateur en pleine journée de travail.
+    expect(getIdleTimeoutMs()).toBe(480 * 60 * 1000);
 
     process.env.AUTH_IDLE_TIMEOUT_MINUTES = '15';
     expect(getIdleTimeoutMs()).toBe(15 * 60 * 1000);
+
+    process.env.AUTH_IDLE_TIMEOUT_MINUTES = 'invalide';
+    expect(getIdleTimeoutMs()).toBe(480 * 60 * 1000);
+
+    // 0 = contrôle d'inactivité désactivé (le plafond absolu reste appliqué).
+    process.env.AUTH_IDLE_TIMEOUT_MINUTES = '0';
+    expect(getIdleTimeoutMs()).toBe(Number.POSITIVE_INFINITY);
   });
 
   it('configure le cookie de refresh en HttpOnly avec un SameSite sûr', () => {
