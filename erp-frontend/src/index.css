@@ -3797,6 +3797,12 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   background: #04070f;
 }
 
+/* Variante sans fond (vignette de la sidebar) : le sapin se pose directement sur
+   le fond de la barre latérale, sans ciel nocturne. */
+.xmas-scene-transparent {
+  background: transparent;
+}
+
 .xmas-scene-canvas {
   display: block;
   width: 100%;

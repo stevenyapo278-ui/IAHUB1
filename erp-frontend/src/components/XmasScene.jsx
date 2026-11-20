@@ -44,7 +44,7 @@ export default function XmasScene({
   }, [snow, presents, sparks, compact, transparent]);
 
   return (
-    <div className={`xmas-scene ${className}`.trim()}>
+    <div className={`xmas-scene ${transparent ? 'xmas-scene-transparent' : ''} ${className}`.trim()}>
       <canvas ref={canvasRef} className="xmas-scene-canvas" aria-hidden="true" />
       {title && (
         <div className="xmas-scene-caption" aria-hidden="true">
