@@ -76,6 +76,33 @@ export function createXmasScene(canvas, options = {}) {
   let shoot = null;
   let shootTimer = 4;
 
+  // ── Accumulation de neige + chasse-neige (compact+transparent uniquement) ─
+  const SNOW_COLS    = 26;
+  const MAX_SNOW_H   = 20;
+  let snowHeightMap  = [];
+  let plow           = null;
+  let plowParticles  = [];
+  let plowCount      = 0;    // nombre de passages effectués
+
+  // ── Vent dynamique ──────────────────────────────────────────────────
+  let wind = { vx: 0, target: 0, timer: rand(18, 35), phase: 'idle' };
+
+  // ── Traces de pneus ───────────────────────────────────────────────
+  let tireTracks = null; // { pts: [{x,y}], age: 0, maxAge: 12 }
+
+  // ── Bonhomme de neige ─────────────────────────────────────────────
+  // États : 'idle' | 'assembling' | 'alive' | 'exploding' | 'debris'
+  let snowman = {
+    state:    'idle',
+    t:        0,       // timer interne de l'état
+    x:        0,       // position X centrée
+    y:        0,       // y de la base (baseY - hauteur neige locale)
+    blink:    0,       // timer clignement
+    blinkAnim:0,       // progression du clignement 0→1
+    armAngle: 0,       // oscillation des bras
+    debris:   [],      // morceaux après explosion
+  };
+
   let rafId = 0;
   let T = 0;
   let last = 0;
@@ -116,6 +143,13 @@ export function createXmasScene(canvas, options = {}) {
     buildTreeLayer();
     buildLights();
     buildPresents();
+    // (ré)initialise le heightmap en conservant une couche résiduelle si elle existait
+    if (opts.compact && opts.transparent) {
+      const prev = snowHeightMap;
+      snowHeightMap = Array.from({ length: SNOW_COLS }, (_, i) =>
+        prev[i] !== undefined ? Math.min(prev[i], MAX_SNOW_H) : 0
+      );
+    }
 
     if (reduceMotion) renderStatic();
   }
@@ -648,7 +682,34 @@ export function createXmasScene(canvas, options = {}) {
     }
   }
 
-  function drawSnowLayer(dt, time, front) {
+  // ---------------------------------------------------------------- wind
+  function updateWind(dt) {
+    if (!opts.compact || !opts.transparent) return;
+    wind.timer -= dt;
+    if (wind.phase === 'idle' && wind.timer <= 0) {
+      wind.phase  = 'rising';
+      wind.target = rand(18, 32) * (Math.random() > 0.5 ? 1 : -1);
+      wind.timer  = rand(1.2, 2.2); // durée montée
+    } else if (wind.phase === 'rising') {
+      wind.vx += (wind.target - wind.vx) * Math.min(1, dt * 2.5);
+      wind.timer -= 0;
+      if (Math.abs(wind.vx - wind.target) < 1.5) {
+        wind.phase = 'hold';
+        wind.timer = rand(2.5, 5);
+      }
+    } else if (wind.phase === 'hold') {
+      if (wind.timer <= 0) { wind.phase = 'falling'; wind.timer = rand(1.5, 3); }
+    } else if (wind.phase === 'falling') {
+      wind.vx += (0 - wind.vx) * Math.min(1, dt * 1.8);
+      if (Math.abs(wind.vx) < 0.8) {
+        wind.vx    = 0;
+        wind.phase = 'idle';
+        wind.timer = rand(18, 38);
+      }
+    }
+  }
+
+function drawSnowLayer(dt, time, front) {
     // Sur fond clair, des flocons blancs seraient invisibles : on les teinte en
     // bleu ardoise. Sur fond sombre (ou en scène complète), on garde le blanc.
     const lightFlakes = opts.transparent && !isDark;
@@ -673,8 +734,31 @@ export function createXmasScene(canvas, options = {}) {
         ctx.arc(s.x + sway, s.y, s.r, 0, TAU);
         ctx.fill();
       }
+      // position update avec vent
       s.y += s.vy * dt;
-      s.x += (s.vx || 0) * dt + Math.cos(time * s.sp * 0.7 + s.ph) * 4 * dt;
+      s.x += (s.vx || 0) * dt + Math.cos(time * s.sp * 0.7 + s.ph) * 4 * dt
+             + wind.vx * s.depth * dt;
+
+      // ── Atterrissage sur la surface de neige (sidebar uniquement) ──────────
+      if (opts.compact && opts.transparent && snowHeightMap.length) {
+        const colW    = W / SNOW_COLS;
+        const colIdx  = clamp(Math.floor(s.x / colW), 0, SNOW_COLS - 1);
+        const surface = baseY - snowHeightMap[colIdx]; // y de la surface
+        if (s.y + s.r >= surface) {
+          // Le flocon se pose : augmente la pile
+          snowHeightMap[colIdx] = Math.min(MAX_SNOW_H, snowHeightMap[colIdx] + s.r * 0.28);
+          // Légère diffusion vers les colonnes voisines (effet naturel)
+          if (colIdx > 0)            snowHeightMap[colIdx - 1] = Math.min(MAX_SNOW_H, snowHeightMap[colIdx - 1] + s.r * 0.06);
+          if (colIdx < SNOW_COLS - 1) snowHeightMap[colIdx + 1] = Math.min(MAX_SNOW_H, snowHeightMap[colIdx + 1] + s.r * 0.06);
+          s.y = -8;
+          s.x = Math.random() * W;
+          checkPlowTrigger();
+          if (s.x < -20) s.x = W + 20;
+          if (s.x > W + 20) s.x = -20;
+          continue;
+        }
+      }
+
       if (s.y - 6 > H) {
         s.y = -8;
         s.x = Math.random() * W;
@@ -684,6 +768,711 @@ export function createXmasScene(canvas, options = {}) {
     }
     ctx.globalAlpha = 1;
   }
+
+  /** Vérifie si la pile de neige est assez haute pour déclencher la voiture. */
+  function checkPlowTrigger() {
+    if (plow || !snowHeightMap.length) return;
+    // Déclenche quand la moyenne des colonnes dépasse 65 % du max
+    const avg = snowHeightMap.reduce((a, b) => a + b, 0) / SNOW_COLS;
+    if (avg >= MAX_SNOW_H * 0.60) initPlow();
+  }
+
+  /**
+   * Dessine la surface de neige accumulée (heightmap → courbe de Bézier lissée).
+   * Dessinée au-dessus de baseY, entre le bas du canvas et la surface.
+   */
+  function drawSnowAccum() {
+    if (!snowHeightMap.length) return;
+    const anySnow = snowHeightMap.some(h => h > 0.3);
+    if (!anySnow) return;
+
+    const colW = W / SNOW_COLS;
+    // Points du contour supérieur de la surface de neige
+    const pts = snowHeightMap.map((h, i) => ({
+      x: (i + 0.5) * colW,
+      y: baseY - h,
+    }));
+
+    ctx.save();
+
+    // ── Dégradé vertical : blanc/bleu en haut, plus opaque en bas ──
+    const topY  = baseY - MAX_SNOW_H - 2;
+    const botY  = H + 2;
+    const grad  = ctx.createLinearGradient(0, topY, 0, botY);
+    if (isDark) {
+      grad.addColorStop(0,   'rgba(230,245,255,0.93)');
+      grad.addColorStop(0.3, 'rgba(210,232,255,0.96)');
+      grad.addColorStop(1,   'rgba(190,220,255,0.98)');
+    } else {
+      grad.addColorStop(0,   'rgba(240,250,255,0.88)');
+      grad.addColorStop(0.3, 'rgba(215,235,255,0.92)');
+      grad.addColorStop(1,   'rgba(190,215,245,0.95)');
+    }
+
+    // ── Tracé du contour lissé ──
+    ctx.beginPath();
+    ctx.moveTo(-2, H + 2);
+    ctx.lineTo(-2, pts[0].y);
+    for (let i = 0; i < pts.length - 1; i++) {
+      const mx = (pts[i].x + pts[i + 1].x) / 2;
+      const my = (pts[i].y + pts[i + 1].y) / 2;
+      ctx.quadraticCurveTo(pts[i].x, pts[i].y, mx, my);
+    }
+    // dernier segment jusqu'au bord droit
+    const last = pts[pts.length - 1];
+    ctx.lineTo(last.x, last.y);
+    ctx.lineTo(W + 2, last.y);
+    ctx.lineTo(W + 2, H + 2);
+    ctx.closePath();
+    ctx.fillStyle = grad;
+    ctx.fill();
+
+    // ── Liseret blanc sur le dessus (effet « croûte de neige ») ──
+    ctx.beginPath();
+    ctx.moveTo(-2, pts[0].y);
+    for (let i = 0; i < pts.length - 1; i++) {
+      const mx = (pts[i].x + pts[i + 1].x) / 2;
+      const my = (pts[i].y + pts[i + 1].y) / 2;
+      ctx.quadraticCurveTo(pts[i].x, pts[i].y, mx, my);
+    }
+    ctx.lineTo(last.x, last.y);
+    ctx.lineTo(W + 2, last.y);
+    ctx.strokeStyle = isDark ? 'rgba(255,255,255,0.75)' : 'rgba(255,255,255,0.92)';
+    ctx.lineWidth   = 1.6;
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  // ── Chasse-neige : initialisation, mise à jour, dessin ─────────────────
+
+  function initPlow() {
+    const goRight = Math.random() > 0.5;
+    const speed   = W * 0.40; // traverse en ~2.5 s
+    plow = {
+      x:      goRight ? -44 : W + 44,
+      y:      baseY - 8,
+      dir:    goRight ? 1 : -1,
+      speed,
+      blinkT: 0,
+    };
+    plowParticles = [];
+  }
+
+  function updatePlow(dt) {
+    if (!plow) return;
+    plow.x     += plow.dir * plow.speed * dt;
+    plow.blinkT += dt;
+
+    // ── Effacement du heightmap sous la lame ──────────────────────────────
+    if (snowHeightMap.length) {
+      const colW     = W / SNOW_COLS;
+      // La lame est à l'avant de la voiture (décalage ~16 px en coordonnées réelles)
+      const sc       = clamp(W * 0.19, 22, 34) / 32;
+      const bladeOff = 16 * sc * plow.dir;
+      const bladeX   = plow.x + bladeOff;
+      // Largeur balayée par la voiture entière
+      const halfW    = 18 * sc;
+      const x0 = plow.x - halfW;
+      const x1 = plow.x + halfW;
+      const ci0 = clamp(Math.floor(x0 / colW), 0, SNOW_COLS - 1);
+      const ci1 = clamp(Math.floor(x1 / colW), 0, SNOW_COLS - 1);
+
+      for (let i = ci0; i <= ci1; i++) {
+        const wasH = snowHeightMap[i];
+        // Efface rapidement la neige sous la voiture
+        snowHeightMap[i] = Math.max(0, snowHeightMap[i] - wasH * 12 * dt);
+        const cleared = wasH - snowHeightMap[i];
+        // Éjecte des particules proportionnellement à la neige dégagée
+        if (cleared > 0.2 && Math.random() < 0.5) {
+          plowParticles.push({
+            x:    (i + 0.5) * colW + rand(-4, 4),
+            y:    baseY - wasH - rand(0, 4),
+            vx:   plow.dir * rand(28, 70) + rand(-15, 15),
+            vy:   rand(-70, -20),
+            r:    rand(1.0, 2.5),
+            a:    rand(0.6, 0.9),
+            life: rand(0.35, 0.80),
+          });
+        }
+      }
+    }
+
+    // Fin de traversée
+    const offscreen =
+      (plow.dir > 0 && plow.x > W + 48) ||
+      (plow.dir < 0 && plow.x < -48);
+    if (offscreen) {
+      // Capturer les traces de pneus (snapshot du heightmap)
+      const colW = W / SNOW_COLS;
+      const sc   = clamp(W * 0.19, 22, 34) / 32;
+      const tireSpacing = 6 * sc;
+      tireTracks = {
+        pts: snowHeightMap.map((h, i) => ({
+          x: (i + 0.5) * colW,
+          y: baseY - Math.max(h, 0) - 1,
+        })),
+        tireSpacing,
+        age:    0,
+        maxAge: 14,
+      };
+      // Laisser une fine couche résiduelle
+      snowHeightMap = snowHeightMap.map(h => h * 0.15);
+      plowCount++;
+      // Après 2 passages : déclencher l'assemblage du bonhomme
+      if (plowCount >= 2 && snowman.state === 'idle') initSnowman();
+      plow = null;
+    }
+  }
+
+  function drawPlowParticles(dt) {
+    for (let i = plowParticles.length - 1; i >= 0; i--) {
+      const p = plowParticles[i];
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vy += 160 * dt; // gravité légère
+      p.life -= dt;
+      if (p.life <= 0) { plowParticles.splice(i, 1); continue; }
+      const alpha = p.a * Math.min(1, p.life * 2.5);
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = isDark ? '#d8ecff' : '#7eaadc';
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r, 0, TAU);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  /**
+   * Dessine la voiture chasse-neige en canvas 2D pur.
+   * Taille de référence : ~32 px de large × 18 px de haut.
+   * Elle est dessinée centrée sur (plow.x, plow.y), orientée selon plow.dir.
+   */
+  function drawPlow() {
+    if (!plow) return;
+    ctx.save();
+    // Miroir horizontal si on va vers la gauche
+    ctx.translate(plow.x, plow.y);
+    if (plow.dir < 0) ctx.scale(-1, 1);
+
+    const s = clamp(W * 0.19, 22, 34); // taille adaptive à la largeur canvas
+    const sc = s / 32;                  // facteur d'échelle relatif à 32 px
+
+    ctx.save();
+    ctx.scale(sc, sc);
+
+    // ── Ombre portée ──
+    ctx.save();
+    ctx.translate(2, 3);
+    ctx.scale(1, 0.35);
+    ctx.fillStyle = 'rgba(0,0,0,0.25)';
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 18, 10, 0, 0, TAU);
+    ctx.fill();
+    ctx.restore();
+
+    // ── Lame chasse-neige (avant) ──
+    ctx.fillStyle = '#c8d8e8';
+    ctx.strokeStyle = '#8aa0b4';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(-16, -8);
+    ctx.lineTo(-6, -13);
+    ctx.lineTo(-6, 2);
+    ctx.lineTo(-16, 2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    // reflet sur la lame
+    ctx.fillStyle = 'rgba(255,255,255,0.45)';
+    ctx.beginPath();
+    ctx.moveTo(-15, -7);
+    ctx.lineTo(-9, -11);
+    ctx.lineTo(-9, -4);
+    ctx.lineTo(-15, -4);
+    ctx.closePath();
+    ctx.fill();
+
+    // ── Bras hydraulique lame ──
+    ctx.strokeStyle = '#7a8fa0';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(-6, -5);
+    ctx.lineTo(-2, -8);
+    ctx.stroke();
+
+    // ── Corps principal (cabine + benne) ──
+    // Benne arrière
+    ctx.fillStyle = '#e8c43a'; // jaune travaux
+    ctx.strokeStyle = '#b8962a';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.roundRect(-4, -6, 20, 8, 1.5);
+    ctx.fill();
+    ctx.stroke();
+
+    // Cabine
+    ctx.fillStyle = '#d44430'; // rouge cabine
+    ctx.strokeStyle = '#a0301e';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.roundRect(-4, -14, 13, 9, [2, 2, 1, 1]);
+    ctx.fill();
+    ctx.stroke();
+
+    // Pare-brise
+    ctx.fillStyle = 'rgba(160,220,255,0.75)';
+    ctx.strokeStyle = 'rgba(100,170,220,0.5)';
+    ctx.lineWidth = 0.8;
+    ctx.beginPath();
+    ctx.roundRect(-2, -13, 10, 6, 1);
+    ctx.fill();
+    ctx.stroke();
+    // reflet pare-brise
+    ctx.fillStyle = 'rgba(255,255,255,0.4)';
+    ctx.beginPath();
+    ctx.roundRect(-1, -12, 4, 3, 0.8);
+    ctx.fill();
+
+    // Porte / détail cabine
+    ctx.strokeStyle = 'rgba(120,30,10,0.5)';
+    ctx.lineWidth = 0.7;
+    ctx.beginPath();
+    ctx.moveTo(5, -13);
+    ctx.lineTo(5, -6);
+    ctx.stroke();
+
+    // Phare avant
+    ctx.fillStyle = '#fff8d0';
+    ctx.shadowColor = 'rgba(255,240,150,0.8)';
+    ctx.shadowBlur = 4;
+    ctx.beginPath();
+    ctx.ellipse(-4, -9, 2.5, 1.8, 0, 0, TAU);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    // Feu arrière
+    ctx.fillStyle = '#ff4444';
+    ctx.beginPath();
+    ctx.ellipse(16, -9, 1.8, 1.4, 0, 0, TAU);
+    ctx.fill();
+
+    // ── Gyrophare (clignote) ──
+    const blinkOn = Math.sin(plow.blinkT * 7) > 0;
+    if (blinkOn) {
+      ctx.fillStyle = '#ff8c00';
+      ctx.shadowColor = 'rgba(255,140,0,0.9)';
+      ctx.shadowBlur = 7;
+      ctx.beginPath();
+      ctx.arc(2, -15, 2.5, 0, TAU);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    } else {
+      ctx.fillStyle = '#8a4a00';
+      ctx.beginPath();
+      ctx.arc(2, -15, 2, 0, TAU);
+      ctx.fill();
+    }
+    // pied du gyrophare
+    ctx.fillStyle = '#555';
+    ctx.fillRect(0.5, -14.5, 3, 1.5);
+
+    // ── Roues ──
+    const wheelY = 2;
+    for (const wx of [-10, 10]) {
+      // pneu
+      ctx.fillStyle = '#222';
+      ctx.beginPath();
+      ctx.arc(wx, wheelY, 5, 0, TAU);
+      ctx.fill();
+      // jante
+      ctx.fillStyle = '#c0c0c0';
+      ctx.beginPath();
+      ctx.arc(wx, wheelY, 2.8, 0, TAU);
+      ctx.fill();
+      // boulon centre
+      ctx.fillStyle = '#888';
+      ctx.beginPath();
+      ctx.arc(wx, wheelY, 1.2, 0, TAU);
+      ctx.fill();
+    }
+
+    // ── Échappement (petites fumées) ──
+    const smokeAlpha = 0.18 + 0.12 * Math.sin(plow.blinkT * 4);
+    ctx.fillStyle = `rgba(200,200,210,${smokeAlpha.toFixed(2)})`;
+    ctx.beginPath();
+    ctx.arc(16, -16, 3, 0, TAU);
+    ctx.fill();
+    ctx.fillStyle = `rgba(200,200,210,${(smokeAlpha * 0.6).toFixed(2)})`;
+    ctx.beginPath();
+    ctx.arc(18, -20, 2, 0, TAU);
+    ctx.fill();
+
+    ctx.restore(); // scale sc
+    ctx.restore(); // translate + mirror
+  }
+
+  // ── Faisceau de phares ──────────────────────────────────────────────
+  function drawPlowBeam() {
+    if (!plow) return;
+    ctx.save();
+    const sc     = clamp(W * 0.19, 22, 34) / 32;
+    const beamL  = 55 * sc;         // longueur du faisceau
+    const beamW0 = 6  * sc;         // largeur à la source
+    const beamW1 = 28 * sc;         // largeur au bout
+    // Point d'origine du phare (avant gauche de la cabine)
+    const ox = plow.x + plow.dir * (-4) * sc;
+    const oy = plow.y - 9 * sc;
+    // Extrémité du cône
+    const ex = ox + plow.dir * beamL;
+
+    const grad = ctx.createLinearGradient(ox, oy, ex, oy);
+    grad.addColorStop(0,   'rgba(255,250,180,0.32)');
+    grad.addColorStop(0.5, 'rgba(255,245,160,0.14)');
+    grad.addColorStop(1,   'rgba(255,240,140,0)');
+
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.beginPath();
+    ctx.moveTo(ox, oy - beamW0 / 2);
+    ctx.lineTo(ex, oy - beamW1 / 2);
+    ctx.lineTo(ex, oy + beamW1 / 2);
+    ctx.lineTo(ox, oy + beamW0 / 2);
+    ctx.closePath();
+    ctx.fillStyle = grad;
+    ctx.fill();
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.restore();
+  }
+
+  // ── Traces de pneus ──────────────────────────────────────────────
+  function drawTireTracks(dt) {
+    if (!tireTracks) return;
+    tireTracks.age += dt;
+    if (tireTracks.age >= tireTracks.maxAge) { tireTracks = null; return; }
+
+    const alpha = (1 - tireTracks.age / tireTracks.maxAge) * 0.55;
+    const { pts, tireSpacing } = tireTracks;
+    if (pts.length < 2) return;
+
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.strokeStyle = isDark ? 'rgba(100,145,210,1)' : 'rgba(80,120,185,1)';
+    ctx.lineWidth   = 1.5;
+    ctx.setLineDash([3, 4]); // effet bande de roulement
+
+    for (const offset of [-tireSpacing / 2, tireSpacing / 2]) {
+      ctx.beginPath();
+      ctx.moveTo(pts[0].x + offset, pts[0].y);
+      for (let i = 1; i < pts.length; i++) {
+        ctx.lineTo(pts[i].x + offset, pts[i].y);
+      }
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 1;
+    ctx.restore();
+  }
+
+  // ── Bonhomme de neige ──────────────────────────────────────────────
+  function initSnowman() {
+    // Position centrée sur le milieu de la surface de neige
+    snowman.x     = cx;
+    snowman.y     = baseY - (snowHeightMap[Math.floor(SNOW_COLS / 2)] || 1);
+    snowman.state = 'assembling';
+    snowman.t     = 0;
+    snowman.blink = rand(3, 6);
+    snowman.blinkAnim = 0;
+    snowman.armAngle  = 0;
+    snowman.debris    = [];
+  }
+
+  function updateSnowman(dt) {
+    if (snowman.state === 'idle') return;
+
+    snowman.t += dt;
+
+    if (snowman.state === 'assembling') {
+      // 2.8 s d'assemblage, puis on passe à 'alive'
+      if (snowman.t >= 2.8) {
+        snowman.state = 'alive';
+        snowman.t     = 0;
+      }
+
+    } else if (snowman.state === 'alive') {
+      // Oscillation des bras
+      snowman.armAngle = Math.sin(snowman.t * 1.1) * 0.06;
+      // Mise à jour position Y (suit la neige sous lui)
+      const col = clamp(Math.floor(snowman.x / (W / SNOW_COLS)), 0, SNOW_COLS - 1);
+      snowman.y = baseY - snowHeightMap[col];
+
+      // Clignement des yeux
+      snowman.blink -= dt;
+      if (snowman.blink <= 0) {
+        snowman.blink     = rand(2.5, 7);
+        snowman.blinkAnim = 1; // déclenche l'animation
+      }
+      if (snowman.blinkAnim > 0) {
+        snowman.blinkAnim = Math.max(0, snowman.blinkAnim - dt * 8);
+      }
+
+      // Détection collision avec le plow
+      if (plow) {
+        const sc  = clamp(W * 0.19, 22, 34) / 32;
+        const hit = Math.abs(plow.x - snowman.x) < 22 * sc;
+        if (hit) explodeSnowman();
+      }
+
+    } else if (snowman.state === 'exploding') {
+      if (snowman.t >= 0.35) {
+        snowman.state = 'debris';
+        snowman.t     = 0;
+      }
+
+    } else if (snowman.state === 'debris') {
+      // Mise à jour des morceaux
+      for (const d of snowman.debris) {
+        d.x  += d.vx * dt;
+        d.y  += d.vy * dt;
+        d.vy += 200 * dt;
+        d.rot += d.spin * dt;
+        d.life -= dt;
+      }
+      snowman.debris = snowman.debris.filter(d => d.life > 0);
+      if (snowman.t >= 2.5) {
+        snowman.state = 'idle';
+        snowman.t     = 0;
+        // Permet au bonhomme de se reconstruire au prochain passage
+        plowCount = 1;
+      }
+    }
+  }
+
+  function explodeSnowman() {
+    snowman.state = 'exploding';
+    snowman.t     = 0;
+    const sc      = clamp(W * 0.19, 22, 34) / 32;
+    const ejectDir = plow ? -plow.dir : 1;
+    // Génére 10 morceaux variés
+    for (let i = 0; i < 11; i++) {
+      const angle = rand(-Math.PI * 0.9, 0) + (ejectDir > 0 ? 0 : Math.PI);
+      const speed = rand(60, 160);
+      snowman.debris.push({
+        x:    snowman.x + rand(-8, 8) * sc,
+        y:    snowman.y - rand(5, 28) * sc,
+        vx:   Math.cos(angle) * speed + ejectDir * rand(20, 50),
+        vy:   Math.sin(angle) * speed - rand(20, 60),
+        r:    rand(1.5, 5) * sc,
+        rot:  rand(0, TAU),
+        spin: rand(-8, 8),
+        life: rand(0.6, 1.8),
+        col:  i < 7 ? 'snow' : i < 9 ? 'orange' : 'black',
+      });
+    }
+  }
+
+  /** Dessine le bonhomme selon son état courant. */
+  function drawSnowman() {
+    if (snowman.state === 'idle') return;
+    const sc  = clamp(W * 0.14, 14, 22) / 20; // échelle de référence 20 px
+    const sx  = snowman.x;
+    const sy  = snowman.y;         // base du bonhomme (sol)
+
+    // ── MORCEAUX (debris) ──
+    if (snowman.state === 'debris' || snowman.state === 'exploding') {
+      ctx.save();
+      for (const d of snowman.debris) {
+        const a = Math.min(1, d.life * 1.5);
+        ctx.globalAlpha = a;
+        ctx.save();
+        ctx.translate(d.x, d.y);
+        ctx.rotate(d.rot);
+        if (d.col === 'snow') {
+          ctx.fillStyle = isDark ? '#d4ebff' : '#c8e0ff';
+        } else if (d.col === 'orange') {
+          ctx.fillStyle = '#e8721a';
+        } else {
+          ctx.fillStyle = '#1a1a2e';
+        }
+        ctx.beginPath();
+        ctx.arc(0, 0, d.r, 0, TAU);
+        ctx.fill();
+        ctx.restore();
+      }
+      ctx.globalAlpha = 1;
+      ctx.restore();
+      if (snowman.state === 'debris') return;
+    }
+
+    // ── Progression d'assemblage ──
+    // t va de 0 à 2.8 s : chaque élément pop selon son délai
+    const asm  = snowman.state === 'assembling';
+    const prog = asm ? clamp(snowman.t / 2.8, 0, 1) : 1;
+
+    // --- Boule du bas ---
+    const r0  = 10 * sc;
+    const p0  = clamp((snowman.t - 0.0) / 0.7, 0, 1); // 0→0.7 s
+    const ey0 = asm ? easeOut(p0) : 1;
+    if (ey0 <= 0) return;
+    const y0 = sy - r0 * ey0;  // centre de la boule du bas
+    _drawSnowBall(sx, y0, r0 * ey0);
+
+    // --- Boule du milieu ---
+    const r1  = 7 * sc;
+    const p1  = clamp((snowman.t - 0.6) / 0.6, 0, 1); // 0.6→1.2 s
+    const ey1 = asm ? easeOut(p1) : 1;
+    const y1  = y0 - r0 - r1 * ey1;
+    if (ey1 > 0) {
+      _drawSnowBall(sx, y1, r1 * ey1);
+      // Boutons
+      if (!asm || snowman.t > 1.4) {
+        const bAlpha = asm ? clamp((snowman.t - 1.4) / 0.3, 0, 1) : 1;
+        ctx.globalAlpha = bAlpha;
+        ctx.fillStyle = '#1a1a2e';
+        for (let bi = -1; bi <= 1; bi++) {
+          ctx.beginPath();
+          ctx.arc(sx, y1 + bi * r1 * 0.38, 1.1 * sc, 0, TAU);
+          ctx.fill();
+        }
+        ctx.globalAlpha = 1;
+      }
+    }
+
+    // --- Tête ---
+    const r2  = 5 * sc;
+    const p2  = clamp((snowman.t - 1.0) / 0.55, 0, 1); // 1.0→1.55 s
+    const ey2 = asm ? easeOut(p2) : 1;
+    const y2  = y1 - r1 - r2 * ey2;
+    if (ey2 > 0) {
+      _drawSnowBall(sx, y2, r2 * ey2);
+
+      // Yeux
+      if (!asm || snowman.t > 1.6) {
+        const eAlpha = asm ? clamp((snowman.t - 1.6) / 0.3, 0, 1) : 1;
+        ctx.globalAlpha = eAlpha;
+        const blinkSY = asm ? 1 : (1 - 0.9 * Math.pow(Math.sin(clamp(1 - snowman.blinkAnim, 0, 1) * Math.PI / 2), 2));
+        for (const ex of [-2.2 * sc, 2.2 * sc]) {
+          ctx.save();
+          ctx.translate(sx + ex, y2 - 0.5 * sc);
+          ctx.scale(1, blinkSY);
+          ctx.fillStyle = '#1a1a2e';
+          ctx.beginPath();
+          ctx.arc(0, 0, 1.3 * sc, 0, TAU);
+          ctx.fill();
+          ctx.restore();
+        }
+        ctx.globalAlpha = 1;
+      }
+
+      // Nez-carotte
+      if (!asm || snowman.t > 1.9) {
+        const nAlpha = asm ? clamp((snowman.t - 1.9) / 0.3, 0, 1) : 1;
+        const nScale = asm ? clamp((snowman.t - 1.9) / 0.3, 0, 1) : 1;
+        ctx.globalAlpha = nAlpha;
+        ctx.save();
+        ctx.translate(sx, y2);
+        ctx.scale(nScale, 1);
+        ctx.fillStyle = '#e8721a';
+        ctx.beginPath();
+        ctx.ellipse(3.2 * sc, 0, 3.5 * sc, 1.3 * sc, 0.15, 0, TAU);
+        ctx.fill();
+        ctx.restore();
+        ctx.globalAlpha = 1;
+      }
+
+      // Chapeau
+      if (!asm || snowman.t > 2.1) {
+        const hProg = asm ? clamp((snowman.t - 2.1) / 0.4, 0, 1) : 1;
+        const hOff  = asm ? (1 - easeOut(hProg)) * (-16 * sc) : 0;
+        ctx.save();
+        ctx.translate(sx, y2 - r2 + hOff);
+        ctx.fillStyle = '#0f0f1a';
+        // bord du chapeau
+        ctx.beginPath();
+        ctx.ellipse(0, 0.5 * sc, 7 * sc, 2 * sc, 0, 0, TAU);
+        ctx.fill();
+        // corps du chapeau
+        ctx.fillStyle = '#1a1a2e';
+        ctx.beginPath();
+        ctx.roundRect(-4 * sc, -10 * sc, 8 * sc, 11 * sc, 1);
+        ctx.fill();
+        // ruban rouge
+        ctx.fillStyle = '#c0392b';
+        ctx.fillRect(-4 * sc, -4 * sc, 8 * sc, 1.5 * sc);
+        ctx.restore();
+      }
+
+      // Écharpe
+      if (!asm || snowman.t > 2.35) {
+        const sAlpha = asm ? clamp((snowman.t - 2.35) / 0.3, 0, 1) : 1;
+        const windSkew = wind.vx * 0.015;
+        ctx.globalAlpha = sAlpha;
+        ctx.save();
+        ctx.translate(sx, y1 + 1.5 * sc);
+        ctx.rotate(windSkew);
+        // écharpe principale
+        ctx.fillStyle = '#c0392b';
+        ctx.beginPath();
+        ctx.ellipse(0, 0, r1 * 1.15, 2.2 * sc, 0, 0, TAU);
+        ctx.fill();
+        // extrémité flottante
+        ctx.beginPath();
+        ctx.moveTo(r1 * 0.6, 0);
+        ctx.lineTo(r1 * 0.6 + windSkew * 10, 5 * sc);
+        ctx.lineTo(r1 * 0.3 + windSkew * 10, 5 * sc);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+        ctx.globalAlpha = 1;
+      }
+    }
+
+    // --- Bras (brindilles) ---
+    if (!asm || snowman.t > 2.5) {
+      const aAlpha = asm ? clamp((snowman.t - 2.5) / 0.3, 0, 1) : 1;
+      ctx.globalAlpha = aAlpha;
+      ctx.strokeStyle = '#5a3a1a';
+      ctx.lineWidth   = 1.5 * sc;
+      ctx.lineCap     = 'round';
+      const baseArm   = -0.55 + snowman.armAngle;
+      for (const side of [-1, 1]) {
+        const aAng = side * baseArm;
+        ctx.save();
+        ctx.translate(sx + side * r1 * 0.95, y1 - r1 * 0.1);
+        ctx.rotate(aAng);
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(side * 8 * sc, -4 * sc);
+        ctx.stroke();
+        // branchette
+        ctx.beginPath();
+        ctx.moveTo(side * 5 * sc, -2.5 * sc);
+        ctx.lineTo(side * 8 * sc, -7 * sc);
+        ctx.stroke();
+        ctx.restore();
+      }
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  /** Boule de neige avec dégradé de volume. */
+  function _drawSnowBall(x, y, r) {
+    if (r <= 0) return;
+    const g = ctx.createRadialGradient(x - r * 0.3, y - r * 0.3, r * 0.05, x, y, r);
+    g.addColorStop(0,   isDark ? 'rgba(240,250,255,0.98)' : 'rgba(255,255,255,0.98)');
+    g.addColorStop(0.6, isDark ? 'rgba(210,235,255,0.95)' : 'rgba(230,245,255,0.95)');
+    g.addColorStop(1,   isDark ? 'rgba(170,210,255,0.90)' : 'rgba(190,225,255,0.90)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, TAU);
+    ctx.fill();
+    // contour discret
+    ctx.strokeStyle = isDark ? 'rgba(180,215,255,0.3)' : 'rgba(160,200,240,0.4)';
+    ctx.lineWidth   = 0.5;
+    ctx.stroke();
+  }
+
+  /** Ease-out quadratique simple. */
+  function easeOut(t) { return 1 - (1 - t) * (1 - t); }
 
   function drawMound() {
     // ombre de contact
@@ -1077,13 +1866,18 @@ export function createXmasScene(canvas, options = {}) {
     // Canvas transparent : on efface chaque image pour laisser voir la sidebar.
     ctx.clearRect(0, 0, W, H);
 
+    // Vent
+    updateWind(dt);
+
     // neige derrière le sapin
     if (opts.snow) drawSnowLayer(dt, time, false);
 
     ctx.save();
-    const sway = Math.sin(time * 0.42) * 0.0055;
+    // Le balancement du sapin s'amplifie légèrement avec le vent
+    const swayBase = Math.sin(time * 0.42) * 0.0055;
+    const swayWind = wind.vx * 0.00018;
     ctx.translate(cx, baseY);
-    ctx.rotate(sway);
+    ctx.rotate(swayBase + swayWind);
     ctx.translate(-cx, -baseY);
 
     drawLights(time, false);
@@ -1095,6 +1889,20 @@ export function createXmasScene(canvas, options = {}) {
     // neige devant le sapin
     if (opts.snow) drawSnowLayer(dt, time, true);
     updateSparks(dt);
+
+    // Couche de neige accumulée
+    drawSnowAccum();
+    // Traces de pneus (sur la neige, sous le bonhomme)
+    drawTireTracks(dt);
+    // Bonhomme de neige
+    updateSnowman(dt);
+    drawSnowman();
+    // Faisceau de phares (en 'lighter', avant la voiture)
+    drawPlowBeam();
+    // Voiture
+    updatePlow(dt);
+    drawPlowParticles(dt);
+    drawPlow();
   }
 
   function drawBokehMove(dt) {
