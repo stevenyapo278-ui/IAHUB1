@@ -80,7 +80,14 @@ function profileOptionsFor(catalog, applicationId) {
   return Array.isArray(field?.options) ? field.options : [];
 }
 
-export default function AccountProvisioningModal({ open, ticketId, ticketTitle, onClose, onSaved }) {
+export default function AccountProvisioningModal({
+  open,
+  ticketId,
+  ticketTitle,
+  initialPrefill = null,
+  onClose,
+  onSaved,
+}) {
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [catalog, setCatalog] = useState([]);
@@ -93,7 +100,7 @@ export default function AccountProvisioningModal({ open, ticketId, ticketTitle, 
   // le technicien voie immédiatement ce qui manque (et non un message global).
   const [fieldErrors, setFieldErrors] = useState({});
 
-  const aiConfidence = useMemo(() => confidenceLabel(prefill?.confidence), [prefill]);
+  const aiConfidence = useMemo(() => (prefill ? confidenceLabel(prefill.confidence) : null), [prefill]);
 
   // Détection immédiate des doublons (même application + même identifiant) :
   // on prévient avant l'envoi, le backend refusant de toute façon.
@@ -115,6 +122,21 @@ export default function AccountProvisioningModal({ open, ticketId, ticketTitle, 
     return duplicates;
   }, [rows]);
 
+  // Applique un pré-remplissage (IA ou déterministe) au formulaire : comptes
+  // suggérés s'il y en a, sinon applications probables, sinon ligne vierge.
+  function applyPrefill(data) {
+    setPrefill(data);
+    const suggested = Array.isArray(data?.accounts) ? data.accounts : [];
+    const suggestedApps = Array.isArray(data?.applications) ? data.applications : [];
+    if (suggested.length > 0) {
+      setRows(suggested.map(rowFromAccount));
+    } else if (suggestedApps.length > 0) {
+      setRows(suggestedApps.map((app) => ({ ...EMPTY_ROW, applicationId: String(app.id) })));
+    } else {
+      setRows([{ ...EMPTY_ROW }]);
+    }
+  }
+
   useEffect(() => {
     if (!open || !ticketId) return undefined;
     let cancelled = false;
@@ -122,10 +144,17 @@ export default function AccountProvisioningModal({ open, ticketId, ticketTitle, 
     setLoading(true);
     setError('');
     setFieldErrors({});
+    // Repart d'un formulaire vierge à chaque ouverture (ticket différent ou
+    // réouverture) : évite de conserver « aucun compte » coché par erreur.
     setPrefill(null);
     setExistingRecord(null);
     setRows([{ ...EMPTY_ROW }]);
     setNoAccountCreated(false);
+
+    // Pré-analyse déjà obtenue par le pré-vol de résolution : on la réutilise
+    // telle quelle pour ne pas refaire (ni refacturer) un appel IA.
+    const cachedPrefill =
+      initialPrefill && String(initialPrefill.ticketId) === String(ticketId) ? initialPrefill : null;
 
     (async () => {
       try {
@@ -143,24 +172,25 @@ export default function AccountProvisioningModal({ open, ticketId, ticketTitle, 
           const recordAccounts = Array.isArray(record.accounts) ? record.accounts : [];
           setRows(recordAccounts.length > 0 ? recordAccounts.map(rowFromAccount) : [{ ...EMPTY_ROW }]);
           setNoAccountCreated(recordAccounts.length === 0);
+          setPrefill(null);
+          setLoading(false);
+          return;
+        }
+
+        if (cachedPrefill) {
+          applyPrefill(cachedPrefill);
           setLoading(false);
           return;
         }
 
         // Pas encore de déclaration : on demande le pré-remplissage IA (non bloquant).
+        // `force=1` : vraie analyse, même si le ticket ne parle pas de comptes.
         try {
-          const { data } = await api.get(`/account-provisioning/ticket/${ticketId}/prefill`);
+          const { data } = await api.get(`/account-provisioning/ticket/${ticketId}/prefill`, {
+            params: { force: 1 },
+          });
           if (cancelled) return;
-          setPrefill(data);
-          const suggested = Array.isArray(data?.accounts) ? data.accounts : [];
-          const suggestedApps = Array.isArray(data?.applications) ? data.applications : [];
-          if (suggested.length > 0) {
-            setRows(suggested.map(rowFromAccount));
-          } else if (suggestedApps.length > 0) {
-            setRows(suggestedApps.map((app) => ({ ...EMPTY_ROW, applicationId: String(app.id) })));
-          } else {
-            setRows([{ ...EMPTY_ROW }]);
-          }
+          applyPrefill(data);
         } catch {
           // Le pré-remplissage est optionnel : le formulaire reste utilisable à la main.
         } finally {
@@ -175,7 +205,16 @@ export default function AccountProvisioningModal({ open, ticketId, ticketTitle, 
     })();
 
     return () => { cancelled = true; };
+    // `initialPrefill` est volontairement absent des dépendances : il est figé au
+    // moment de l'ouverture (le relire relancerait l'analyse à chaque rendu).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, ticketId]);
+  // Détection après chargement de l'état du ticket : si le module est actif côté
+  // serveur mais qu'aucune déclaration n'existe, on force l'affichage du bandeau
+  // « aucune opération » sans attendre que l'utilisateur clique quelque part.
+
+
+
 
   useEffect(() => {
     if (!open) return undefined;
@@ -433,13 +472,13 @@ export default function AccountProvisioningModal({ open, ticketId, ticketTitle, 
                     ? 'border-violet-500/25 bg-violet-500/5'
                     : 'border-outline-variant/50 bg-surface-container-low'
                 }`}>
-                  {prefill.aiUsed ? (
+                  {prefill?.aiUsed ? (
                     <Sparkles className="w-4 h-4 text-violet-500 shrink-0 mt-0.5" />
                   ) : (
                     <span className="material-symbols-outlined text-[18px] text-on-surface-variant shrink-0">info</span>
                   )}
                   <div className="text-[11px] leading-relaxed text-on-surface-variant">
-                    {prefill.aiUsed ? (
+                    {prefill?.aiUsed ? (
                       <>
                         <strong className="text-on-surface">Pré-rempli par IA</strong>
                         {aiConfidence ? ` (confiance ${aiConfidence})` : ''} — vérifiez et corrigez avant de valider.
@@ -450,14 +489,14 @@ export default function AccountProvisioningModal({ open, ticketId, ticketTitle, 
                           </span>
                         )}
                         {prefill.lowConfidence && (
-                          <span className="block mt-1 text-amber-600 dark:text-amber-400">
+                          <span className="block mt-1 text-amber-500 dark:text-amber-400">
                             Confiance faible : les comptes ne sont pas pré-remplis, seules les applications sont proposées.
                           </span>
                         )}
                       </>
                     ) : (
                       <>
-                        {prefill.isAccountProvisioning
+                        {prefill?.isAccountProvisioning === true
                           ? 'Pré-remplissage automatique à partir du ticket.'
                           : 'Aucune opération sur compte détectée dans le ticket — complétez ou cochez « aucune opération ».'}
                         {prefill.reason ? ` ${prefill.reason}` : ''}
@@ -468,8 +507,8 @@ export default function AccountProvisioningModal({ open, ticketId, ticketTitle, 
                         )}
                       </>
                     )}
-                    {Array.isArray(prefill.ignoredApplications) && prefill.ignoredApplications.length > 0 && (
-                      <span className="block mt-1 text-amber-600 dark:text-amber-400">
+                    {Array.isArray(prefill?.ignoredApplications) && prefill.ignoredApplications.length > 0 && (
+                      <span className="block mt-1 text-amber-500 dark:text-amber-400">
                         Applications citées hors catalogue : {prefill.ignoredApplications.join(', ')}.
                         {' '}Elles ne sont pas proposées ici et ont été signalées à un administrateur —
                         choisissez l’application correspondante dans la liste, ou « Autre ».
@@ -477,9 +516,7 @@ export default function AccountProvisioningModal({ open, ticketId, ticketTitle, 
                     )}
                   </div>
                 </div>
-              )}
-
-              {error && (
+              )}                  {error && (
                 <div className="flex items-start gap-3 rounded-xl border border-red-500/25 bg-red-500/5 px-3.5 py-3 text-red-600 dark:text-red-400">
                   <AlertTriangle className="w-5 h-5 shrink-0" />
                   <p className="text-xs font-semibold leading-relaxed">{error}</p>

@@ -474,6 +474,18 @@ describe('détection déterministe', () => {  it('détecte un alias avec accents
       CATALOG
     );
     expect(prefill.isAccountProvisioning).toBe(false);
+    // Hors sujet explicite : le pré-vol de résolution s'en sert pour ne pas
+    // afficher la modale (contrairement à une simple négation ou demande).
+    expect(prefill.explicitlyIrrelevant).toBe(true);
+  });
+
+  it('ne marque pas « hors sujet » un ticket qui parle de comptes', () => {
+    const prefill = buildDeterministicPrefill(
+      { title: 'Aucun compte créé', content: 'Le demandeur avait déjà un compte Odoo, aucune création nécessaire.' },
+      [],
+      CATALOG
+    );
+    expect(prefill.explicitlyIrrelevant).toBe(false);
   });
 
   it('reconnaît une mise à jour de droits attestée', () => {

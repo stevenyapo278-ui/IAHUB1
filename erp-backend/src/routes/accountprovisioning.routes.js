@@ -237,7 +237,11 @@ router.get('/ticket/:ticketId', async (req, res) => {
 router.get('/ticket/:ticketId/prefill', async (req, res) => {
   try {
     if (!canDeclare(req.user)) return res.status(403).json({ error: 'Accès refusé.' });
-    const suggestion = await suggestProvisioning({ ticketId: req.params.ticketId, user: req.user });
+    // `force=1` : utilisé par le pré-vol de résolution pour obtenir une vraie
+    // analyse (l'IA est sollicitée même si le pré-filtre déterministe ne voit
+    // aucun mot-clé « compte »).
+    const force = req.query.force === '1' || req.query.force === 'true';
+    const suggestion = await suggestProvisioning({ ticketId: req.params.ticketId, user: req.user, force });
 
     // File de validation : les noms hors catalogue sont conservés pour que le
     // SUPERADMIN puisse enrichir le référentiel. Jamais bloquant.

@@ -66,6 +66,39 @@ function extractCleanTextAndImages(content) {
 // pour éviter un upload de 200 Mo qui échouerait au dernier moment.
 const MAX_ATTACHMENT_SIZE = 200 * 1024 * 1024;
 
+// Seuil au-delà duquel on fait confiance à l'IA pour conclure qu'aucune
+// opération sur compte n'a eu lieu (et donc ne pas afficher la modale).
+const PROVISIONING_NONE_MIN_CONFIDENCE = 0.6;
+
+/**
+ * Décide si le pré-remplissage permet de résoudre le ticket SANS ouvrir la modale.
+ * On reste volontairement strict : dès qu'un compte ou une application est
+ * proposé, ou que la confiance est insuffisante, le technicien garde la main.
+ * Sans IA, seul le cas « hors sujet explicite » du pré-filtre déterministe passe.
+ */
+function isProvisioningClearlyNotApplicable(prefill) {
+  if (!prefill || prefill.isAccountProvisioning !== false) return false;
+  if (Array.isArray(prefill.accounts) && prefill.accounts.length > 0) return false;
+  if (Array.isArray(prefill.applications) && prefill.applications.length > 0) return false;
+  if (Array.isArray(prefill.ignoredApplications) && prefill.ignoredApplications.length > 0) return false;
+  if (prefill.aiUsed) return Number(prefill.confidence) >= PROVISIONING_NONE_MIN_CONFIDENCE;
+  return prefill.explicitlyIrrelevant === true;
+}
+
+// Métadonnées de télémétrie envoyées avec la déclaration (identique à la modale).
+function buildProvisioningPrefillMeta(prefill) {
+  if (!prefill) return null;
+  return {
+    aiUsed: Boolean(prefill.aiUsed),
+    classifier: prefill.classifier || (prefill.aiUsed ? 'AI' : 'DETERMINISTIC'),
+    confidence: prefill.confidence ?? null,
+    evidence: prefill.evidence || '',
+    accounts: Array.isArray(prefill.accounts) ? prefill.accounts : [],
+    applications: Array.isArray(prefill.applications) ? prefill.applications : [],
+    ignoredApplications: Array.isArray(prefill.ignoredApplications) ? prefill.ignoredApplications : [],
+  };
+}
+
 // Variants du "défilement" entre tickets (carrousel) : le ticket sorti glisse dans le sens du voyage,
 // le nouveau entre par le côté opposé — sortie rapide puis entrée longue et douce (ease-out quintique)
 const TICKET_SLIDE_VARIANTS = {
@@ -377,6 +410,17 @@ export default function TicketDetail() {
   const [newLocationName, setNewLocationName] = useState('');
   // Module « Création de comptes applicatifs » : modale bloquante avant SOLVED.
   const [accountProvisioningOpen, setAccountProvisioningOpen] = useState(false);
+  // Pré-analyse récupérée par le pré-vol : réutilisée par la modale pour éviter
+  // un second appel (et une seconde facture IA).
+  const [accountProvisioningPrefill, setAccountProvisioningPrefill] = useState(null);
+  // true quand la modale a été ouverte par la résolution : valider déclenche
+  // alors le passage à SOLVED (sinon, ouverture manuelle = simple correction).
+  const [accountProvisioningResolveOnSave, setAccountProvisioningResolveOnSave] = useState(false);
+  const accountProvisioningShouldRender = useMemo(
+    () => user?.role === 'TECHNICIAN' && systemSettings?.accountProvisioningEnabled === true,
+    [user?.role, systemSettings?.accountProvisioningEnabled]
+  );
+  const [submitting, setSubmitting] = useState(false);
   const [editingFollowupId, setEditingFollowupId] = useState(null);
   const [editingFollowupContent, setEditingFollowupContent] = useState('');
   const [editingFollowupImages, setEditingFollowupImages] = useState([]);
@@ -887,19 +931,68 @@ export default function TicketDetail() {
     api.get('/teams').then(({ data }) => setTeams(data)).catch(() => {});
   }, [canAssign]);
 
+  /**
+   * Pré-vol du blocage SOLVED. On analyse le ticket AVANT d'ouvrir la modale :
+   *   • une déclaration existe déjà → rien à saisir, le backend autorisera ;
+   *   • l'analyse conclut clairement à aucune opération sur compte → on enregistre
+   *     la trace « aucun compte » et la résolution continue sans modale ;
+   *   • sinon (ou en cas d'erreur) → on ouvre la modale avec l'analyse déjà faite.
+   * Retourne true quand le PATCH de statut peut partir immédiatement.
+   */
+  async function runAccountProvisioningPreflight() {
+    try {
+      const { data: state } = await api.get(`/account-provisioning/ticket/${id}`);
+      if (state?.record) {
+        setAccountProvisioningPrefill(null);
+        return true;
+      }
+
+      // `force=1` : on veut une vraie analyse, même si le ticket ne contient
+      // aucun mot-clé « compte » (c'est le cas des tickets hors sujet).
+      const { data: prefill } = await api.get(`/account-provisioning/ticket/${id}/prefill`, {
+        params: { force: 1 },
+      });
+
+      if (isProvisioningClearlyNotApplicable(prefill)) {
+        await api.post(`/account-provisioning/ticket/${id}`, {
+          noAccountCreated: true,
+          source: 'MANUAL',
+          prefillMeta: buildProvisioningPrefillMeta(prefill),
+        });
+        setAccountProvisioningPrefill(null);
+        toast.info('Aucune opération sur compte détectée — résolution tracée sans déclaration.');
+        return true;
+      }
+
+      setAccountProvisioningPrefill(prefill || null);
+      setAccountProvisioningResolveOnSave(true);
+      setAccountProvisioningOpen(true);
+      return false;
+    } catch {
+      // L'analyse est une aide : si elle échoue, le technicien garde la modale
+      // (et le backend reste le filet de sécurité).
+      setAccountProvisioningPrefill(null);
+      setAccountProvisioningResolveOnSave(true);
+      setAccountProvisioningOpen(true);
+      return false;
+    }
+  }
+
   async function updateField(field, value, options = {}) {
     // Un technicien ne peut pas résoudre un ticket sans déclarer les comptes créés
-    // quand le module est actif. On ouvre la modale AVANT l'appel PATCH ; le backend
-    // reste le filet de sécurité (409 ACCOUNT_PROVISIONING_REQUIRED).
+    // quand le module est actif. Le pré-vol décide s'il faut ouvrir la modale ; le
+    // backend reste le filet de sécurité (409 ACCOUNT_PROVISIONING_REQUIRED).
     if (
       !options.skipAccountGate &&
       field === 'status' &&
       value === 'SOLVED' &&
       user?.role === 'TECHNICIAN' &&
-      systemSettings?.accountProvisioningEnabled
+      systemSettings?.accountProvisioningEnabled === true
     ) {
-      setAccountProvisioningOpen(true);
-      return;
+      setSubmitting(true);
+      const canResolve = await runAccountProvisioningPreflight();
+      if (!canResolve) return;
+      setSubmitting(false);
     }
     try {
       setSavingField(field);
@@ -912,6 +1005,8 @@ export default function TicketDetail() {
       // Filet de sécurité : même si le réglage local n'était pas encore chargé,
       // le backend refuse la résolution et on ouvre le formulaire.
       if (err.response?.data?.code === 'ACCOUNT_PROVISIONING_REQUIRED') {
+        setAccountProvisioningPrefill(null);
+        setAccountProvisioningResolveOnSave(true);
         setAccountProvisioningOpen(true);
         return;
       }
@@ -922,8 +1017,33 @@ export default function TicketDetail() {
   }
 
   async function handleAccountProvisioningSaved() {
+    const shouldResolve = accountProvisioningResolveOnSave;
     setAccountProvisioningOpen(false);
-    await updateField('status', 'SOLVED', { skipAccountGate: true });
+    setAccountProvisioningPrefill(null);
+    setAccountProvisioningResolveOnSave(false);
+    setSubmitting(false);
+    if (shouldResolve) {
+      await updateField('status', 'SOLVED', { skipAccountGate: true });
+    } else {
+      // Ouverture manuelle (correction) : on rafraîchit le fil pour afficher la
+      // note interne ajoutée par le backend.
+      load();
+    }
+  }
+
+  // Ouverture manuelle : le technicien peut déclarer ou corriger les comptes
+  // sans changer le statut (notamment après une trace automatique « aucun compte »).
+  function openAccountProvisioningModal() {
+    setAccountProvisioningPrefill(null);
+    setAccountProvisioningResolveOnSave(false);
+    setAccountProvisioningOpen(true);
+  }
+
+  function onAccountProvisioningClose() {
+    setAccountProvisioningOpen(false);
+    setAccountProvisioningPrefill(null);
+    setAccountProvisioningResolveOnSave(false);
+    setSubmitting(false);
   }
 
   // Extrait le nom du lieu (partie avant ":", "-", "/", "|") d'un titre
@@ -2151,6 +2271,17 @@ export default function TicketDetail() {
                   <FileText className={`w-3.5 h-3.5 ${summarizingThread ? 'animate-pulse' : ''}`} />
                   <span>{summarizingThread ? 'Résumé en cours…' : 'Résumer les échanges'}</span>
                 </button>
+
+                {accountProvisioningShouldRender && (
+                  <button
+                    onClick={openAccountProvisioningModal}
+                    className="px-3 py-1.5 rounded-xl border border-primary/30 bg-primary/10 text-primary hover:bg-primary/20 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-sm"
+                    title="Déclarer ou corriger les opérations sur comptes applicatifs liées à ce ticket"
+                  >
+                    <UserCheck className="w-3.5 h-3.5" />
+                    <span>Comptes applicatifs</span>
+                  </button>
+                )}
 
                 <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold ${sConfig.bg}`}>
                   <SIcon className="w-3.5 h-3.5" />
@@ -5172,13 +5303,29 @@ export default function TicketDetail() {
         );
       })()}
 
-      <AccountProvisioningModal
-        open={accountProvisioningOpen}
-        ticketId={id}
-        ticketTitle={ticket?.title}
-        onClose={() => setAccountProvisioningOpen(false)}
-        onSaved={handleAccountProvisioningSaved}
-      />
+      {accountProvisioningShouldRender && (
+        <AccountProvisioningModal
+          open={accountProvisioningOpen}
+          ticketId={id}
+          ticketTitle={ticket?.title}
+          initialPrefill={accountProvisioningPrefill}
+          onClose={onAccountProvisioningClose}
+          onSaved={handleAccountProvisioningSaved}
+        />
+      )}
+      {submitting && !accountProvisioningOpen && (
+        // Analyse préalable à la résolution (classification des comptes) : un
+        // voile discret évite les doubles clics pendant l'appel.
+        <div className="fixed inset-0 z-[9998] flex items-center justify-center bg-black/40 backdrop-blur-sm"
+             role="status" aria-live="polite">
+          <div className="rounded-2xl bg-surface shadow-2xl px-5 py-4 flex items-center gap-3">
+            <Loader2 className="w-4 h-4 animate-spin text-primary" />
+            <p className="text-xs font-bold text-on-surface-variant">
+              Analyse des comptes applicatifs…
+            </p>
+          </div>
+        </div>
+      )}
 
     </div>
   );

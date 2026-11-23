@@ -144,8 +144,13 @@ function buildDeterministicPrefill(ticket, followups, catalog) {
   let isAccountProvisioning = false;
   let confidence = 0.05;
   let reason = applicationReason;
+  // Ticket manifestement hors sujet (aucun mot « compte/accès » et aucune
+  // application du catalogue) : le pré-vol de résolution peut s'en servir pour
+  // éviter d'afficher la modale au technicien (la trace « aucun compte » est
+  // tout de même enregistrée).
+  const explicitlyIrrelevant = !mentionsAccount && applications.length === 0;
 
-  if (!mentionsAccount && applications.length === 0) {
+  if (explicitlyIrrelevant) {
     // Ticket manifestement hors sujet : rien à proposer, aucun appel IA ne sera fait.
   } else if (mentionsNegation) {
     confidence = 0.15;
@@ -181,6 +186,7 @@ function buildDeterministicPrefill(ticket, followups, catalog) {
     applications,
     ignoredApplications: [],
     aiUsed: false,
+    explicitlyIrrelevant,
     reason,
   };
 }
@@ -403,8 +409,13 @@ Réponds UNIQUEMENT avec ce JSON, sans commentaire :
 /**
  * Analyse un ticket pour pré-remplir le formulaire. Ne lève jamais : renvoie
  * toujours une proposition (éventuellement vide) et un drapeau aiUsed.
+ *
+ * `force` : quand le technicien s'apprête à résoudre le ticket, on veut une
+ * vraie analyse et non le seul pré-filtre déterministe. On demande alors l'IA
+ * même si le ticket ne contient aucun mot-clé « compte » — c'est justement ce
+ * qui permet de ne pas afficher la modale sur les tickets hors sujet.
  */
-async function suggestProvisioning({ ticketId, user } = {}) {
+async function suggestProvisioning({ ticketId, user, force = false } = {}) {
   const ticket = await prisma.ticket.findUnique({
     where: { id: Number(ticketId) },
     select: { id: true, title: true, content: true, status: true, deletedAt: true },
@@ -435,15 +446,17 @@ async function suggestProvisioning({ ticketId, user } = {}) {
     catalog.length > 0;
 
   // Pré-filtre : aucun mot-clé « compte/accès » et aucune application citée → inutile
-  // de dépenser un appel IA sur un ticket qui n'a rien à voir.
+  // de dépenser un appel IA sur un ticket qui n'a rien à voir (sauf en mode `force`,
+  // où l'on veut explicitement l'analyse avant une résolution).
   const text = buildTicketText(ticket, followups);
-  if (!aiAllowed || (!ACCOUNT_KEYWORD_RE.test(text) && fallback.applications.length === 0)) {
+  if (!aiAllowed || (!force && !ACCOUNT_KEYWORD_RE.test(text) && fallback.applications.length === 0)) {
     return {
       ...fallback,
       ticketId: ticket.id,
       fallback: true,
       classifier: 'DETERMINISTIC',
       evidence: '',
+      explicitlyIrrelevant: fallback.explicitlyIrrelevant === true,
       lowConfidence: false,
     };
   }
@@ -486,6 +499,7 @@ async function suggestProvisioning({ ticketId, user } = {}) {
       classifier: 'AI',
       aiUsed: true,
       fallback: false,
+      explicitlyIrrelevant: false,
       // Conservé pour l'UI : applications vues par les alias, même si l'IA conclut
       // qu'il n'y a pas eu de création (le technicien garde l'information).
       deterministicApplications: fallback.applications,
