@@ -400,9 +400,12 @@ async function processMessage(message, account) {
 
   try {
     // Étape 1 : chercher un ticket existant par conversation
-    const match = await findExistingTicket({ conversationId, inReplyTo, internetMessageId, subject, fromEmail });
+    const match = await findExistingTicket({ conversationId, inReplyTo });
+    // Le fil appartient à un ticket CLOSED : le mail doit devenir une nouvelle demande.
+    // On conserve l'id du ticket clos pour lier les deux tickets et tracer l'origine.
+    const closedThreadTicketId = match?.closedTicketId || null;
 
-    if (match) {
+    if (match?.ticketId) {
       // Email de suivi sur ticket existant
       const ticket = await prisma.ticket.findUnique({ where: { id: match.ticketId } });
 
@@ -821,10 +824,13 @@ async function processMessage(message, account) {
       return applyInboxRulesSafe(updated, 'needs-review');
     }
 
-    // Étape 2b : détecter un incident similaire déjà ouvert (même problème, autre site/magasin)
-    const similarMatch = await findSimilarOpenTicket({
+    // Étape 2b : détecter un incident similaire déjà ouvert (même problème, autre site/magasin).
+    // Un mail arrivé dans le fil d'un ticket CLOSED ne doit PAS être rattaché à un autre
+    // ticket : c'est une nouvelle demande, même si le sujet ressemble à un incident connu.
+    const similarMatch = closedThreadTicketId ? null : await findSimilarOpenTicket({
       subject, body: cleanBody, category: analysis.category,
-    });      if (similarMatch) {
+    });
+    if (similarMatch) {
       // Rattacher cet email au ticket similaire existant
       const similarTicket = await prisma.ticket.findUnique({
         where: { id: similarMatch.ticketId },
@@ -1057,6 +1063,23 @@ async function processMessage(message, account) {
       await logEvent(created.erpTicketId, 'CREATED', fromEmail, { source: 'EMAIL' }, tx);
       await logEvent(created.erpTicketId, 'AI_ANALYZED', 'AI', { analysis }, tx);
 
+      // Tracé du lien avec le ticket fermé d'origine : visible dans l'historique des
+      // deux tickets et exploité par la fiche ticket pour afficher un bandeau.
+      if (closedThreadTicketId) {
+        await logEvent(created.erpTicketId, 'CREATED_FROM_CLOSED_TICKET', 'SYSTEM', {
+          originTicketId: closedThreadTicketId,
+          originTicketTitle: match?.closedTicketTitle || null,
+          originStatus: match?.closedTicketStatus || 'CLOSED',
+          conversationId,
+        }, tx);
+        await logEvent(closedThreadTicketId, 'NEW_REQUEST_CREATED', 'SYSTEM', {
+          targetTicketId: created.erpTicketId,
+          targetTicketTitle: analysis.suggestedTitle || subject,
+          sender: fromEmail,
+          subject,
+        }, tx);
+      }
+
       // Expéditeur dégradé par la boucle de rétroaction (taux de rejets élevé) : tracer pour la Hotline
       if (lowTrustSender) {
         await logEvent(created.erpTicketId, 'AI_LOW_TRUST_SENDER', 'SYSTEM', {
@@ -1069,6 +1092,19 @@ async function processMessage(message, account) {
 
     erpTicketId = txResult.erpTicketId;
     ticketMessageId = txResult.ticketMessageId;
+
+    // Lien « ticket lié » entre la nouvelle demande et le ticket fermé d'origine.
+    // Best-effort : un échec de liaison ne doit jamais remettre en cause le ticket créé.
+    if (closedThreadTicketId) {
+      try {
+        await prisma.ticketLink.createMany({
+          data: [{ ticketAId: closedThreadTicketId, ticketBId: erpTicketId, type: 'RELATED' }],
+          skipDuplicates: true,
+        });
+      } catch (linkErr) {
+        console.warn(`[emailPipeline] Liaison ticket #${erpTicketId} → #${closedThreadTicketId} impossible :`, linkErr.message);
+      }
+    }
 
     const { cidMap } = await safeProcessIncomingAttachments({
       account, graphMessageId, incomingEmailId: incoming.id,
@@ -1142,6 +1178,9 @@ async function processMessage(message, account) {
       where: { id: incoming.id },
       data: {
         status: 'DONE', erpTicketId, isNewTicket: true,
+        // Marqueur utilisé par la boîte de réception pour signaler qu'un mail arrivé
+        // dans le fil d'un ticket fermé a bien été traité comme une nouvelle demande.
+        ...(closedThreadTicketId ? { aiIntent: 'NEW_REQUEST_FROM_CLOSED_TICKET' } : {}),
         aiSummary: analysis.summary, aiCategory: analysis.category,
         aiPriority: analysis.priority, aiTeam: analysis.team,
         aiConfidence: analysis.confidence, aiIsSpam: false,

@@ -3,6 +3,7 @@ import {
   Inbox, Sparkles, Plus, Flame, RefreshCw, ChevronDown,
   UserCheck, MessageSquare, Trash2, FileText, HelpCircle, TrendingUp,
   Clock, CheckCircle2, Shield, AlertTriangle, Layers, Link2, History,
+  GitBranch,
 } from 'lucide-react';
 import { sanitizeHtml } from '../utils/sanitize';
 import { FIELD_LABELS, formatLogValue } from '../utils/logFields';
@@ -68,6 +69,7 @@ function eventIcon(type) {
     case 'SLA_UPDATED': return <Clock className="w-3 h-3" />;
     case 'MERGED_INTO': case 'MERGED_FROM': return <Layers className="w-3 h-3" />;
     case 'LINKED': case 'UNLINKED': return <Link2 className="w-3 h-3" />;
+    case 'CREATED_FROM_CLOSED_TICKET': case 'NEW_REQUEST_CREATED': return <GitBranch className="w-3 h-3" />;
     default: return <History className="w-3 h-3" />;
   }
 }
@@ -119,6 +121,8 @@ function eventLabel(type) {
     NEW_TICKET_SUGGESTED: 'Nouvelle demande détectée dans le fil',
     NEW_TICKET_SUGGESTED_CREATED: 'Nouvelle demande créée depuis la suggestion',
     NEW_TICKET_SUGGESTED_DISMISSED: 'Suggestion de nouvelle demande ignorée',
+    CREATED_FROM_CLOSED_TICKET: 'Nouvelle demande issue d\'un ticket fermé',
+    NEW_REQUEST_CREATED: 'Nouvelle demande créée depuis ce fil',
     RESOLUTION_CONFIRMED_ON_CLOSED: 'Résolution confirmée sur ticket fermé',
   };
   return labels[type] || (type ? type.replace(/_/g, ' ').toLowerCase() : '');
@@ -167,6 +171,7 @@ function eventDetail(event) {
   if (p.level) parts.push(`niveau ${p.level}`);
   if (p.fromTeam?.name && p.toTeam?.name) parts.push(`${p.fromTeam.name} → ${p.toTeam.name}`);
   if (p.targetTicketId) parts.push(`Ticket #${p.targetTicketId}`);
+  if (p.originTicketId) parts.push(`Ticket d'origine #${p.originTicketId}`);
   if (p.daysSinceSolved !== undefined) parts.push(`résolu depuis ${p.daysSinceSolved} j`);
   if (p.daysSinceLastReply !== undefined) parts.push(`sans réponse depuis ${p.daysSinceLastReply} j`);
   // Commentaires : extrait du contenu + auteur d'origine (tracé « qui a écrit quoi »)

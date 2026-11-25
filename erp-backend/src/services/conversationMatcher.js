@@ -1,62 +1,79 @@
 const prisma = require('../prismaClient');
 
+// Un ticket CLOSED ne doit plus absorber les emails de son fil de conversation :
+// tout nouveau message reçu dans ce fil devient une NOUVELLE DEMANDE (nouveau ticket).
+// On renvoie les métadonnées du ticket clos (closedTicketId/…) pour que le pipeline
+// puisse lier les deux tickets et afficher un indicateur visuel côté interface.
+const CLOSED_STATUS = 'CLOSED';
+
+const TICKET_SELECT = { id: true, title: true, status: true };
+
+function newRequestFromClosedThread(ticket, method) {
+  return {
+    ticketId: null,
+    method,
+    closedTicketId: ticket.id,
+    closedTicketTitle: ticket.title || null,
+    closedTicketStatus: ticket.status || CLOSED_STATUS,
+  };
+}
+
 // Rattache un email entrant à un ticket existant selon 3 niveaux de priorité.
-// Retourne { ticketId, method } ou null si aucun ticket trouvé.
-//
-// Les réglages closedTicketBehavior et reopenThresholdDays (SystemSettings) déterminent
-// le comportement sur les tickets fermés : création d'un nouveau ticket ou réouverture.
-async function findExistingTicket({ conversationId, inReplyTo, internetMessageId, subject, fromEmail }) {
-  // Priorité 1 : conversationId Outlook
+// Retourne { ticketId, method } pour un ticket encore actif, ou
+// { ticketId: null, method: 'NEW_TICKET_FROM_CLOSED', closedTicketId } quand le fil
+// appartient à un ticket fermé — le pipeline créera alors une nouvelle demande.
+async function findExistingTicket({ conversationId, inReplyTo }) {
+  let closedThreadTicket = null;
+
+  // Priorité 1 : conversationId Outlook — ticket encore actif
   if (conversationId) {
     const ticket = await prisma.ticket.findFirst({
-      where: { outlookConversationId: conversationId, status: { not: 'CLOSED' } },
+      where: { outlookConversationId: conversationId, status: { not: CLOSED_STATUS } },
       orderBy: { updatedAt: 'desc' },
+      select: TICKET_SELECT,
     });
     if (ticket) return { ticketId: ticket.id, method: 'CONVERSATION_ID' };
 
-    // Vérifier aussi dans les TicketMessages existants
-    const msg = await prisma.ticketMessage.findFirst({
-      where: { conversationId },
-      include: { ticket: true },
+    // Tickets historiques : l'identifiant de conversation n'est porté que par les
+    // messages. On cherche d'abord un message rattaché à un ticket encore actif.
+    const activeMsg = await prisma.ticketMessage.findFirst({
+      where: { conversationId, ticket: { status: { not: CLOSED_STATUS } } },
+      include: { ticket: { select: TICKET_SELECT } },
+      orderBy: { timestamp: 'desc' },
     });
-    if (msg && msg.ticket.status !== 'CLOSED') return { ticketId: msg.ticketId, method: 'CONVERSATION_ID_MSG' };
+    if (activeMsg?.ticket) return { ticketId: activeMsg.ticketId, method: 'CONVERSATION_ID_MSG' };
+
+    // Aucun ticket actif : mémoriser le ticket clos du fil s'il existe.
+    const closedMsg = await prisma.ticketMessage.findFirst({
+      where: { conversationId },
+      include: { ticket: { select: TICKET_SELECT } },
+      orderBy: { timestamp: 'desc' },
+    });
+    if (closedMsg?.ticket?.status === CLOSED_STATUS) closedThreadTicket = closedMsg.ticket;
   }
 
-  // Priorité 2 : In-Reply-To / References
+  // Priorité 2 : In-Reply-To / References — même règle : jamais un ticket clos.
   if (inReplyTo) {
     const msg = await prisma.ticketMessage.findFirst({
       where: { OR: [{ outlookMessageId: inReplyTo }, { internetMessageId: inReplyTo }] },
-      include: { ticket: true },
+      include: { ticket: { select: TICKET_SELECT } },
     });
-    if (msg) return { ticketId: msg.ticketId, method: 'IN_REPLY_TO' };
-  }
-
-  // Priorité 3 : ticket clôturé avec même conversationId → réouverture ou nouveau ticket
-  // selon les réglages closedTicketBehavior et reopenThresholdDays.
-  if (conversationId) {
-    const closed = await prisma.ticket.findFirst({
-      where: { outlookConversationId: conversationId, status: 'CLOSED' },
-      orderBy: { closedAt: 'desc' },
-    });
-
-    if (closed) {
-      // Charger les réglages pour savoir si on rouvre ou non
-      const settings = await prisma.systemSettings.findUnique({ where: { id: 1 } });
-
-      // Comportement "create_new" : ne pas rouvrir, le pipeline créera un nouveau ticket
-      if (settings?.closedTicketBehavior === 'create_new') return null;
-
-      // Vérifier le seuil de réouverture : si fermé depuis trop longtemps, créer un nouveau ticket
-      if (closed.closedAt && settings?.reopenThresholdDays) {
-        const daysSinceClosed = Math.floor((Date.now() - new Date(closed.closedAt).getTime()) / (1000 * 60 * 60 * 24));
-        if (daysSinceClosed > settings.reopenThresholdDays) return null;
-      }
-
-      // Mode "reopen" et pas de dépassement du seuil
-      return { ticketId: closed.id, method: 'REOPEN' };
+    if (msg?.ticket) {
+      if (msg.ticket.status !== CLOSED_STATUS) return { ticketId: msg.ticketId, method: 'IN_REPLY_TO' };
+      if (!closedThreadTicket) closedThreadTicket = msg.ticket;
     }
   }
 
+  // Priorité 3 : ticket clos portant directement le conversationId.
+  if (conversationId && !closedThreadTicket) {
+    closedThreadTicket = await prisma.ticket.findFirst({
+      where: { outlookConversationId: conversationId, status: CLOSED_STATUS },
+      orderBy: { closedAt: 'desc' },
+      select: TICKET_SELECT,
+    });
+  }
+
+  if (closedThreadTicket) return newRequestFromClosedThread(closedThreadTicket, 'NEW_TICKET_FROM_CLOSED');
   return null;
 }
 

@@ -461,6 +461,18 @@ export default function TicketDetail() {
     return events.find(isClosing) || null;
   }, [events, ticket?.status]);
 
+  // Origine « nouvelle demande » : ce ticket a été créé depuis le fil d'un ticket fermé.
+  const closedThreadOriginEvent = useMemo(
+    () => events.find((e) => e.type === 'CREATED_FROM_CLOSED_TICKET') || null,
+    [events]
+  );
+
+  // Inverse : une nouvelle demande a été créée depuis CE ticket fermé.
+  const closedThreadFollowupEvent = useMemo(
+    () => events.find((e) => e.type === 'NEW_REQUEST_CREATED') || null,
+    [events]
+  );
+
   const toggleEmailExpanded = (id) => setExpandedEmails((prev) => {
     const next = new Set(prev);
     if (next.has(id)) next.delete(id); else next.add(id);
@@ -2416,6 +2428,29 @@ export default function TicketDetail() {
         </div>
       )}
 
+      {/* Bandeau d'origine — ce ticket a été créé depuis le fil d'un ticket fermé */}
+      {closedThreadOriginEvent?.payload?.originTicketId && (
+        <div className="border border-sky-400/40 bg-sky-500/10 rounded-xl p-4 flex items-start gap-3 text-sky-800 dark:text-sky-300">
+          <GitBranch className="w-5 h-5 shrink-0 mt-0.5 text-sky-600 dark:text-sky-400" />
+          <div className="flex-1 min-w-0">
+            <h4 className="text-xs font-bold uppercase tracking-wider">Nouvelle demande issue d'un ticket fermé</h4>
+            <p className="text-xs mt-1">
+              Un email reçu dans le fil du ticket{' '}
+              <Link
+                to={`/tickets/${closedThreadOriginEvent.payload.originTicketId}`}
+                className="font-bold underline hover:no-underline"
+              >
+                #{closedThreadOriginEvent.payload.originTicketId}
+              </Link>
+              {closedThreadOriginEvent.payload.originTicketTitle && (
+                <> — {closedThreadOriginEvent.payload.originTicketTitle}</>
+              )}
+              {' '}a été traité automatiquement comme une nouvelle demande.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Bannière de clôture — visible en haut de fiche : qui a fermé, quand, pourquoi */}
       {ticket.status === 'CLOSED' && (
         <div className="border border-slate-400/40 bg-slate-500/10 rounded-xl p-4 flex items-start gap-3 text-slate-700 dark:text-slate-300">
@@ -2439,6 +2474,18 @@ export default function TicketDetail() {
                 <span className="text-slate-500 dark:text-slate-400"> — rejet de la Hotline : {closingEvent.payload.reason}</span>
               )}
             </p>
+            {closedThreadFollowupEvent?.payload?.targetTicketId && (
+              <p className="text-xs mt-2">
+                Une nouvelle demande{' '}
+                <Link
+                  to={`/tickets/${closedThreadFollowupEvent.payload.targetTicketId}`}
+                  className="font-bold underline hover:no-underline"
+                >
+                  #{closedThreadFollowupEvent.payload.targetTicketId}
+                </Link>
+                {' '}a été créée depuis ce fil de conversation.
+              </p>
+            )}
           </div>
         </div>
       )}

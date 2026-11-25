@@ -27,7 +27,7 @@ import {
   ChevronRight, ChevronUp, Flame, AlertTriangle, ArrowDownWideNarrow, Rows3, Rows4,
   CircleDot, Mail, CheckCheck, Send, FileText, Tag, Users, Filter, Sparkles, Plus,
   CalendarRange, Info, FolderPlus, ArrowRight, Loader2, Folder, Settings, Trash2, Play, EyeOff, Eye,
-  MapPin, ShieldAlert, Gauge, Layers,
+  MapPin, ShieldAlert, Gauge, Layers, GitBranch,
 } from 'lucide-react';
 
 // STATUS_CONFIG / PRIORITY_CONFIG : voir ../components/inbox/inboxShared.js
@@ -1468,6 +1468,12 @@ export default function Inbox() {
                             <RefreshCw className="w-3.5 h-3.5" />
                             Relancer
                           </button>
+                        )}
+                        {threadDetail.latest?.aiIntent === 'NEW_REQUEST_FROM_CLOSED_TICKET' && (
+                          <span className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-sky-500/10 text-sky-600 dark:text-sky-400 border border-sky-500/20 text-xs font-bold">
+                            <GitBranch className="w-3.5 h-3.5" />
+                            Nouvelle demande (fil clôturé)
+                          </span>
                         )}
                         {threadDetail.latest?.erpTicketId && (
                           <button

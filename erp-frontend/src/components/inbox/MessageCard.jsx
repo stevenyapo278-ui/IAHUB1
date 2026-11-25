@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   MailOpen, Reply, ChevronDown, ChevronRight, XCircle, Info,
-  Sparkles, Paperclip,
+  Sparkles, Paperclip, GitBranch,
 } from 'lucide-react';
 import {
   STATUS_CONFIG, PRIORITY_CONFIG, initialOf, displayAddr,
@@ -143,6 +143,13 @@ export default function MessageCard({ msg, isLast, onOpenTicket }) {
                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-semibold text-on-surface-variant border border-outline-variant/40 bg-surface-container">
                       <Paperclip className="w-2.5 h-2.5" />
                       {attachments.length} PJ
+                    </span>
+                  )}
+                  {/* Mail reçu dans le fil d'un ticket fermé : traité comme une nouvelle demande */}
+                  {isInbound && msg.aiIntent === 'NEW_REQUEST_FROM_CLOSED_TICKET' && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold border border-sky-500/30 bg-sky-500/10 text-sky-600 dark:text-sky-400">
+                      <GitBranch className="w-2.5 h-2.5" />
+                      Nouvelle demande (fil clôturé)
                     </span>
                   )}
                 </div>
