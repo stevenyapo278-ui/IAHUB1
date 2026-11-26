@@ -959,11 +959,9 @@ export default function TicketDetail() {
         return true;
       }
 
-      // `force=1` : on veut une vraie analyse, même si le ticket ne contient
-      // aucun mot-clé « compte » (c'est le cas des tickets hors sujet).
-      const { data: prefill } = await api.get(`/account-provisioning/ticket/${id}/prefill`, {
-        params: { force: 1 },
-      });
+      // Analyse courte côté serveur (pré-filtre déterministe immédiat sur les
+      // tickets hors sujet, IA bornée à quelques secondes sinon).
+      const { data: prefill } = await api.get(`/account-provisioning/ticket/${id}/prefill`);
 
       if (isProvisioningClearlyNotApplicable(prefill)) {
         await api.post(`/account-provisioning/ticket/${id}`, {
@@ -2880,12 +2878,12 @@ export default function TicketDetail() {
                     <button
                       onClick={() => startEditFollowup(f)}
                       title="Modifier"
-                      className="p-1 rounded-md border border-outline-variant/40 bg-surface-container text-on-surface-variant hover:text-on-surface hover:border-outline transition-colors cursor-pointer"
+                      className="p-1 rounded-md border border-outline-variant/40 bg-surface-container text-on-surface-variant hover:text-on-surface hover-border-outline transition-colors cursor-pointer"
                     >
                       <Pencil className="w-3 h-3" />
                     </button>
                   )}
-                  {['ADMIN', 'SUPERADMIN'].includes(user?.role) && f.source !== 'glpi' && editingFollowupId !== f.id && (
+                  {((['ADMIN', 'SUPERADMIN'].includes(user?.role) || (['HOTLINE', 'TECHNICIAN'].includes(user?.role) && f.authorId === user?.id)) && f.source !== 'glpi' && editingFollowupId !== f.id && (
                     <button
                       onClick={() => setFollowupToDelete(f.id)}
                       title="Supprimer"

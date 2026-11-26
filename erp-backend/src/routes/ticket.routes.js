@@ -3380,8 +3380,8 @@ router.patch('/:id/followups/:followupId', requirePermission('tickets.assign', [
   return res.json({ followup: updated, imageAttachments, imagesRemoved: cleanup.removed });
 });
 
-// Supprimer un commentaire (ADMIN / SUPERADMIN uniquement)
-router.delete('/:id/followups/:followupId', requirePermission('tickets.assign', ['ADMIN', 'SUPERADMIN']), async (req, res) => {
+// Supprimer un commentaire (auteur, ADMIN, SUPERADMIN) — un technicien/HOTLINE ne peut supprimer que son propre commentaire
+router.delete('/:id/followups/:followupId', requirePermission('tickets.assign', ['ADMIN', 'SUPERADMIN', 'HOTLINE', 'TECHNICIAN']), async (req, res) => {
   const ticketId = Number(req.params.id);
   const followupId = Number(req.params.followupId);
 
@@ -3393,6 +3393,16 @@ router.delete('/:id/followups/:followupId', requirePermission('tickets.assign', 
 
   if (followup.source === 'glpi') {
     return res.status(403).json({ error: 'Impossible de supprimer un commentaire synchronisé depuis GLPI' });
+  }
+
+  // Vérifier les droits : auteur du commentaire, ou ADMIN/SUPERADMIN/HOTLINE/TECHNICIEN
+  const isAuthor = followup.authorId === req.user.sub;
+  const isAdminOrSuper = ['ADMIN', 'SUPERADMIN'].includes(req.user.role);
+  const isTechOrAbove = isAdminOrSuper || ['HOTLINE', 'TECHNICIAN'].includes(req.user.role);
+
+  // Les techniciens/HOTLINE ne peuvent supprimer que leurs propres commentaires
+  if (isTechOrAbove && !isAdminOrSuper && !isAuthor) {
+    return res.status(403).json({ error: 'Vous ne pouvez supprimer que vos propres commentaires' });
   }
 
   await prisma.followup.delete({ where: { id: followupId } });
