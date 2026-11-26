@@ -1515,7 +1515,6 @@ export default function TicketDetail() {
     setDeletingFollowup(true);
     try {
       await api.delete(`/tickets/${id}/followups/${followupToDelete}`);
-      toast.success('Commentaire supprimé');
       setFollowupToDelete(null);
       load();
     } catch (err) {

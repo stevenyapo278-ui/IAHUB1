@@ -220,6 +220,7 @@ const NOISE_EVENTS = new Set([
   'FOLLOWUP_ADDED',
   'FOLLOWUP_MADE_PRIVATE',
   'FOLLOWUP_MADE_PUBLIC',
+  'FOLLOWUP_DELETED',
   'EMAIL_RECEIVED',
   'EMAIL_SENT',
   // Automatisations internes
