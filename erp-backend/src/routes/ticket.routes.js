@@ -424,7 +424,7 @@ router.get('/', async (req, res) => {
 
 // Export serveur : mêmes filtres que la liste, dataset complet (pas de pagination UI)
 router.get('/export', async (req, res) => {
-  const { sortBy, sortOrder, format } = req.query;
+  const { sortBy, sortOrder, format, columns } = req.query;
 
   const where = buildTicketWhereClause(req.user, req.query);
 
@@ -434,22 +434,61 @@ router.get('/export', async (req, res) => {
     orderBy = { [sortBy]: order };
   }
 
+  // Colonnes de base toujours sélectionnées dans l'export
+  const baseSelect = {
+    id: true,
+    title: true,           // utilisé aussi comme « description »
+    status: true,
+    priority: true,
+    category: true,
+    type: true,
+    source: true,
+    requesterId: true,
+    assignedToId: true,
+    teamId: true,
+    locationName: true,
+    createdAt: true,
+    solvedAt: true,
+    closedAt: true,
+    slaResponseDueAt: true,
+    slaResolutionDueAt: true,
+    slaBreachedAt: true,
+    firstResponseAt: true,
+    aiProcessed: true,
+    approvalStatus: true,
+    requester: { select: { email: true, fullName: true, avatarUrl: true } },
+    assignedTo: { select: { email: true, fullName: true, avatarUrl: true } },
+    assignees: { select: { id: true, email: true, fullName: true, avatarUrl: true } },
+    team: { select: { name: true } },
+    observers: { select: { id: true, fullName: true, avatarUrl: true } },
+  };
+
+  // Mapping des colonnes supplémentaires que l'utilisateur peut demander
+  const extraColumns = {
+    description: true,               // alias de title ; on garde la clé pour le frontend
+    dernier_mail: true,
+    deuxieme_mail: true,
+    troisieme_mail: true,
+    quatrieme_mail: true,
+  };
+
+  // Filtrer la liste des colonnes demandées par l'utilisateur
+  const columnsList = (String(columns || '')).split(',').map(c => c.trim()).filter(Boolean);
+  const select = Object.assign({}, baseSelect);
+
+  for (const col of columnsList) {
+    if (extraColumns[col] !== undefined) {
+      // colonne supplémentaire : on ajoute true pour éviter une erreur Prisma
+      // le champ sera renseigné par des décorations ultérieures si besoin
+      select[col] = true;
+    }
+  }
+
   const tickets = await prisma.ticket.findMany({
     where,
     take: 10000,
     orderBy,
-    select: {
-      id: true, title: true, status: true, priority: true, category: true, type: true,
-      source: true, requesterId: true, assignedToId: true, teamId: true,
-      locationName: true,
-      createdAt: true, solvedAt: true, closedAt: true,
-      slaResponseDueAt: true, slaResolutionDueAt: true, slaBreachedAt: true, firstResponseAt: true,
-      aiProcessed: true, approvalStatus: true, requester: { select: { email: true, fullName: true, avatarUrl: true } },
-      assignedTo: { select: { email: true, fullName: true, avatarUrl: true } },
-      assignees: { select: { id: true, email: true, fullName: true, avatarUrl: true } },
-      team: { select: { name: true } },
-      observers: { select: { id: true, fullName: true, avatarUrl: true } },
-    },
+    select,
   });
 
   // Catégorie racine + sous-catégorie pour le CSV et le JSON (le XLSX se décore lui-même)

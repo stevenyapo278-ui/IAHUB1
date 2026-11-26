@@ -942,6 +942,11 @@ const DEFAULT_COLUMNS = [
   { key: 'updatedAt', label: 'Modifié', visible: true },
   { key: 'solvedAt', label: 'Résolu', visible: false },
   { key: 'closedAt', label: 'Fermé', visible: false },
+  { key: 'description', label: 'Description', visible: false },
+  { key: 'dernier_mail', label: 'Dernier mail', visible: false },
+  { key: 'deuxieme_mail', label: '2ème mail', visible: false },
+  { key: 'troisieme_mail', label: '3ème mail', visible: false },
+  { key: 'quatrieme_mail', label: '4ème mail', visible: false },
 ];
 
 // Champs de tri supportés par GET /tickets (paramètre sortBy) —
