@@ -2882,7 +2882,12 @@ export default function TicketDetail() {
                       <Pencil className="w-3 h-3" />
                     </button>
                   )}
-                  {((['ADMIN', 'SUPERADMIN'].includes(user?.role) || (['HOTLINE', 'TECHNICIAN'].includes(user?.role) && f.authorId === user?.id)) && f.source !== 'glpi' && editingFollowupId !== f.id && (
+                  {(
+  (['ADMIN', 'SUPERADMIN'].includes(user?.role) || 
+   (['HOTLINE', 'TECHNICIAN'].includes(user?.role) && f.authorId === user?.id)) && 
+  f.source !== 'glpi' && 
+  editingFollowupId !== f.id
+) && (
                     <button
                       onClick={() => setFollowupToDelete(f.id)}
                       title="Supprimer"
